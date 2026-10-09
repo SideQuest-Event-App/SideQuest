@@ -1,0 +1,516 @@
+/* The 6ix Sense wireframe: black-and-white, low-fidelity styles. */
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'IBM Plex Sans',sans-serif;
+  background: #efefef;
+  color: #111;
+}
+
+a {
+  color: #111;
+}
+
+a:hover {
+  color: #444;
+}
+
+p,h1,h2,h3 {
+  margin: 0;
+}
+
+.ph {
+  position: relative;
+  background-color: #ececec;
+  background-image: linear-gradient(to top right,transparent calc(50% - 1px),#c2c2c2 50%,transparent calc(50% + 1px)),linear-gradient(to top left,transparent calc(50% - 1px),#c2c2c2 50%,transparent calc(50% + 1px));
+  border: 1px solid #8f8f8f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'IBM Plex Mono',monospace;
+  font-size: 11px;
+  color: #444;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.ph>.lbl {
+  background: #ececec;
+  padding: 2px 6px;
+}
+
+.box {
+  border: 1.5px solid #111;
+  border-radius: 14px;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.soft {
+  border: 1px solid #b5b5b5;
+  border-radius: 12px;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.btn {
+  min-height: 44px;
+  border: 1.5px solid #111;
+  border-radius: 22px;
+  background: #fff;
+  color: #111;
+  font: 600 14px 'IBM Plex Sans',sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.btn.solid {
+  background: #111;
+  color: #fff;
+}
+
+.ibtn {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  border: 1.5px solid #111;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.chip {
+  min-height: 30px;
+  border: 1px solid #777;
+  border-radius: 15px;
+  padding: 0 11px;
+  font: 500 12px 'IBM Plex Sans',sans-serif;
+  background: #fff;
+  color: #111;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+}
+
+.chip.on {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mono {
+  font-family: 'IBM Plex Mono',monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #444;
+  text-transform: uppercase;
+}
+
+.h1 {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+}
+
+.h2 {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.sm {
+  font-size: 12px;
+  color: #444;
+  line-height: 1.4;
+}
+
+.bd {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.u {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.bar {
+  height: 8px;
+  background: #dcdcdc;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bar>div {
+  height: 8px;
+  background: #111;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.screen {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 390px;
+  height: 844px;
+  padding: 22px 18px 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.dots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: #bbb;
+  display: block;
+}
+
+.dots i.on {
+  width: 18px;
+  background: #111;
+}
+
+.av {
+  width: 40px;
+  height: 40px;
+  border-radius: 20px;
+  border: 1.5px solid #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  background: #fff;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.pin {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: #111;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 1px #111;
+}
+
+.bub {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px solid #111;
+  background: rgba(255,255,255,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 600 11px 'IBM Plex Mono',monospace;
+}
+
+.tabs {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 16px;
+  height: 62px;
+  border: 1.5px solid #111;
+  border-radius: 31px;
+  background: #fff;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.tab {
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tab svg {
+  stroke: #111;
+}
+
+.tab.on {
+  background: #111;
+}
+
+.tab.on svg {
+  stroke: #fff;
+}
+
+.nav {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: 500 14px 'IBM Plex Sans',sans-serif;
+  color: #111;
+  box-sizing: border-box;
+}
+
+.nav:hover {
+  background: #e6e6e6;
+}
+
+.nav .c {
+  font: 500 11px 'IBM Plex Mono',monospace;
+  color: #555;
+  width: 40px;
+  flex-shrink: 0;
+}
+
+.nav.on {
+  background: #111;
+  color: #fff;
+}
+
+.nav.on .c {
+  color: #ccc;
+}
+
+.grp {
+  font: 600 11px 'IBM Plex Mono',monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #555;
+  padding: 14px 10px 4px;
+}
+
+.click {
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+
+/* ---------- Shared pieces used by several screens ---------- */
+
+.spacer {
+  flex-grow: 1;
+}
+
+.progress-pill {
+  position: relative;
+  padding: 8px 14px;
+  border-radius: 20px;
+}
+
+.scene-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.scene-tile {
+  position: relative;
+  height: 82px;
+  border: 1px solid #b5b5b5;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.scene-tile.picked {
+  border: 1.5px solid #111;
+  border-radius: 14px;
+}
+
+.scene-tile .ph {
+  height: 100%;
+  border: none;
+  opacity: 0.6;
+}
+
+.scene-tile.picked .ph {
+  opacity: 1;
+}
+
+.scene-name {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  padding: 0 4px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.scene-tile.picked .scene-name {
+  font-weight: 700;
+}
+
+.scene-mark {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  min-height: 22px;
+  padding: 0 6px;
+}
+
+.tab.sixer {
+  border: 1.5px solid #111;
+}
+
+/* ---------- Page shell: sitemap sidebar, phone, notes ---------- */
+
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  width: 300px;
+  height: 100vh;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 28px 18px;
+  background: #fafafa;
+  border-right: 1.5px solid #111;
+  overflow-y: auto;
+}
+
+.sidebar h2 {
+  margin-top: 6px;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.sidebar .sm {
+  margin-top: 4px;
+}
+
+#sitemap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.stage {
+  flex-grow: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 56px;
+  padding: 40px;
+  box-sizing: border-box;
+}
+
+.phone {
+  position: relative;
+  width: 390px;
+  height: 844px;
+  flex-shrink: 0;
+  border: 2px solid #111;
+  border-radius: 44px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.notes {
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.notes h2 {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+}
+
+.notes-caption {
+  font-size: 16px;
+  line-height: 1.5;
+  color: #333;
+}
+
+.notes-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 14px;
+  border-top: 1.5px solid #111;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #333;
+}
+
+.notes-controls {
+  margin-top: 10px;
+}
+
+@media (max-width: 900px) {
+  .app {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1.5px solid #111;
+  }
+}

@@ -1,0 +1,37 @@
+/* Sidequest · product sitemap. Root on top, the three parts of the app as columns, each an indented tree. */
+.m-legend { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 16px 28px 0; font-size: 12.5px; color: var(--mid); }
+.m-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.k { width: 18px; height: 12px; border-radius: 4px; border: 1.5px solid var(--ink); display: inline-block; background: #fff; }
+.k.tab { background: var(--ink); }
+.k.new { border-style: dashed; }
+.k.ai { border-radius: 8px; border-width: 2.5px; }
+
+.m-wrap { padding: 22px 28px 48px; overflow-x: auto; }
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree > li > .n.root { display: inline-flex; font-size: 18px; padding: 10px 18px; margin-bottom: 18px; background: var(--ink); color: #fff; border-radius: 12px; }
+/* The three parts sit side by side */
+.tree > li > ul { display: grid; grid-template-columns: repeat(3, minmax(260px, 1fr)); gap: 26px; align-items: start; }
+.tree > li > ul > li { background: #fff; border: 1.5px solid var(--line); border-radius: 18px; padding: 16px 16px 18px; }
+.tree > li > ul > li > .n.section { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); border: 0; padding: 0 0 10px; }
+
+/* Nested levels: connector lines */
+.tree ul ul ul, .tree ul ul > li > ul { margin-left: 14px; padding-left: 14px; border-left: 1.5px solid var(--soft); }
+.tree ul ul li { position: relative; padding-top: 6px; }
+.tree ul ul ul > li::before { content: ''; position: absolute; left: -14px; top: 22px; width: 12px; border-top: 1.5px solid var(--soft); }
+.tree > li > ul > li > ul { margin-left: 0; padding-left: 0; border-left: 0; }
+.tree > li > ul > li > ul > li::before { display: none; }
+
+.n { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 7px 12px; border: 1.5px solid var(--ink); border-radius: 10px; background: #fff; text-decoration: none; font-weight: 600; font-size: 13.5px; line-height: 1.2; }
+a.n:hover { background: var(--fill); }
+.n.tab { background: var(--ink); color: #fff; }
+.n.tab .fig { color: #ddd; border-color: #777; }
+a.n.tab:hover { background: #3a3a3a; }
+.n.ai { border-width: 2.5px; border-radius: 18px; }
+.n.new { border-style: dashed; }
+.n.section { border-style: dotted; border-color: var(--mid); color: var(--mid); background: none; font-weight: 700; }
+.n .fig { margin: 0; }
+
+@media (max-width: 960px) {
+  .tree > li > ul { grid-template-columns: 1fr; }
+  .m-wrap, .m-legend { padding-left: 16px; padding-right: 16px; }
+}

@@ -1,0 +1,1 @@
+{"title":"Babelween 🎃","startsAt":"2026-10-31T19:00:00-04:00","endsAt":"2026-10-31T23:00:00-04:00","status":"ACTIVE","type":"PHYSICAL","description":"Babel pub crawl.","venue":{"address":""},"fee":null,"group":"TorontoBabel: Toronto's International Language Exchange","image":"https://secure.meetupstatic.com/photos/event/e/2/d/0/highres_508438064.jpeg"}

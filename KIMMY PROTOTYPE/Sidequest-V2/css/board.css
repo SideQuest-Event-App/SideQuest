@@ -1,0 +1,92 @@
+/* Sidequest · screen board. Same greyscale wireframe language as the prototype. */
+:root {
+  --ink: #1a1a1a;
+  --mid: #6b6b6b;
+  --soft: #bdbdbd;
+  --line: #d9d9d9;
+  --fill: #efefef;
+  --bg: #f6f6f6;
+  --card: #ffffff;
+  --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --scale: .56;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); }
+a { color: inherit; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.b-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: space-between; padding: 14px 28px; background: #fff; border-bottom: 1.5px solid var(--ink); }
+.b-name { font-weight: 800; font-size: 20px; letter-spacing: -.01em; }
+.b-sub { font-family: var(--mono); font-size: 11.5px; color: var(--mid); margin-top: 2px; }
+.b-links { display: flex; gap: 8px; flex-wrap: wrap; }
+.b-links a { text-decoration: none; font-weight: 600; font-size: 13px; border: 1.5px solid var(--ink); border-radius: 18px; padding: 6px 14px; }
+.b-links a:hover { background: var(--ink); color: #fff; }
+
+.b-summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 20px; padding: 22px 28px 6px; }
+.b-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; align-content: start; }
+.b-stats > div { background: #fff; border: 1.5px solid var(--line); border-radius: 14px; padding: 12px; display: grid; gap: 2px; }
+.b-stats b { font-size: 26px; line-height: 1; }
+.b-stats span { font-size: 12px; color: var(--mid); }
+.b-stats .open { border-color: var(--ink); border-style: dashed; }
+.b-open { background: #fff; border: 1.5px dashed var(--ink); border-radius: 14px; padding: 12px 16px; }
+.b-open h2 { margin: 0 0 6px; font-size: 13px; font-family: var(--mono); font-weight: 500; letter-spacing: .1em; text-transform: uppercase; }
+.b-open ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.b-open a { font-weight: 700; text-decoration: none; }
+.b-open a:hover { text-decoration: underline; }
+.b-open p { margin: 2px 0 0; color: var(--mid); font-size: 13px; }
+.fig { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--soft); border-radius: 6px; padding: 0 5px; margin-right: 6px; color: var(--mid); font-weight: 500; }
+.fig.ghost { border-style: dashed; }
+
+.b-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 14px 28px; }
+.b-seg { display: inline-flex; border: 1.5px solid var(--ink); border-radius: 18px; overflow: hidden; background: #fff; }
+.b-seg button { border: 0; background: none; padding: 6px 13px; font-size: 13px; font-weight: 600; }
+.b-seg button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+.b-search { flex: 1; min-width: 200px; max-width: 360px; }
+.b-search input { width: 100%; height: 34px; border: 1.5px solid var(--soft); border-radius: 17px; padding: 0 14px; font: inherit; background: #fff; }
+
+.row { padding: 10px 0 18px; border-top: 1px solid var(--line); }
+.row h2 { display: flex; align-items: baseline; gap: 10px; margin: 14px 28px 14px; font-size: 18px; }
+.row h2 span { font-family: var(--mono); font-size: 12px; color: var(--mid); font-weight: 500; }
+.row h2 small { font-family: var(--mono); font-size: 11px; color: var(--mid); font-weight: 400; }
+.cards { display: flex; flex-wrap: wrap; gap: 28px 22px; padding: 0 28px 10px; align-items: flex-start; }
+.card { flex: none; width: calc(390px * var(--scale)); scroll-snap-align: start; }
+.card.hit .frame { outline: 3px solid var(--ink); outline-offset: 4px; }
+.frame { display: block; width: calc(390px * var(--scale)); height: calc(844px * var(--scale)); border: 1.5px solid var(--ink); border-radius: calc(36px * var(--scale)); overflow: hidden; background: #fff; position: relative; }
+.frame iframe { width: 390px; height: 844px; border: 0; transform: scale(var(--scale)); transform-origin: 0 0; pointer-events: none; display: block; }
+.frame:hover { box-shadow: 0 0 0 4px var(--fill); }
+.meta { padding-top: 10px; }
+.code { font-family: var(--mono); font-size: 11px; color: var(--mid); display: flex; align-items: center; gap: 8px; }
+.code > span:first-child { color: var(--ink); }
+.meta h3 { margin: 4px 0 4px; font-size: 15px; line-height: 1.2; }
+.note { margin: 0; font-size: 12.5px; color: #3d3d3d; }
+.see { margin: 8px 0 0; font-size: 12px; color: var(--mid); }
+.comments { margin-top: 10px; border-top: 1px dashed var(--soft); padding-top: 8px; }
+.comments summary { font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--mid); cursor: pointer; }
+.comments ol { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.comments li { font-size: 12px; }
+.comments q { display: block; quotes: none; padding-left: 8px; border-left: 2px solid var(--soft); color: var(--mid); font-style: italic; }
+.comments li.open q { border-left-color: var(--ink); }
+.resp { margin-top: 4px; }
+.st { display: inline-block; font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--ink); border-radius: 5px; padding: 0 4px; margin-right: 6px; vertical-align: 1px; }
+.st.done { background: var(--fill); border-color: var(--soft); color: var(--mid); }
+.st.decision { background: #fff; }
+.st.open { background: var(--ink); color: #fff; }
+.b-foot { padding: 20px 28px 40px; color: var(--mid); font-size: 12.5px; border-top: 1px solid var(--line); }
+code { font-family: var(--mono); font-size: 12px; }
+
+@media (max-width: 900px) {
+  .b-summary { grid-template-columns: 1fr; }
+  .b-stats { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 560px) {
+  :root { --scale: .5; }
+  .b-top, .b-summary, .b-filters { padding-left: 16px; padding-right: 16px; }
+  .row h2 { margin-left: 16px; }
+  .cards { padding: 0 16px 10px; gap: 16px; }
+  .b-stats b { font-size: 21px; }
+}

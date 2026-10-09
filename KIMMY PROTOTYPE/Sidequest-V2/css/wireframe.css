@@ -1,0 +1,90 @@
+/* Low-fidelity wireframe skin.
+   Greyscale only, outlines instead of fills, crossed boxes for images, system type, no motion.
+   Loaded after app.css, so it only overrides the visual layer and keeps every layout. */
+:root {
+  --ink: #ffffff;          /* ground */
+  --paper: #1a1a1a;        /* text, lines, primary buttons */
+  --accent: #8a8a8a;       /* emphasis */
+  --dim: rgba(26, 26, 26, .62);
+  --faint: rgba(26, 26, 26, .42);
+  --surface: #ffffff;
+  --surface-2: #f1f1f1;
+  --line: #cfcfcf;
+  --glass: #f1f1f1;
+  --glass-ink: rgba(255, 255, 255, .94);
+  --accent-soft: #ededed;
+  --wf-line: #1a1a1a;
+  --wf-soft: #bdbdbd;
+  --wf-fill: #e9e9e9;
+  --f-display: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --f-body: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --f-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+*, *::before, *::after { animation: none !important; transition: none !important; }
+body::before { display: none; }
+h1, h2, h3 { letter-spacing: -0.01em; font-weight: 700 !important; }
+
+/* Containers become outlined boxes. */
+.why, .hub-block, .kpi, .step, .night-card, .blend-card, .map-card, .search, .asked, .seg,
+.verify button, .claim, .text-in, .chat-form input, .demand-map, .area-map, .photos .ph, .idgo, .role-card {
+  border: 1.5px solid var(--wf-soft);
+  box-shadow: none;
+}
+.btn, .chip, .icon-btn, .pill, .stars button, .taste-row .ctl button, .seg button.on, .check-row .box { border: 1.5px solid var(--wf-line); }
+.btn.solid, .icon-btn.solid, .chip.on, .seg button.on, .nav button.on, .check-row .box.on { background: var(--wf-line); color: #fff; }
+.btn.hot, .pill.hot, .stars button.on, .step.done .n, .claim.on .tick, .scene-tile.on .tick, .big-check { background: #5a5a5a; color: #fff; border-color: #5a5a5a; }
+.btn.ghost, .chip, .icon-btn.glass, .pill.glass, .glass { background: #fff; color: var(--wf-line); }
+.glass-dark { background: #fff; color: var(--wf-line); border: 1.5px solid var(--wf-line); }
+.kpi.hot { background: var(--wf-fill); color: var(--wf-line); }
+.idgo { background: var(--wf-fill); color: var(--wf-line); }
+.idgo .btn { background: var(--wf-line); color: #fff; }
+.role-card.a, .role-card.b { background: #fff; color: var(--wf-line); border: 2px solid var(--wf-line); }
+.role-card .arrow { background: var(--wf-line); color: #fff; }
+.verify button.on, .claim.on, .scene-tile.on { box-shadow: none; border: 2.5px solid var(--wf-line); background: #f6f6f6; }
+
+/* Images: crossed placeholder boxes with a label. */
+.poster { background: var(--wf-fill) !important; border: 1.5px solid var(--wf-soft); }
+.poster::before {
+  inset: 0; z-index: 0;
+  background:
+    linear-gradient(to top right, transparent calc(50% - .75px), var(--wf-soft) calc(50% - .75px), var(--wf-soft) calc(50% + .75px), transparent calc(50% + .75px)),
+    linear-gradient(to bottom right, transparent calc(50% - .75px), var(--wf-soft) calc(50% - .75px), var(--wf-soft) calc(50% + .75px), transparent calc(50% + .75px));
+}
+.poster::after, .poster .shade, .poster .type, .poster .tint { display: none; }
+.img-tag { position: absolute; left: 10px; bottom: 8px; z-index: 1; font-family: var(--f-mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: #8a8a8a; background: var(--wf-fill); padding: 1px 4px; }
+.poster .inner h1, .poster .inner h2, .poster .inner h3 { background: rgba(255, 255, 255, .86); display: inline; box-decoration-break: clone; -webkit-box-decoration-break: clone; padding: 0 4px; }
+.hero, .wrapped .poster, .onb > .poster { border-width: 0 0 1.5px; }
+
+/* People and Sixer. */
+.avatar, .face { background: #fff; color: var(--wf-line); border: 1.5px solid var(--wf-line); box-shadow: none; }
+.avatar.me, .face.me { background: var(--wf-line); color: #fff; }
+.crew-pick button.on .avatar { background: var(--wf-line); color: #fff; box-shadow: 0 0 0 3px #fff, 0 0 0 4.5px var(--wf-line); }
+.orb { background: #fff; border: 2px solid var(--wf-line); box-shadow: none; }
+.orb::before, .orb::after { background: var(--wf-line); }
+
+/* Bars, meters, score. */
+.bar i, .meter i, .split i { background: #6b6b6b !important; }
+.bar, .meter { background: #e6e6e6; }
+.ring { background: conic-gradient(#6b6b6b calc(var(--p) * 1%), #e6e6e6 0); }
+.score, .count-up, .idea .count, .wrapped .huge, .fit, .hl, .idea-line em, .eyebrow.hot { color: #5a5a5a; }
+.live-dot { background: #5a5a5a; box-shadow: none; }
+
+/* Navigation, overlays, feedback. */
+.nav { border: 1.5px solid var(--wf-line); }
+.toast { background: var(--wf-line); color: #fff; border: 0; }
+.chat { background: #fff; }
+.msg.me { background: var(--wf-line); color: #fff; }
+.onb-bg.build { display: none; }
+.wall { opacity: .6; }
+.wall-fade { background: linear-gradient(180deg, rgba(255, 255, 255, .3) 0%, #fff 70%); }
+.slide-btn .knob { background: var(--wf-line); color: #fff; }
+.progress-pill .dots i.on { background: var(--wf-line); }
+.scanner .frame { box-shadow: 0 0 0 999px rgba(255, 255, 255, .55); border: 2px dashed var(--wf-line); }
+.scanner .frame::before { background: var(--wf-line); box-shadow: none; }
+.switch.on { background: #5a5a5a; }
+.switch.on::after { background: #fff; }
+.qr { border: 1.5px solid var(--wf-line); }
+
+/* Image cards fill their whole tile, so the crossed box reads as the card's image area. */
+button > .poster:only-child { height: 100%; }

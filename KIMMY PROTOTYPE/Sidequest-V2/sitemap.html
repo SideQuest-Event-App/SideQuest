@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sidequest · Product Sitemap</title>
+  <meta name="description" content="How Sidequest is organized: onboarding, the five attendee tabs, the five host tabs, and every screen under them. Each box opens that screen in the prototype.">
+  <link rel="stylesheet" href="css/board.css">
+  <link rel="stylesheet" href="css/map.css">
+</head>
+<body>
+  <header class="b-top">
+    <div class="b-brand">
+      <div class="b-name">Sidequest</div>
+      <div class="b-sub">Product sitemap · v2 · click any box to open that screen</div>
+    </div>
+    <nav class="b-links" aria-label="Views">
+      <a href="index.html">Interactive prototype</a>
+      <a href="board.html">Screen board</a>
+    </nav>
+  </header>
+
+  <div class="m-legend" aria-label="Legend">
+    <span><i class="k tab"></i>Tab in the bottom bar</span>
+    <span><i class="k page"></i>Screen</span>
+    <span><i class="k new"></i>New in v2 (from Figma comments)</span>
+    <span><i class="k ai"></i>Sixer, the AI guide</span>
+    <span class="fig">06</span>Figma frame
+  </div>
+
+  <main id="map" class="m-wrap"></main>
+
+  <script src="js/screens.js"></script>
+  <script>
+  (() => {
+    'use strict';
+    const { byId } = window.SQ_SCREENS;
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    // Screens that are new in v2 (added from team comments or new decisions).
+    const NEW = new Set(['signup', 'past-events', 'import-ticket', 'wallet', 'party-big', 'quest-log-cal', 'bookmarked', 'attendee-chat', 'profile-edit', 'accounts', 'host-account', 'host-ticketing', 'host-team', 'host-review', 'h-create', 'h-dayinfo', 'h-published', 'h-audience', 'h-inbox', 'notifications', 'filters', 'no-matches']);
+
+    // Product structure: [label, kind, screen id | null, children]
+    const T = [
+      ['Sidequest', 'root', null, [
+        ['Onboarding', 'section', null, [
+          ['Landing', 'page', 'welcome'], ['Going out or hosting', 'page', 'role'],
+          ['Attendee setup', 'section', null, [['Sign up', 'page', 'signup'], ['Meet Sixer', 'ai', 'meet-sixer'], ['Vibes', 'page', 'vibes'], ['Quests you\'ve been to', 'page', 'past-events'], ['When you go out', 'page', 'times'], ['Areas you frequent', 'page', 'areas'], ['Assemble your party', 'page', 'party-invite'], ['Taste avatar ready', 'page', 'taste-ready']]],
+          ['Host setup', 'section', null, [['Host type', 'page', 'host-type'], ['Host account', 'page', 'host-account'], ['Verification', 'page', 'host-verify'], ['Host profile', 'page', 'host-profile-setup'], ['Ticketing', 'page', 'host-ticketing'], ['Team', 'page', 'host-team'], ['Claim listings', 'page', 'host-claim'], ['Review', 'page', 'host-review'], ['Demand map ready', 'page', 'host-ready']]],
+        ]],
+        ['Attendee app', 'section', null, [
+          ['Discover', 'tab', 'discover', [['Map view', 'page', 'map', [['Pin selected', 'page', 'map-pin']]], ['Filters', 'page', 'filters'], ['No matches', 'page', 'no-matches'], ['Weekly Quests', 'page', 'weekly'], ['Vibe Mix', 'page', 'vibe-mix'], ['Notifications', 'page', 'notifications'],
+            ['Quest detail', 'page', 'quest', [['19+ quest', 'page', 'quest-19', [['19+ check', 'page', 'age-check'], ['All-ages picks', 'page', 'all-ages']]], ['Tickets', 'page', 'tickets', [['Import ticket', 'page', 'import-ticket']]]]]]],
+          ['Parties', 'tab', 'parties', [['Party · Crew Blend', 'page', 'party', [['Group plan', 'page', 'group-plan']]], ['Party of 6+', 'page', 'party-big']]],
+          ['Sixer', 'ai', 'sixer'],
+          ['Quest Requests', 'tab', 'requests', [['Request a quest', 'page', 'request-new']]],
+          ['Quest Log', 'tab', 'quest-log', [['Calendar', 'page', 'quest-log-cal'], ['Bookmarked', 'page', 'bookmarked'], ['Ticket wallet', 'page', 'wallet'],
+            ['Event day mode', 'page', 'event-day', [['Attendee chat', 'page', 'attendee-chat'], ['Check-in', 'page', 'check-in', [['Checked in', 'page', 'checked-in']]]]],
+            ['Past quests', 'page', 'past-quests', [['Rate your quest', 'page', 'rate'], ['Saved quest', 'page', 'saved-quest'], ['Sidequest Wrapped', 'page', 'wrapped']]]]],
+          ['Profile (avatar)', 'page', 'profile', [['Editing', 'page', 'profile-edit'], ['Switch account', 'page', 'accounts']]],
+        ]],
+        ['Host app', 'section', null, [
+          ['Demand', 'tab', 'h-demand', [['Request detail', 'page', 'h-request', [['Draft test', 'page', 'h-draft'], ['Create a quest', 'page', 'h-create', [['Event day info', 'page', 'h-dayinfo'], ['Quest published', 'page', 'h-published']]]]]]],
+          ['Your quests', 'tab', 'h-quests', [['Drafts', 'page', 'h-drafts'], ['Past', 'page', 'h-past', [['Recap', 'page', 'h-recap']]], ['Event day tools', 'page', 'h-eventday']]],
+          ['Sixer', 'ai', 'sixer'],
+          ['Insights', 'tab', 'h-insights', [['Audience', 'page', 'h-audience']]],
+          ['Inbox', 'tab', 'h-inbox'],
+          ['Host profile (avatar)', 'page', 'h-profile'],
+        ]],
+      ]],
+    ];
+
+    const node = ([label, kind, id, kids]) => {
+      const s = id && byId[id];
+      const isNew = id && NEW.has(id);
+      const box = s
+        ? `<a class="n ${kind}${isNew ? ' new' : ''}" href="index.html#${id}" title="${esc(s.note)}"><span class="l">${esc(label)}</span>${s.fig && s.fig !== 'New' ? `<span class="fig">${esc(s.fig)}</span>` : ''}</a>`
+        : `<div class="n ${kind}"><span class="l">${esc(label)}</span></div>`;
+      return `<li>${box}${kids && kids.length ? `<ul>${kids.map(node).join('')}</ul>` : ''}</li>`;
+    };
+    document.getElementById('map').innerHTML = `<ul class="tree">${T.map(node).join('')}</ul>`;
+  })();
+  </script>
+</body>
+</html>

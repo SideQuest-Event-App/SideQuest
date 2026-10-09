@@ -1,0 +1,1 @@
+Connecting users to other like-minded people through worthwhile events in their area

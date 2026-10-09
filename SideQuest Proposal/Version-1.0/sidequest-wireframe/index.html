@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sidequest wireframe demo</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="User flows">
+      <div class="brand">
+        <strong>Sidequest</strong>
+        <span>Wireframe demo</span>
+      </div>
+      <p class="sidebar-hint">Choose a flow to walk through it step by step. Tap buttons inside the phone to move forward.</p>
+      <nav id="flow-nav"></nav>
+      <button id="reset" class="btn btn-secondary">Reset demo</button>
+    </aside>
+
+    <section class="stage" aria-label="App preview">
+      <p class="phone-label" id="phone-role">Attendee app</p>
+      <div class="phone">
+        <div id="phone-screen" tabindex="-1"></div>
+        <div id="toast" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <aside class="notes" id="notes" aria-label="Flow notes"></aside>
+  </div>
+
+  <!-- Plain scripts (no build step), so the demo also works by opening this file directly. -->
+  <script src="js/data.js"></script>
+  <script src="js/screens.js"></script>
+  <script src="js/actions.js"></script>
+  <script src="js/flows.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

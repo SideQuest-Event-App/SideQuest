@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>The 6ix Sense · Wireframe</title>
+  <meta name="description" content="Low-fidelity, clickable wireframe of The 6ix Sense with a site map for navigating every screen.">
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/wireframe.css">
+  <link rel="stylesheet" href="css/sitemap.css">
+</head>
+<body>
+  <div class="layout">
+    <aside id="sitemap" class="sitemap" aria-label="Site map"></aside>
+    <main class="stage">
+      <div class="stage-head" id="stageHead" aria-live="polite"></div>
+      <div class="app" id="app">
+        <div id="root"></div>
+        <nav class="nav glass-dark" id="nav" aria-label="Main"></nav>
+        <div id="chat" hidden></div>
+        <div id="onb" class="onb" hidden></div>
+        <div id="toast" class="toast glass-dark" role="status" hidden></div>
+      </div>
+    </main>
+  </div>
+  <button type="button" class="sm-toggle" id="smToggle" aria-label="Open site map">Site map</button>
+
+  <script src="js/app.js"></script>
+  <script src="js/sitemap.js"></script>
+</body>
+</html>

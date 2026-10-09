@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The 6ix Sense wireframes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <nav class="sidebar" aria-label="Sitemap">
+      <p class="mono">The 6ix Sense</p>
+      <h2>Sitemap</h2>
+      <p class="sm">Lo-fi wireframes · 15 key screens. Click any screen to open it.</p>
+      <div id="sitemap"></div>
+    </nav>
+
+    <main class="stage">
+      <div class="phone" id="phone" aria-label="App preview"></div>
+
+      <aside class="notes" aria-label="Screen notes">
+        <p class="mono" id="notes-eyebrow"></p>
+        <h2 id="notes-title"></h2>
+        <p class="notes-caption" id="notes-caption"></p>
+        <div class="notes-flow">
+          <p class="mono">In the flow</p>
+          <p id="notes-flow"></p>
+        </div>
+        <div class="row notes-controls">
+          <button type="button" class="btn" id="prev">&larr; Prev</button>
+          <button type="button" class="btn solid" id="next">Next &rarr;</button>
+          <span class="mono" id="notes-position"></span>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Plain scripts (no build step), so the wireframe also works by opening this file directly. -->
+  <script src="js/ui.js"></script>
+  <script src="js/screens.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

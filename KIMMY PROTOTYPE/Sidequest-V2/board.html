@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sidequest · Screen Board</title>
+  <meta name="description" content="Every Sidequest wireframe screen laid out in rows, with an annotation and the team's Figma comments under each one.">
+  <link rel="stylesheet" href="css/board.css">
+</head>
+<body>
+  <header class="b-top">
+    <div class="b-brand">
+      <div class="b-name">Sidequest</div>
+      <div class="b-sub">Screen board · v2 · merged from Kimmy's prototype and the Figma low-fi file</div>
+    </div>
+    <nav class="b-links" aria-label="Views">
+      <a href="index.html">Interactive prototype</a>
+      <a href="sitemap.html">Product sitemap</a>
+    </nav>
+  </header>
+
+  <section class="b-summary" id="summary" aria-label="Comment summary"></section>
+
+  <div class="b-filters" role="toolbar" aria-label="Filter screens">
+    <div class="b-seg" id="sideSeg">
+      <button type="button" data-side="all" aria-pressed="true">All</button>
+      <button type="button" data-side="Attendee" aria-pressed="false">Attendee</button>
+      <button type="button" data-side="Host" aria-pressed="false">Host</button>
+    </div>
+    <div class="b-seg" id="noteSeg">
+      <button type="button" data-notes="all" aria-pressed="true">Every screen</button>
+      <button type="button" data-notes="comments" aria-pressed="false">With team comments</button>
+      <button type="button" data-notes="open" aria-pressed="false">Open questions</button>
+    </div>
+    <label class="b-search"><span class="sr">Search screens</span><input id="q" type="search" placeholder="Search screens, notes, comments"></label>
+  </div>
+
+  <main id="board"></main>
+
+  <footer class="b-foot">Screens are live: each frame is the interactive prototype at that state (<code>index.html?embed=1#id</code>). Click a frame to open it in the prototype.</footer>
+
+  <script src="js/screens.js"></script>
+  <script src="js/comments.js"></script>
+  <script src="js/board.js"></script>
+</body>
+</html>

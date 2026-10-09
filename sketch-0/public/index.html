@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#ffffff" />
+  <title>Sidequest — Sketch 0</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="phone">
+    <header class="appbar">
+      <div class="brand">Sidequest</div>
+      <div class="tagline">Collect the stories, not just the tickets.</div>
+    </header>
+
+    <main class="scroll" id="scroll">
+      <!-- Discover: one person, or a crew of up to 4 (Crew Blend) -->
+      <section class="tab" id="tab-discover" aria-labelledby="tabbtn-discover">
+        <div class="section-head">
+          <h2>Who's going?</h2>
+          <span class="hint" id="crew-hint">Just you</span>
+        </div>
+        <div id="crew"></div>
+        <button class="add-friend" id="add-friend" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          Add a friend to blend your tastes
+        </button>
+
+        <div class="section-head">
+          <h2>Getting there</h2>
+        </div>
+        <div class="card">
+          <div class="field-label">Max travel time, for everyone</div>
+          <div class="chips" id="max-minutes" role="radiogroup" aria-label="Max travel time">
+            <button type="button" role="radio" data-value="15">15 min</button>
+            <button type="button" role="radio" data-value="30">30 min</button>
+            <button type="button" role="radio" data-value="45">45 min</button>
+            <button type="button" role="radio" data-value="60">1 hr</button>
+            <button type="button" role="radio" data-value="">Any</button>
+          </div>
+          <p class="field-help" id="travel-help">Set a starting point for at least one person to use a time limit.</p>
+        </div>
+
+        <button class="primary" id="go" type="button">Find your quest</button>
+
+        <div id="results" aria-live="polite"></div>
+      </section>
+
+      <!-- Quest Log: intent first, then "did you go?" and a rating -->
+      <section class="tab" id="tab-log" aria-labelledby="tabbtn-log" hidden>
+        <div class="page-head">
+          <h1>Quest Log</h1>
+          <p>Quests you said you'd go to. After each one, tell us if you actually went. That's what we count, not taps.</p>
+        </div>
+        <div class="chips segmented" id="log-filter" role="radiogroup" aria-label="Show">
+          <button type="button" role="radio" data-value="upcoming" aria-checked="true">Upcoming</button>
+          <button type="button" role="radio" data-value="completed" aria-checked="false">Completed</button>
+        </div>
+        <div id="log-list"></div>
+      </section>
+
+      <!-- Requests: Quest Requests (explicit Demand Signals) -->
+      <section class="tab" id="tab-requests" aria-labelledby="tabbtn-requests" hidden>
+        <div class="page-head">
+          <h1>Quest Requests</h1>
+          <p>Tell hosts what you want. If one puts it on, you hear first.</p>
+        </div>
+        <div id="claimed-news"></div>
+        <div class="card" id="request-form"></div>
+        <div class="section-head"><h2>Trending</h2><span class="hint">Upvote what you'd go to</span></div>
+        <div id="request-list"></div>
+      </section>
+
+      <!-- Hosts: Demand Insights -->
+      <section class="tab" id="tab-hosts" aria-labelledby="tabbtn-hosts" hidden>
+        <div class="page-head">
+          <div class="eyebrow">For hosts</div>
+          <h1>Demand Insights</h1>
+          <p>What people asked for, what they searched for and couldn't find, and how interest turned into real attendance. Built from this sketch only.</p>
+        </div>
+        <div id="demand"></div>
+      </section>
+    </main>
+
+    <nav class="tabbar" role="tablist" aria-label="Sections">
+      <button type="button" role="tab" id="tabbtn-discover" data-tab="discover" aria-selected="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>
+        Discover
+      </button>
+      <button type="button" role="tab" id="tabbtn-log" data-tab="log" aria-selected="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>
+        Quest Log
+        <span class="tab-count" id="log-count" hidden></span>
+      </button>
+      <button type="button" role="tab" id="tabbtn-requests" data-tab="requests" aria-selected="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9z"/><path d="M12 8v4M12 14.5v.01"/></svg>
+        Requests
+        <span class="tab-count" id="requests-count" hidden></span>
+      </button>
+      <button type="button" role="tab" id="tabbtn-hosts" data-tab="hosts" aria-selected="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V5M19 20v-6"/></svg>
+        Hosts
+      </button>
+    </nav>
+
+    <div class="toast" id="toast" role="status" hidden></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

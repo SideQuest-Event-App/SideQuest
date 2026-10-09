@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
+    http://www.sitemaps.org/schemas/sitemap/0.9/siteindex.xsd"
+  xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+>
+<sitemap>
+  <loc>https://dice.fm/sitemaps/sitemap1.xml</loc>
+  <lastmod>2026-10-02T00:10:18Z</lastmod>
+</sitemap><sitemap>
+  <loc>https://dice.fm/sitemaps/sitemap2.xml</loc>
+  <lastmod>2026-10-02T00:10:31Z</lastmod>
+</sitemap><sitemap>
+  <loc>https://dice.fm/sitemaps/sitemap3.xml</loc>
+  <lastmod>2026-10-02T00:10:45Z</lastmod>
+</sitemap><sitemap>
+  <loc>https://dice.fm/sitemaps/sitemap4.xml</loc>
+  <lastmod>2026-10-02T00:10:57Z</lastmod>
+</sitemap><sitemap>
+  <loc>https://dice.fm/sitemaps/sitemap5.xml</loc>
+  <lastmod>2026-10-02T00:11:10Z</lastmod>
+</sitemap><sitemap>
+  <loc>https://dice.fm/sitemaps/sitemap6.xml</loc>
+  <lastmod>2026-10-02T00:11:21Z</lastmod>
+</sitemap><sitemap>
+  <loc>https://dice.fm/sitemaps/sitemap7.xml</loc>
+  <lastmod>2026-10-02T00:11:32Z</lastmod>
+</sitemap><sitemap>
+  <loc>https://dice.fm/sitemaps/sitemap8.xml</loc>
+  <lastmod>2026-10-02T00:11:39Z</lastmod>
+</sitemap></sitemapindex>
