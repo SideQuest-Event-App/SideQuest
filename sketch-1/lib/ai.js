@@ -352,29 +352,35 @@ ${text ? `The ticket's text:\n<ticket>\n${text}\n</ticket>\n` : ""}Respond with 
   );
 }
 
-// ---------- 5. Attendees: turn a screenshot of an event into a draft listing ----------
+// ---------- 5. Attendees: turn a screenshot of an event, or a shared link, into a draft listing ----------
 // image: base64 (no data: prefix). The AI reads the screenshot, then searches the web for the original listing
 // to fill gaps and find its link. Nothing is guessed: anything it can't find comes back null, and the person
 // checks every field before the event goes up (as "unverified").
-async function extractEvent(image, mediaType, { vibes, areas, today }) {
+// link: { url, text } instead of an image: the page's text, or "" if it couldn't be loaded (Instagram blocks bots)
+async function extractEvent(image, mediaType, { vibes, areas, today, link }) {
   const m = mode();
-  if (m === "keywords") return { mode: m, draft: null, error: "Reading screenshots needs the AI (an Anthropic API key or Claude Code). Fill in the details yourself below." };
-  const prompt = (where) => `${where}It's a screenshot someone took of an event in the Toronto area (from Eventbrite, Instagram, a poster, a group chat, anything). Today is ${today}.
-1. Read everything the screenshot says about the event.
-2. Search the web for the original listing (the event's own page, ticket page or post) to confirm it and fill in what the screenshot leaves out. Prefer the organizer's or ticket seller's page.
-Never invent anything: use null for whatever neither the screenshot nor the listing you found says.
+  if (m === "keywords") return { mode: m, draft: null, error: `Reading ${link ? "this page" : "screenshots"} needs the AI (an Anthropic API key or Claude Code). Fill in the details yourself below.` };
+  const what = link ? "page" : "screenshot";
+  const prompt = (where) => `${where}It's ${link ? "a link someone shared to" : "a screenshot someone took of"} an event in the Toronto area (from Eventbrite, Instagram, a poster, a group chat, anything). Today is ${today}.
+1. Read everything the ${what} says about the event.
+2. Search the web for the original listing (the event's own page, ticket page or post) to confirm it and fill in what the ${what} leaves out. Prefer the organizer's or ticket seller's page.
+Never invent anything: use null for whatever neither the ${what} nor the listing you found says.
 "area" must be one of ${JSON.stringify(areas)} (by the venue's location), or null. "vibes" may only use names from ${JSON.stringify(vibes)}.
-"isEvent" is false if the image isn't an event at all.
+"isEvent" is false if it isn't an event at all.
 Respond with JSON only, no other text, in this shape:
 {"isEvent": true, "title": "<string>", "date": "<YYYY-MM-DD>", "time": "<HH:MM 24-hour start>", "endTime": "<HH:MM or null>", "venue": "<venue name>", "address": "<street address>", "area": "<area>", "price": <lowest ticket price in CAD as a number, 0 if free, null if unknown>, "priceNote": "<e.g. $15 to $25, or Free with RSVP>", "organizer": "<name>", "description": "<one to three sentences>", "vibes": ["<vibe>"], "sourceUrl": "<URL of the original listing you found, or null>", "source": "<site name, e.g. Eventbrite or Instagram>"}`;
 
   let json;
   if (m === "api") {
-    const content = [{ type: "image", source: { type: "base64", media_type: mediaType, data: image } }, { type: "text", text: prompt("The image above is ") }];
+    const content = link
+      ? prompt(`Someone shared this link: ${link.url}\nThe page's text (empty if it couldn't be loaded):\n<page>\n${link.text}\n</page>\n`)
+      : [{ type: "image", source: { type: "base64", media_type: mediaType, data: image } }, { type: "text", text: prompt("The image above is ") }];
     const search = [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }];
     // Web search can be turned off for an API org; still read the screenshot without it
     const text = await askAPI(content, 2000, search).catch((err) => (/web_search/i.test(err.message) ? askAPI(content, 2000) : Promise.reject(err)));
     json = parseJSON(text);
+  } else if (link) {
+    json = parseJSON(await askClaudeCode(prompt(`Someone shared this link: ${link.url}\nRead it with WebFetch. `), ["--allowedTools", "WebSearch,WebFetch"]));
   } else {
     const file = path.join(os.tmpdir(), `sidequest-shot-${Date.now()}.${(mediaType.split("/")[1] || "png").replace(/[^a-z]/g, "")}`);
     fs.writeFileSync(file, Buffer.from(image, "base64"));
@@ -384,9 +390,9 @@ Respond with JSON only, no other text, in this shape:
       fs.rmSync(file, { force: true });
     }
   }
-  if (json.isEvent === false) return { mode: m, draft: null, error: "That doesn't look like an event. Try a screenshot of the listing or poster." };
+  if (json.isEvent === false) return { mode: m, draft: null, error: `That doesn't look like an event. Try ${link ? "the link to the event's own page" : "a screenshot of the listing or poster"}.` };
   const str = (v, max) => (v == null ? "" : String(v).trim().slice(0, max));
-  const url = str(json.sourceUrl, 300);
+  const url = str(json.sourceUrl, 300) || (link ? link.url : "");
   return {
     mode: m,
     draft: {

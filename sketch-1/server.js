@@ -19,6 +19,8 @@ if (fs.existsSync(envPath)) {
 const db = require("./lib/db");
 const ai = require("./lib/ai");
 const { track, flush: flushAnalytics } = require("./lib/analytics");
+const { jsonLdEvents } = require("./import/fetch");
+const { stripHtml, trimText, place, vibesOf } = require("./import/normalize");
 
 const PORT = process.env.PORT || 3000;
 
@@ -697,10 +699,11 @@ A.importEvent = (ctx, { draft }) => {
   if (isNaN(start)) throw new Error("That date doesn't look right.");
   const end = /^\d{2}:\d{2}$/.test(d.endTime || "") ? startOf(d.date, d.endTime).start : null;
   if (end && end < start) end.setDate(end.getDate() + 1); // ends after midnight
+  if ((end || new Date(start.getTime() + 2 * 3600 * 1000)) < now()) throw new Error("That event has already happened.");
   const area = AREAS.includes(d.area) ? d.area : "Downtown";
   const price = budgetOf(d.price);
   const vibes = (d.vibes || []).filter((v) => VIBES.includes(v)).slice(0, 4);
-  const source = clean(d.source, 40) || new URL(sourceUrl).hostname.replace(/^www\./, "");
+  const source = clean(d.source, 40) || siteName(sourceUrl);
   const venue = clean(d.venue, 80);
   const e = {
     id: db.data.events.reduce((m, x) => Math.max(m, x.id), 0) + 1,
@@ -976,6 +979,73 @@ async function apiExtract({ userId, image }) {
   return { time: new Date().toISOString(), ...(await ai.extractEvent(m[2], m[1], { vibes: VIBES, areas: AREAS, today })) };
 }
 
+// Shared link -> draft event. Event sites (Eventbrite, DICE, Luma, Meetup…) put the event's details in the page as
+// schema.org JSON-LD, so most links need no AI; anything else (or a page that blocks us) goes to the AI.
+const SITES = [[/eventbrite\./, "Eventbrite"], [/dice\.fm/, "DICE"], [/meetup\.com/, "Meetup"], [/lu\.ma|luma\.com/, "Luma"], [/ticketmaster\./, "Ticketmaster"], [/instagram\.com/, "Instagram"], [/facebook\.com|fb\.me/, "Facebook"], [/partiful\.com/, "Partiful"], [/ra\.co/, "Resident Advisor"], [/posh\.vip/, "Posh"], [/universe\.com/, "Universe"], [/showclix|showpass/, "Showpass"]];
+const siteName = (url) => {
+  const host = new URL(url).hostname.replace(/^www\./, "");
+  return (SITES.find(([re]) => re.test(host)) || [, host])[1];
+};
+// "2026-10-30T21:00:00-04:00" -> { date: "2026-10-30", time: "21:00" } in Toronto; a time with no zone is already local
+function torontoParts(iso) {
+  if (!iso || isNaN(Date.parse(iso))) return { date: "", time: "" };
+  const local = /(Z|[+-]\d\d:?\d\d)$/i.test(iso) ? new Date(iso).toLocaleString("sv-SE", { timeZone: "America/Toronto" }) : String(iso).replace("T", " ");
+  return { date: local.slice(0, 10), time: /\d\d:\d\d/.test(local.slice(11, 16)) ? local.slice(11, 16) : "" };
+}
+function draftFromLd(ld, url) {
+  const loc = [].concat(ld.location || [])[0] || {};
+  const addr = loc.address || {};
+  const street = typeof addr === "string" ? addr : addr.streetAddress || "";
+  const address = addr.addressLocality && !street.includes(addr.addressLocality) ? `${street}, ${addr.addressLocality}` : street;
+  const lat = Number(loc.geo && loc.geo.latitude);
+  const lng = Number(loc.geo && loc.geo.longitude);
+  const area = Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng) ? place(lat, lng, addr.addressLocality).area : "";
+  // Only CAD prices go in the price field; others (Eventbrite sometimes shows USD) go in the note as-is
+  const offers = [].concat(ld.offers || []).map((o) => ({ low: Number(o.lowPrice != null ? o.lowPrice : o.price), currency: o.priceCurrency || "CAD" })).filter((o) => Number.isFinite(o.low));
+  const low = offers.length ? offers.reduce((a, b) => (b.low < a.low ? b : a)) : null;
+  const org = [].concat(ld.organizer || [])[0];
+  const start = torontoParts(ld.startDate);
+  const short = ld.endDate && Date.parse(ld.endDate) - Date.parse(ld.startDate) < 86400000; // a multi-day run has no single end time
+  const description = trimText(ld.description || "", 300);
+  return {
+    title: stripHtml(ld.name).slice(0, 60),
+    date: start.date,
+    time: start.time,
+    endTime: short ? torontoParts(ld.endDate).time : "",
+    venue: stripHtml(loc.name).slice(0, 80),
+    address: stripHtml(address).slice(0, 120),
+    area: AREAS.includes(area) ? area : "",
+    price: low && low.currency === "CAD" ? String(low.low) : "",
+    priceNote: low && low.currency !== "CAD" ? `${low.low} ${low.currency}` : "",
+    organizer: stripHtml(typeof org === "string" ? org : org && org.name).slice(0, 60),
+    description,
+    vibes: vibesOf(`${ld.name} ${description}`).filter((v) => VIBES.includes(v)),
+    sourceUrl: url,
+    source: siteName(url),
+  };
+}
+async function apiFromLink({ userId, url }) {
+  if (!db.data.users[userId]) throw new Error("Sign up first.");
+  const link = validUrl(url);
+  // ponytail: blocks obvious internal hosts only; a public name that resolves to a private IP still gets through. Resolve and check the IP before deploying somewhere with internal services.
+  const host = link && new URL(link).hostname;
+  if (!link || /^(localhost|.*\.(local|internal|localhost))$/i.test(host) || /^[\d.]+$|:/.test(host)) throw new Error("Paste the event's web link, like https://www.eventbrite.ca/e/…");
+  const same = db.data.events.find((e) => e.sourceUrl === link || e.ticketLink === link);
+  if (same) return { existingId: same.id };
+  let html = "";
+  try {
+    const res = await fetch(link, { headers: { "user-agent": "SidequestSketch/1.0 (reads one event page someone shared)", "accept-language": "en-CA,en;q=0.8" }, redirect: "follow", signal: AbortSignal.timeout(15000) });
+    if (res.ok) html = (await res.text()).slice(0, 3000000);
+  } catch {}
+  const ld = jsonLdEvents(html).find((e) => e.name && e.startDate);
+  if (ld) return { time: new Date().toISOString(), mode: "listing", draft: draftFromLd(ld, link) };
+  const today = now().toLocaleDateString("en-CA", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "America/Toronto" });
+  const text = stripHtml(html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")).slice(0, 8000);
+  const out = await ai.extractEvent(null, null, { vibes: VIBES, areas: AREAS, today, link: { url: link, text } });
+  if (out.draft) out.draft.sourceUrl = link; // the link they shared is the source
+  return { time: new Date().toISOString(), ...out };
+}
+
 // ---------- Tiny web server ----------
 // ---------- Analytics: what each action records (ids, choices and counts; never names, emails or text) ----------
 const SAFE_ARGS = ["real", "field", "eventId", "requestId", "stars", "tags", "attended", "audience", "size", "when", "source", "origin", "transit", "budget", "maxMinutes", "registered", "toggleVibe", "type", "area", "submit"];
@@ -1077,7 +1147,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/host-report") {
       return sendJSON(res, 200, hostReport(db.data.hosts[url.searchParams.get("host")] || null));
     }
-    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/extract": apiExtract, "/api/read-ticket": apiReadTicket };
+    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/extract": apiExtract, "/api/from-link": apiFromLink, "/api/read-ticket": apiReadTicket };
     if (req.method === "POST" && ROUTES[url.pathname]) {
       const body = await readBody(req);
       const route = url.pathname.slice("/api/".length);
