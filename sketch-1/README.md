@@ -81,6 +81,15 @@ Events are stored one row each, and everything else is one `app_state` row, so a
 
 Your browser only remembers which attendee and host account are yours (and your theme). There are no passwords; anyone on the same server can act as any host from the sample list.
 
+## Ticket wallet
+
+Quest Log → the ticket icon opens the wallet. "Add a ticket" takes a screenshot or photo, a PDF ticket, or an Apple Wallet pass (`.pkpass`), so every ticket sits in one place. Accepting a quest also offers "Add my ticket to my wallet", and Event day mode shows the ticket.
+
+- **Codes stay scannable.** The browser finds every QR code, PDF417, Aztec, Data Matrix or barcode in the file ([zxing-wasm](https://github.com/Sec-ant/zxing-wasm), loaded only on this screen), redraws it sharp from its exact contents, then decodes the redraw and keeps it only if it reads back byte for byte. If it can't be redrawn, the original pixels are kept, cropped and never resized. Codes always show on white, and the screen stays awake while a ticket is open.
+- **Details** (event, venue, date, seat) are read by the AI from the picture or the PDF's text; a Wallet pass's own fields fill them without AI. You check them before saving. A ticket is linked to its quest when the date matches and the titles share a word.
+- Tickets live on the attendee, in the same database as everything else (`data/db.json` or Supabase's `app_state`), so no new table is needed.
+- Tickets whose code changes every few seconds (Ticketmaster SafeTix) can't be copied by anyone and stay in their own app.
+
 ## What's honest about the numbers
 
 Sketch 0's rule carries over: tapping **Accept quest** is intent only. After the quest (2 hours after it starts, when the host ends it, or with "Demo: skip to after the event"), the Quest Log asks **Did you go?**. Only a "yes" counts toward the north star and unlocks the rating. Hosts see accepts and confirmed attendance side by side in their dashboard and recaps.
@@ -98,6 +107,7 @@ Sketch 0's rule carries over: tapping **Accept quest** is intent only. After the
 - `public/js/ui.js`: icons, event images (or an "Image: N/A" box), and shared components
 - `public/js/screens-attendee.js`, `public/js/screens-host.js`: every screen
 - `public/js/actions.js`: what each button does
+- `public/js/wallet.js`: the ticket wallet (importing, code reading and redrawing, its screens)
 - `public/js/app.js`: navigation, rendering, and talking to the server
 - `strategy.md`: the product strategy the AI is steered by (copied from Sketch 0)
 
@@ -109,4 +119,4 @@ Sketch 0's rule carries over: tapping **Accept quest** is intent only. After the
 - Claude Code can take 10 to 30 seconds per AI call. The app shows a loading state and caches results, but the API is much faster.
 - Friends are sample profiles, not other people using the app, so party votes and chat replies are simulated.
 - Out of scope, as in the wireframe: social sign-in, uploads (posters, photos, venue maps), ticket scanning, scheduling, chat moderation, payouts.
-- Not built from the spec's later list: Find my party with real locations, rideshare, in-app tickets.
+- Not built from the spec's later list: Find my party with real locations, rideshare.

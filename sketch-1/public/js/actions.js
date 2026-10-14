@@ -101,6 +101,7 @@
     U().logTab = "Upcoming";
     return "questlog";
   };
+  A.addQuestTicket = () => A.addTicket(U().quest);
   A.notForMe = async (id) => {
     await SQ.act("notForMe", { eventId: Number(id) });
     toast("Got it. Your taste avatar will skip things like that.");
