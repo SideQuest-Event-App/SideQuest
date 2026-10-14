@@ -315,7 +315,7 @@
         <div class="row">
           <div class="stack-xs"><span class="small muted">${hello}, ${esc(u.name || "there")}</span><h1 class="display-l">For You</h1></div>
           <div class="row start" style="gap:2px">
-            <button class="icon-btn" data-act="addEvent" aria-label="Add an event from a screenshot" title="Add an event from a screenshot">${icon("camera")}</button>
+            <button class="icon-btn" data-act="addEvent" aria-label="Add an event" title="Add an event">${icon("plus")}</button>
             <button class="icon-btn" data-go="notifications" aria-label="Notifications${unread ? `, ${unread} unread` : ""}">${icon("bell")}${unread ? `<span class="dot">${unread}</span>` : ""}</button>
             <button data-go="profile" aria-label="Profile">${avatar(u.name || "You", "lg")}</button>
           </div>
@@ -469,12 +469,12 @@
       </div>`, { title: "Tickets", footer: `<div class="action-bar" style="flex-direction:column;gap:8px">${link ? btn("Add my ticket to my wallet", { "data-act": "addQuestTicket" }, "primary", "wallet") : ""}${btn(link ? "I'll add it later" : "Got it", { "data-act": "gotTicket" }, link ? "secondary" : "primary")}${btn("Tell my party", { "data-act": "sendToParty", "data-arg": e.id }, "ghost", "users")}</div>` });
   } };
 
-  /* ===================== Add an event from a screenshot ===================== */
-  S["add-event"] = { role: "attendee", label: "Add an event from a screenshot", render: () => {
+  /* ===================== Add an event: from a link, a screenshot, or typed in ===================== */
+  S["add-event"] = { role: "attendee", label: "Add an event", render: () => {
     const s = U().shot || (U().shot = SQ.emptyShot());
     const d = s.draft;
-    const form = s.preview && !s.loading ? `
-        <div class="row"><span class="label">Check every field</span>${aiTag(s.mode)}</div>
+    const form = s.open && !s.loading ? `
+        <div class="row"><span class="label">${s.mode ? "Check every field" : "Event details"}</span>${s.mode === "listing" ? `<span class="ai-tag">${icon("external")}From the listing</span>` : aiTag(s.mode)}</div>
         <p class="small muted">Leave blank anything you don't know. It shows as N/A, never a guess.</p>
         ${field("Event name", "shot.draft.title", d.title)}
         ${field("Date", "shot.draft.date", d.date, "date")}
@@ -492,14 +492,19 @@
         ${field("Found on", "shot.draft.source", d.source, "text", "Eventbrite, Instagram…")}` : "";
     return screen(`
       <div class="pad stack">
-        <h2 class="display-l">Add an event from a screenshot</h2>
-        <p class="muted">Screenshot an event from Eventbrite, Instagram or anywhere. The AI reads it and looks up the original listing. It goes up as unverified until someone else opens the listing and confirms it's real.</p>
-        <label class="btn btn-outline">${icon("camera")}${s.preview ? "Use a different screenshot" : "Choose a screenshot"}<input type="file" accept="image/*" data-file="readShot" hidden></label>
+        <h2 class="display-l">Add an event</h2>
+        <p class="muted">Paste a link from Eventbrite, Instagram or anywhere, or use a screenshot, and we'll fill in what we can. Or type it in yourself. It goes up as unverified until someone else opens the listing and confirms it's real.</p>
+        <form class="search" data-act="readLink">
+          ${icon("external")}<input type="url" data-bind="shot.link" value="${esc(s.link)}" placeholder="Paste the event's link" aria-label="Event link" enterkeyhint="go">
+          <button class="icon-btn" type="submit" aria-label="Fill in from link">${icon("sparkle")}</button>
+        </form>
+        <label class="btn btn-outline">${icon("camera")}${s.preview ? "Use a different screenshot" : "Use a screenshot"}<input type="file" accept="image/*" data-file="readShot" hidden></label>
+        ${s.open ? "" : btn("Enter it yourself", { "data-act": "manualEvent" }, "ghost", "edit")}
         ${s.preview ? `<img src="${s.preview}" alt="Your screenshot" style="width:100%;max-height:240px;object-fit:contain;border-radius:14px">` : ""}
-        ${s.loading ? thinking(`Reading your screenshot and looking up the listing${SQ.d.mode === "claude-code" ? " (Claude Code can take a minute)" : ""}…`) : ""}
+        ${s.loading ? thinking(`Reading your ${s.preview ? "screenshot" : "link"} and looking up the listing${SQ.d.mode === "claude-code" ? " (Claude Code can take a minute)" : ""}…`) : ""}
         ${s.error ? `<div class="notice hot">${icon("x")}<span>${esc(s.error)}</span></div>` : ""}
         ${form}
-      </div>`, { title: "Add an event", footer: `<div class="action-bar">${btn("Add as unverified event", { "data-act": "importEvent", disabled: !s.preview || s.loading })}</div>` });
+      </div>`, { title: "Add an event", footer: `<div class="action-bar">${btn("Add as unverified event", { "data-act": "importEvent", disabled: !s.open || s.loading })}</div>` });
   } };
 
   /* ===================== Parties and Crew Blend ===================== */

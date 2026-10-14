@@ -108,8 +108,9 @@
     if (U().screen === "quest") SQ.back();
   };
 
-  // ---------- events found by attendees: screenshot -> AI draft -> unverified event ----------
-  SQ.emptyShot = () => ({ preview: "", loading: false, error: null, mode: null, draft: { title: "", date: "", time: "", endTime: "", venue: "", address: "", area: "", price: "", priceNote: "", organizer: "", description: "", vibes: [], sourceUrl: "", source: "" } });
+  // ---------- events found by attendees: a link, a screenshot, or typed in -> draft -> unverified event ----------
+  // open: the draft form is showing; mode: what filled it ("listing" = the page's own event data, or the AI)
+  SQ.emptyShot = () => ({ link: "", open: false, preview: "", loading: false, error: null, mode: null, draft: { title: "", date: "", time: "", endTime: "", venue: "", address: "", area: "", price: "", priceNote: "", organizer: "", description: "", vibes: [], sourceUrl: "", source: "" } });
   A.addEvent = () => {
     U().shot = SQ.emptyShot();
     return "add-event";
@@ -145,6 +146,33 @@
       s.error = err.message;
     }
     s.loading = false;
+    s.open = true;
+  };
+  A.readLink = async () => {
+    const url = U().shot.link.trim();
+    if (!url) return toast("Paste the event's link first.");
+    const s = (U().shot = { ...SQ.emptyShot(), link: url, loading: true });
+    SQ.render();
+    try {
+      const r = await SQ.post("/api/from-link", { userId: SQ.userId(), url });
+      if (r.existingId) {
+        U().shot = null;
+        U().quest = r.existingId;
+        toast("That event is already on Sidequest. Here it is.");
+        return "quest";
+      }
+      s.mode = r.mode;
+      s.error = r.error || null;
+      Object.assign(s.draft, r.draft || { sourceUrl: url });
+    } catch (err) {
+      s.error = err.message;
+      s.draft.sourceUrl = url;
+    }
+    s.loading = false;
+    s.open = true;
+  };
+  A.manualEvent = () => {
+    U().shot = { ...SQ.emptyShot(), open: true };
   };
   A.shotArea = (a) => {
     U().shot.draft.area = U().shot.draft.area === a ? "" : a;

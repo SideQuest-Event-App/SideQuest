@@ -62,13 +62,13 @@ With thousands of real listings, the AI doesn't read them all: each job first sh
 | **Search** | Discover search bar | Sketch 0's matching: what you're in the mood for, in; up to 5 picks with reasons out. Interests nothing fit are listed with the reason (nothing listed, over budget, too far) and can become a Quest Request. |
 | **Crew Blend** | Parties → your party | Sketch 0's crew matching: picks the whole party would enjoy, with a line per person and each person's trip time. The party's budget is the lowest anyone set. |
 | **Draft from a request** | Host → Demand Insights → claim → Create a quest | Writes a title, description, vibes, price and start time that answer the request and fit the host. |
-| **Read a screenshot** | Discover → camera button | Reads a screenshot of an event (Eventbrite, Instagram, a poster…), searches the web for the original listing, and fills in a draft. Nothing is guessed: blanks show as N/A. Needs the API or Claude Code; without either, the person fills the form in by hand. |
+| **Read a screenshot or link** | Discover → + button | Reads a screenshot of an event (Eventbrite, Instagram, a poster…), or a shared link whose page has no event data of its own, searches the web for the original listing, and fills in a draft. Nothing is guessed: blanks show as N/A. Needs the API or Claude Code; without either, the person fills the form in by hand. |
 
 Budget and travel limits are applied **before** the AI sees anything, and only events from the eligible list are accepted back, so nothing over budget or too far can be picked.
 
 ## Events found by attendees
 
-Anyone can add an event Sidequest doesn't have: tap the camera on Discover, pick a screenshot, check the draft the AI filled in, and add a link to the original listing (required). It goes up marked **Unverified** and is linked to that listing; the same link twice opens the existing event instead of making a copy.
+Anyone can add an event Sidequest doesn't have: tap **+** on Discover, then paste the event's link, pick a screenshot, or tap **Enter it yourself**. A link from Eventbrite, DICE, Luma, Meetup and most ticket sites fills the form straight from the page's own event data (no AI needed); other pages and screenshots go to the AI. Check the draft and make sure it links to the original listing (required). It goes up marked **Unverified** and is linked to that listing; the same link twice opens the existing event instead of making a copy.
 
 - **Verifying:** another attendee opens the event and taps **Get tickets** (the purchase-ticket button, on the quest page or after accepting). That opens the original listing and unlocks **It's real** / **Not real**. The person who added an event can't verify it. Whichever answer has more votes wins: **Verified**, or **Reported** (hidden from feeds and search). The person who added it is notified either way.
 - **Flagging:** every event page has **Flag incorrect info**: pick what's wrong (title, date, venue, price…) and say what. Flags show on the event page for everyone.
