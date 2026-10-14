@@ -466,7 +466,7 @@
             <span class="caption muted">Sidequest links out to the real listing; prices can change there.</span>` : `<div class="notice">${icon("ticket")}<span>No ticket needed. Just show up.</span></div>`}
         </div>
         <div style="text-align:left">${verifyCard(e)}</div>
-      </div>`, { title: "Tickets", footer: `<div class="action-bar" style="flex-direction:column;gap:8px">${btn(link ? "I have my ticket" : "Got it", { "data-act": "gotTicket" })}${btn("Tell my party", { "data-act": "sendToParty", "data-arg": e.id }, "ghost", "users")}</div>` });
+      </div>`, { title: "Tickets", footer: `<div class="action-bar" style="flex-direction:column;gap:8px">${link ? btn("Add my ticket to my wallet", { "data-act": "addQuestTicket" }, "primary", "wallet") : ""}${btn(link ? "I'll add it later" : "Got it", { "data-act": "gotTicket" }, link ? "secondary" : "primary")}${btn("Tell my party", { "data-act": "sendToParty", "data-arg": e.id }, "ghost", "users")}</div>` });
   } };
 
   /* ===================== Add an event from a screenshot ===================== */
