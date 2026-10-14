@@ -133,10 +133,17 @@ async function write() {
 // Writes happen in the background, one at a time, batching changes made within half a second
 let timer = null;
 let writing = Promise.resolve();
+let saveError = null; // the last failed write, shown in the app's side panel so it isn't silent
 function save() {
   clearTimeout(timer);
   timer = setTimeout(() => {
-    writing = writing.then(write).catch((err) => console.error("Save failed:", err.message));
+    writing = writing
+      .then(write)
+      .then(() => (saveError = null))
+      .catch((err) => {
+        saveError = err.message;
+        console.error("Save failed:", err.message);
+      });
   }, 500);
 }
 
@@ -150,6 +157,10 @@ function reset() {
 module.exports = {
   get data() {
     return data;
+  },
+  // Where changes are saved, and the last save error if the latest save failed
+  get status() {
+    return { store: useSupabase ? "supabase" : "file", error: saveError };
   },
   load,
   save,

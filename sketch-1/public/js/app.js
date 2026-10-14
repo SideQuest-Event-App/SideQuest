@@ -322,11 +322,16 @@
 
   // ---------- Desktop side panel ----------
   const pill = document.getElementById("ai-pill");
+  const dbPill = document.getElementById("db-pill");
   const jump = document.getElementById("side-jump");
   function renderSide() {
     const mode = SQ.d.mode;
     pill.classList.toggle("off", mode === "keywords");
     pill.lastElementChild.textContent = mode === "api" ? `AI: Claude API (${SQ.d.model})` : mode === "claude-code" ? "AI: Claude Code" : "No AI: keyword matching";
+    // Without Supabase keys, changes only live in data/db.json on the machine running the server (a host like Render wipes it)
+    const { store, error } = SQ.d.db || {};
+    dbPill.classList.toggle("off", store !== "supabase" || !!error);
+    dbPill.lastElementChild.textContent = error ? `Not saving: ${error.slice(0, 80)}` : store === "supabase" ? "Saving to Supabase" : "Saving to data/db.json only (no Supabase keys)";
     const role = SQ.screens[SQ.u.screen].role;
     document.querySelectorAll("#side-role button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.role === role)));
     document.querySelectorAll("#side-theme button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themePick === SQ.u.theme)));

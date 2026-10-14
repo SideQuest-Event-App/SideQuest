@@ -261,6 +261,7 @@ function view(userId, hostId) {
     now: now().toISOString(),
     mode: ai.mode(),
     model: ai.MODEL,
+    db: db.status,
     vocab: { VIBES, ORIGINS, AREAS, WHEN, CREW_SIZES, TRANSIT, RATE_TAGS, HOST_TYPES, PAST_SUGGESTIONS, FLAG_FIELDS },
     friends: db.FRIENDS,
     user: user && { ...user, feedKey: feedKey(user) },
