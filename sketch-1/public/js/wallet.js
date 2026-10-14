@@ -266,7 +266,7 @@
             ${t.code ? `<span class="code-thumb"><img src="${esc(t.code.image)}" alt=""></span>` : `<span class="ic-box">${icon("ticket")}</span>`}
             <span class="stack-xs grow"><span class="label" style="letter-spacing:.04em">${esc(ticketWhen(t))}</span><strong class="ellipsis">${esc(t.title)}</strong><span class="small muted ellipsis">${esc([t.venue, t.seat].filter(Boolean).join(" · ") || sourceLabel[t.source])}</span></span>
           </button>`).join("") : empty("ticket", "No tickets yet. Add a screenshot, PDF or Apple Wallet pass and it lives here with all your others.")}
-      </div>`, { title: "Ticket wallet", footer: `<div class="action-bar">${btn("Add a ticket", { "data-act": "addTicket" }, "primary", "plus")}</div>` });
+      </div>`, { title: "Ticket wallet", back: "questlog", footer: `<div class="action-bar">${btn("Add a ticket", { "data-act": "addTicket" }, "primary", "plus")}</div>` });
   } };
 
   S["wallet-add"] = { role: "attendee", label: "Ticket wallet: add", render: () => {
