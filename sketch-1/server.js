@@ -914,7 +914,9 @@ async function apiSearch({ userId, query }) {
   const { pool, excluded } = applyLimits({ budget: user.budget, origins, maxMinutes: user.maxMinutes });
   const people = [{ name: user.name || "You", interests, origin: user.origin }];
   const words = ai.wordsOf(interests);
-  const candidates = shortlist(pool, (e) => wordHits(e, words) * 3 + vibeOverlap(e, user.vibes) * 0.5 + soonness(e) * 0.2, 35);
+  // Searching an event's name finds it, even when its words ("art", "con") also hit hundreds of others
+  const phrase = interests.toLowerCase();
+  const candidates = shortlist(pool, (e) => (e.title.toLowerCase().includes(phrase) ? 20 : 0) + wordHits(e, words) * 3 + vibeOverlap(e, user.vibes) * 0.5 + soonness(e) * 0.2, 35);
   const result = candidates.length ? await ai.match(people, candidates) : { mode: ai.mode(), matches: [], unmet: ai.phrasesOf(interests).map((i) => ({ person: people[0].name, interest: i })) };
   const unmet = result.unmet.map((u) => ({ ...u, reason: unmetReason(u.interest, excluded) }));
   db.data.logs.searches.push({ time: new Date().toISOString(), mode: result.mode, userId, interests, budget: user.budget, origins, maxMinutes: user.maxMinutes, matchedIds: result.matches.map((m) => m.id), unmet });
