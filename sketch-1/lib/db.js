@@ -92,10 +92,10 @@ async function load() {
     await write();
     return data;
   }
-  // A fresh import replaces the listings but keeps accounts, logs, requests and host-published quests
+  // A fresh import replaces the listings but keeps accounts, logs, requests, and quests hosts published or attendees added
   const fresh = seedEvents();
   if (data.eventsImportedAt !== fresh.importedAt) {
-    data.events = [...fresh.events, ...data.events.filter((e) => e.publishedBy)];
+    data.events = [...fresh.events, ...data.events.filter((e) => e.publishedBy || e.importedBy)];
     data.eventsImportedAt = fresh.importedAt;
     replaceEvents = true;
     await write();
