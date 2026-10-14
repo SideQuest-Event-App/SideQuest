@@ -362,6 +362,12 @@
           ${r.unmet.map((x) => `<div class="row"><span class="small"><strong>${esc(x.interest)}</strong> <span class="muted">${x.reason === "price" ? "· over your budget" : x.reason === "travel" ? "· too far for your trip time" : "· nothing listed yet"}</span></span>
             <button class="btn btn-secondary sm" data-act="requestGap" data-arg="${esc(x.interest)}">${icon("megaphone")}Request it</button></div>`).join("")}
           <p class="small muted">Requests go to hosts. If one puts it on, you hear first.</p>
+        </div>` : ""}
+        ${r.unmet.length || !shown.length ? `<div class="card stack-sm">
+          <span class="label">Missing something?</span>
+          <div class="row"><span class="small">Know of an event like this? Add it to SideQuest!</span>
+            <button class="btn btn-secondary sm" data-act="addEvent">${icon("plus")}Add event</button></div>
+          <p class="small muted">Paste its link, use a screenshot, or type it in.</p>
         </div>` : ""}`;
     }
     return screen(`
