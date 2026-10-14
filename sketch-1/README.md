@@ -130,3 +130,7 @@ Sketch 0's rule carries over: tapping **Accept quest** is intent only. After the
 - Friends are sample profiles, not other people using the app, so party votes and chat replies are simulated.
 - Out of scope, as in the wireframe: social sign-in, uploads (posters, photos, venue maps), ticket scanning, scheduling, chat moderation, payouts.
 - Not built from the spec's later list: Find my party with real locations, rideshare.
+
+## GitHub Pages
+
+Pages can only serve files, so the deploy workflow runs `sh web/build.sh`, which bundles `server.js` to run inside the browser (`web/boot.js` answers the app's `/api/...` requests). Everything works there except what needs secrets: there's no AI (keyword matching instead, since an API key can't be hidden in a web page), data is saved in each visitor's browser rather than shared, and "Add from link" can't read other sites. Locally, `node server.js` is unchanged.

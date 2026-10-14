@@ -26,11 +26,15 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
+      # Pages can't run server.js, so it's bundled to run in the browser (see sketch-1/web/boot.js)
+      - name: Build
+        run: sh web/build.sh
+        working-directory: ./sketch-1
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Tells GitHub Actions exactly where your index.html lives
-          path: './sketch-1/public' 
+          path: './sketch-1/dist' 
 
       - name: Deploy to GitHub Pages
         id: deployment
