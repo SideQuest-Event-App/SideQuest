@@ -113,6 +113,7 @@ function newUser(fields = {}) {
     myRequests: [],
     votedRequests: [],
     notifications: [],
+    tickets: [], // the ticket wallet: imported tickets with their scannable codes
     feed: null, // cached taste-avatar picks
     ...fields,
   };
@@ -636,6 +637,39 @@ A.endEvent = (ctx, { eventId }) => {
   }
 };
 
+// --- ticket wallet: tickets imported from screenshots, PDFs and Apple Wallet passes ---
+// The browser decodes each code and re-draws it (checking the copy scans the same); the server only stores it.
+const DATA_IMAGE = /^data:image\/(svg\+xml|png);base64,[A-Za-z0-9+/=]+$/;
+function cleanCode(c) {
+  if (!c) return null;
+  if (!/^[A-Za-z0-9]{2,20}$/.test(c.format || "")) throw new Error("Unknown code type.");
+  const image = String(c.image || "");
+  if (!DATA_IMAGE.test(image) || image.length > 400000) throw new Error("That code couldn't be saved.");
+  return { format: c.format, text: clean(c.text, 5000), image };
+}
+A.addTickets = (ctx, { tickets }) => {
+  const u = needUser(ctx);
+  if (!Array.isArray(tickets) || !tickets.length || tickets.length > 20) throw new Error("Nothing to add.");
+  u.tickets = u.tickets || [];
+  for (const t of tickets) {
+    const e = findEvent(t.eventId);
+    u.tickets.push({
+      id: newId(),
+      addedAt: now().toISOString(),
+      title: clean(t.title, 80) || (e && e.title) || "Ticket",
+      venue: clean(t.venue, 80),
+      startsAt: /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(t.startsAt || "") ? t.startsAt : "", // Toronto local time
+      seat: clean(t.seat, 60),
+      eventId: e ? e.id : null,
+      source: ["image", "pdf", "pkpass"].includes(t.source) ? t.source : "image",
+      code: cleanCode(t.code),
+    });
+  }
+  return { added: tickets.length };
+};
+A.removeTicket = (ctx, { id }) => {
+  const u = needUser(ctx);
+  u.tickets = (u.tickets || []).filter((t) => t.id !== id);
 // --- events found by attendees: from a screenshot, unverified until someone else checks the listing ---
 const validUrl = (u) => {
   try {
@@ -919,6 +953,17 @@ async function apiDraft({ hostId, requestId }) {
   return ai.draft(r, host, VIBES);
 }
 
+// Read a ticket's details (what, where, when, seat) from its picture or text, and find the quest it's for
+async function apiReadTicket({ userId, image, text }) {
+  if (!db.data.users[userId]) throw new Error("Sign up first.");
+  if (image && !/^data:image\/jpeg;base64,/.test(image)) throw new Error("Send the ticket as a JPEG.");
+  if ((image || "").length > 3000000) throw new Error("That picture is too big.");
+  const out = await ai.readTicket({ image, text: clean(text, 8000) });
+  // The quest: same day, and its title shares a word with the ticket's
+  const words = ai.coreWords(out.title || "");
+  const day = (out.startsAt || "").slice(0, 10);
+  const match = day && words.length && db.data.events.find((e) => new Date(e.startsAt).toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) === day && ai.coreWords(e.title).some((w) => words.includes(w)));
+  return { ...out, eventId: match ? match.id : null };
 // Screenshot -> draft event. The person checks the draft, then importEvent saves it.
 async function apiExtract({ userId, image }) {
   if (!db.data.users[userId]) throw new Error("Sign up first.");

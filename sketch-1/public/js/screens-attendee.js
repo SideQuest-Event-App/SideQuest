@@ -718,7 +718,7 @@
       <div class="pad stack">
         <div class="chips">${["Upcoming", "Saved", "Completed"].map((t) => chip(t, tab === t, { "data-act": "setLogTab", "data-arg": t })).join("")}</div>
         ${list}
-      </div>`, { title: "Quest Log", large: true, tabbar: attendeeTabs("questlog") });
+      </div>`, { title: "Quest Log", large: true, right: `<button class="icon-btn" data-act="openWallet" aria-label="Ticket wallet">${icon("wallet")}</button>`, tabbar: attendeeTabs("questlog") });
   } };
 
   S.rate = { role: "attendee", label: "Rate a quest", render: () => {
@@ -760,6 +760,7 @@
         <div class="meta-row"><span class="ic-box">${icon("coat")}</span><span><strong>Coat check and re-entry</strong><span class="small muted">${esc(e.dayInfo.coat)}</span></span></div>
         <div class="card ${last ? "hot" : ""} stack-xs"><span class="row"><span class="label">${icon("megaphone", "sm")} Host update</span>${last ? `<span class="caption muted">${new Date(last.time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>` : ""}</span>
           <p class="small">${last ? esc(last.text) : `No updates from ${esc(e.organizer.name)} yet. They'll show up here live.`}</p></div>
+        ${SQ.ticketFor(e.id) ? btn("Show my ticket", { "data-act": "openTicket", "data-arg": SQ.ticketFor(e.id).id }, "primary", "ticket") : btn("Add my ticket", { "data-act": "addTicket", "data-arg": e.id }, "outline", "ticket")}
         <div class="btn-row">${btn("Group chat", { "data-go": "eventday-chat" }, "secondary", "chat")}${btn("Find my party", { "data-act": "findParty", "data-arg": e.id }, "primary", "users")}</div>
       </div>`, { title: "Event day" });
   } };
