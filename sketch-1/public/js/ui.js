@@ -90,9 +90,10 @@ window.SQ = window.SQ || {};
   const avatars = (names, max = 4) => names.length ? `<span class="avs">${names.slice(0, max).map((n) => avatar(n)).join("")}${names.length > max ? `<span class="av more">+${names.length - max}</span>` : ""}</span>` : "";
 
   // ---------- Components ----------
+  // back: true goes to the previous screen; a screen id goes there instead
   const bar = (title, { back = true, right = "", large = false } = {}) => large
     ? `<header class="bar large"><h1>${esc(title)}</h1><div class="actions">${right}</div></header>`
-    : `<header class="bar">${back ? `<button class="icon-btn" data-back aria-label="Back">${icon("back")}</button>` : "<span></span>"}<h1>${esc(title)}</h1>${right || "<span></span>"}</header>`;
+    : `<header class="bar">${back ? `<button class="icon-btn" ${back === true ? "data-back" : `data-go="${esc(back)}"`} aria-label="Back">${icon("back")}</button>` : "<span></span>"}<h1>${esc(title)}</h1>${right || "<span></span>"}</header>`;
   const btn = (label, a = {}, kind = "primary", ic = "") => `<button class="btn btn-${kind}" ${attr(a)}>${ic ? icon(ic) : ""}${esc(label)}</button>`;
   const chip = (label, on, a = {}, ic = "") => `<button class="chip${on ? " on" : ""}" aria-pressed="${on ? "true" : "false"}" ${attr(a)}>${ic ? icon(ic) : ""}${esc(label)}</button>`;
   const field = (label, bind, value = "", type = "text", placeholder = "", extra = {}) => `
