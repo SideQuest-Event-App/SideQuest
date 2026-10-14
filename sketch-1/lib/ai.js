@@ -322,6 +322,36 @@ Respond with JSON only, no other text, in this shape:
   );
 }
 
+// ---------- 6. Ticket wallet: read a ticket's details from its picture or text ----------
+// image: a JPEG data URL (a screenshot, or a PDF's first page); text: a PDF's text or an Apple Wallet pass's fields.
+// The scannable code itself is decoded in the browser, never by the AI.
+function readTicket({ image, text }) {
+  const ask = `Read this event ticket and say what it's for. Use only what the ticket shows; leave anything it doesn't show as "".
+${text ? `The ticket's text:\n<ticket>\n${text}\n</ticket>\n` : ""}Respond with JSON only, no other text, in this shape:
+{"title": "<the event's name>", "venue": "<venue name>", "startsAt": "<YYYY-MM-DDTHH:MM in Toronto local time, or YYYY-MM-DD if no time>", "seat": "<section, row, seat or admission type>"}`;
+  return withFallback(
+    async () => {
+      let json;
+      if (image && mode() === "api") {
+        const [, mediaType, data] = image.match(/^data:(image\/jpeg);base64,(.+)$/);
+        json = await askJSON([{ type: "image", source: { type: "base64", media_type: mediaType, data } }, { type: "text", text: ask }], 400);
+      } else if (image) {
+        // Claude Code reads the picture from a temporary file
+        const file = path.join(os.tmpdir(), `sq-ticket-${process.pid}-${Date.now()}.jpg`);
+        fs.writeFileSync(file, Buffer.from(image.split(",")[1], "base64"));
+        try {
+          json = await askJSON(`The picture of the ticket is the image file at ${file}.\n${ask}`, 400);
+        } finally {
+          fs.rmSync(file, { force: true });
+        }
+      } else json = await askJSON(ask, 400);
+      const s = (v, n) => String(v || "").slice(0, n);
+      return { title: s(json.title, 80), venue: s(json.venue, 80), startsAt: /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(json.startsAt) ? json.startsAt : "", seat: s(json.seat, 60) };
+    },
+    () => ({ title: "", venue: "", startsAt: "", seat: "" }) // no AI: the person fills these in
+  );
+}
+
 // ---------- 5. Attendees: turn a screenshot of an event into a draft listing ----------
 // image: base64 (no data: prefix). The AI reads the screenshot, then searches the web for the original listing
 // to fill gaps and find its link. Nothing is guessed: anything it can't find comes back null, and the person
@@ -378,4 +408,4 @@ Respond with JSON only, no other text, in this shape:
   };
 }
 
-module.exports = { mode, MODEL, feed, match, draft, extractEvent, wordsOf, coreWords, phrasesOf, haystack };
+module.exports = { mode, MODEL, feed, match, draft, readTicket, extractEvent, wordsOf, coreWords, phrasesOf, haystack };

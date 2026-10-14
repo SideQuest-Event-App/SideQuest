@@ -670,6 +670,7 @@ A.addTickets = (ctx, { tickets }) => {
 A.removeTicket = (ctx, { id }) => {
   const u = needUser(ctx);
   u.tickets = (u.tickets || []).filter((t) => t.id !== id);
+};
 // --- events found by attendees: from a screenshot, unverified until someone else checks the listing ---
 const validUrl = (u) => {
   try {
@@ -964,6 +965,8 @@ async function apiReadTicket({ userId, image, text }) {
   const day = (out.startsAt || "").slice(0, 10);
   const match = day && words.length && db.data.events.find((e) => new Date(e.startsAt).toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) === day && ai.coreWords(e.title).some((w) => words.includes(w)));
   return { ...out, eventId: match ? match.id : null };
+}
+
 // Screenshot -> draft event. The person checks the draft, then importEvent saves it.
 async function apiExtract({ userId, image }) {
   if (!db.data.users[userId]) throw new Error("Sign up first.");
@@ -976,7 +979,7 @@ async function apiExtract({ userId, image }) {
 // ---------- Tiny web server ----------
 // ---------- Analytics: what each action records (ids, choices and counts; never names, emails or text) ----------
 const SAFE_ARGS = ["real", "field", "eventId", "requestId", "stars", "tags", "attended", "audience", "size", "when", "source", "origin", "transit", "budget", "maxMinutes", "registered", "toggleVibe", "type", "area", "submit"];
-const SAFE_RESULT = ["existing", "status", "flags", "eventId", "requestId", "merged", "votes", "learned", "told", "reached", "requesters", "followers"];
+const SAFE_RESULT = ["added", "existing", "status", "flags", "eventId", "requestId", "merged", "votes", "learned", "told", "reached", "requesters", "followers"];
 const DEMO_ACTIONS = ["demoLogin", "hostLoginAs", "hostApprove", "skipToAfter", "reset"]; // sketch shortcuts, left out of real numbers
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj && obj[k] !== undefined).map((k) => [k, obj[k]]));
 function trackAction(type, { userId, hostId, sessionId, args, result, error }) {
@@ -1074,7 +1077,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/host-report") {
       return sendJSON(res, 200, hostReport(db.data.hosts[url.searchParams.get("host")] || null));
     }
-    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/extract": apiExtract };
+    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/extract": apiExtract, "/api/read-ticket": apiReadTicket };
     if (req.method === "POST" && ROUTES[url.pathname]) {
       const body = await readBody(req);
       const route = url.pathname.slice("/api/".length);
