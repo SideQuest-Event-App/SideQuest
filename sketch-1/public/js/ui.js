@@ -157,7 +157,9 @@ window.SQ = window.SQ || {};
   }
   // Three states: past, happening now (started but not over), or upcoming (the default, no badge)
   const eventStatus = (e) => (isPast(e) ? "past" : Date.parse(e.startsAt) <= now().getTime() ? "now" : "upcoming");
-  const statusBadge = (e) => ({ past: '<span class="badge">Past</span>', now: '<span class="badge live">Happening now</span>' })[eventStatus(e)] || "";
+  // Events attendees added from a screenshot carry "Unverified" until someone else checks the listing
+  const verifyBadge = (e) => (e.verification && e.verification.status !== "verified" ? `<span class="badge">${e.verification.status === "reported" ? "Reported" : "Unverified"}</span>` : "");
+  const statusBadge = (e) => verifyBadge(e) + (({ past: '<span class="badge">Past</span>', now: '<span class="badge live">Happening now</span>' })[eventStatus(e)] || "");
   // The date label with its status badge beside it
   const whenRow = (e) => `<span class="row start" style="gap:8px;flex-wrap:wrap"><span class="label" style="letter-spacing:.04em">${esc(whenLabel(e))}</span>${statusBadge(e)}</span>`;
 

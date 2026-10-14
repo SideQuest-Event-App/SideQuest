@@ -58,6 +58,8 @@
     drafting: false,
     msg: { eventId: null, text: "", audience: "attendees" },
     published: null,
+    shot: null, // the event being added from a screenshot
+    flag: null, // { eventId, field, note }: the "Flag incorrect info" form
     theme: store.get("sq1.theme") || "system",
   };
 
@@ -297,6 +299,13 @@
     e.preventDefault();
     run(el);
   });
+  // File pickers: data-file="action" runs once a file is chosen (data-act would block the picker from opening)
+  screenEl.addEventListener("change", async (e) => {
+    const fn = e.target.type === "file" && SQ.actions[e.target.dataset.file];
+    if (!fn) return;
+    await fn(null, e.target);
+    render(false);
+  });
   screenEl.addEventListener("submit", (e) => {
     e.preventDefault();
     run(e.target);
@@ -369,7 +378,7 @@
     } catch {}
     const u = SQ.d.user;
     const fallback = u ? (u.registered ? "discover" : "ob-vibes") : "landing";
-    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", "search", "host-request", "host-checkin", "host-recap", "host-published", "host-create-dayinfo"].includes(last) ? last : fallback);
+    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", "search", "host-request", "host-checkin", "host-recap", "host-published", "host-create-dayinfo", "add-event"].includes(last) ? last : fallback);
     trackScreen(SQ.u.screen, null);
     render(true);
   })();
