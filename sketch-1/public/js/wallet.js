@@ -273,7 +273,7 @@
     keepAwake(false);
     const w = W();
     const e = ev(w.eventId);
-    if (w.step === "reading") return screen(`<div class="pad stack" style="padding-top:60px">${thinking("Finding the codes and reading your ticket…")}</div>`, { title: "Add a ticket" });
+    if (w.step === "reading") return screen(`<div class="pad stack" style="padding-top:60px">${thinking("Finding the codes and reading your ticket…")}</div>`, { title: "Add a ticket", back: "discover" });
     if (w.step === "review") {
       const d = w.draft;
       return screen(`
@@ -288,7 +288,7 @@
           ${field("Seat or admission", "wallet.draft.seat", d.seat, "text", "General admission, Row F seat 12…")}
           ${e ? `<div class="card tight row start" style="gap:12px">${poster(e, "mini")}<span class="stack-xs grow"><span class="caption muted">Linked to the quest</span><strong class="small ellipsis">${esc(e.title)}</strong></span><button class="link muted" data-act="unlinkTicketQuest">Not this one</button></div>` : ""}
           ${w.mode ? `<p class="caption muted">${w.mode === "keywords" ? "No AI is connected, so fill in the details yourself." : "Details read by AI. Check them before saving."}</p>` : ""}
-        </div>`, { title: "Check your ticket", footer: `<div class="action-bar">${btn(w.codes.length > 1 ? `Add ${w.codes.length} tickets` : "Add to wallet", { "data-act": "saveTickets" }, "primary", "ticket")}</div>` });
+        </div>`, { title: "Check your ticket", back: "discover", footer: `<div class="action-bar">${btn(w.codes.length > 1 ? `Add ${w.codes.length} tickets` : "Add to wallet", { "data-act": "saveTickets" }, "primary", "ticket")}</div>` });
     }
     return screen(`
       <div class="pad stack">
@@ -300,7 +300,7 @@
         ${w.error ? `<div class="notice">${icon("x")}<span>${esc(w.error)}</span></div>` : ""}
         <p class="small muted">We find the QR code or barcode and redraw it sharp, then check the copy scans exactly like the original. Your ticket stays usable at the door.</p>
         <p class="caption muted">Tickets that change every few seconds, like Ticketmaster SafeTix, only work in their own app.</p>
-      </div>`, { title: "Add a ticket" });
+      </div>`, { title: "Add a ticket", back: "discover" });
   } };
 
   S["wallet-ticket"] = { role: "attendee", label: "Ticket wallet: ticket", render: () => {
