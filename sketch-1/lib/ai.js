@@ -38,14 +38,14 @@ function strategyBlock() {
 }
 
 // ---------- The two AI backends ----------
-// files: images for it to look at, copied into a fresh folder it may read (and nothing else)
-function askClaudeCode(prompt, files = []) {
+// files: images for it to look at ([{ name, path }]), copied into a fresh folder it may read (and nothing else)
+function askClaudeCode(prompt, extraArgs = [], files = []) {
   let dir = null;
-  const args = ["-p", prompt, "--output-format", "json"];
+  const args = ["-p", prompt, "--output-format", "json", ...extraArgs];
   if (files.length) {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "sq-images-"));
     for (const f of files) fs.copyFileSync(f.path, path.join(dir, f.name));
-    args.push("--allowedTools", "Read");
+    if (!extraArgs.includes("--allowedTools")) args.push("--allowedTools", "Read");
   }
   return new Promise((resolve, reject) => {
     const child = execFile(
@@ -72,16 +72,18 @@ function askClaudeCode(prompt, files = []) {
 }
 
 const MEDIA_TYPES = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif" };
-async function askAPI(prompt, maxTokens, files = []) {
-  // Each image goes in labelled with its file name, so the prompt can refer to it
-  const images = files.flatMap((f) => [
-    { type: "text", text: `Image file ${f.name}:` },
-    { type: "image", source: { type: "base64", media_type: MEDIA_TYPES[path.extname(f.name).toLowerCase()] || "image/jpeg", data: fs.readFileSync(f.path).toString("base64") } },
-  ]);
+// Image files as content blocks, each labelled with its file name so the prompt can refer to it
+const imageBlocks = (files) => files.flatMap((f) => [
+  { type: "text", text: `Image file ${f.name}:` },
+  { type: "image", source: { type: "base64", media_type: MEDIA_TYPES[path.extname(f.name).toLowerCase()] || "image/jpeg", data: fs.readFileSync(f.path).toString("base64") } },
+]);
+
+// content is the prompt text, or an array of content blocks (an image plus text); tools are server tools like web search
+async function askAPI(content, maxTokens, tools) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages: [{ role: "user", content: files.length ? [...images, { type: "text", text: prompt }] : prompt }] }),
+    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages: [{ role: "user", content }], ...(tools ? { tools } : {}) }),
   });
   if (!res.ok) throw new Error(`AI request failed (${res.status}): ${await res.text()}`);
   const data = await res.json();
@@ -93,7 +95,10 @@ async function askAPI(prompt, maxTokens, files = []) {
 async function askJSON(prompt, maxTokens = 2000, files = []) {
   const m = mode();
   if (m === "keywords") throw new Error("No AI available");
-  const text = m === "api" ? await askAPI(prompt, maxTokens, files) : await askClaudeCode(prompt, files);
+  if (m === "api") return parseJSON(await askAPI(files.length ? [...imageBlocks(files), { type: "text", text: prompt }] : prompt, maxTokens));
+  return parseJSON(await askClaudeCode(prompt, [], files));
+}
+function parseJSON(text) {
   try {
     return JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
   } catch {
@@ -334,4 +339,96 @@ Respond with JSON only, no other text, in this shape:
   );
 }
 
-module.exports = { mode, MODEL, askJSON, feed, match, draft, wordsOf, coreWords, phrasesOf, haystack };
+// ---------- 6. Ticket wallet: read a ticket's details from its picture or text ----------
+// image: a JPEG data URL (a screenshot, or a PDF's first page); text: a PDF's text or an Apple Wallet pass's fields.
+// The scannable code itself is decoded in the browser, never by the AI.
+function readTicket({ image, text }) {
+  const ask = `Read this event ticket and say what it's for. Use only what the ticket shows; leave anything it doesn't show as "".
+${text ? `The ticket's text:\n<ticket>\n${text}\n</ticket>\n` : ""}Respond with JSON only, no other text, in this shape:
+{"title": "<the event's name>", "venue": "<venue name>", "startsAt": "<YYYY-MM-DDTHH:MM in Toronto local time, or YYYY-MM-DD if no time>", "seat": "<section, row, seat or admission type>"}`;
+  return withFallback(
+    async () => {
+      let json;
+      if (image && mode() === "api") {
+        const [, mediaType, data] = image.match(/^data:(image\/jpeg);base64,(.+)$/);
+        json = await askJSON([{ type: "image", source: { type: "base64", media_type: mediaType, data } }, { type: "text", text: ask }], 400);
+      } else if (image) {
+        // Claude Code reads the picture from a temporary file
+        const file = path.join(os.tmpdir(), `sq-ticket-${process.pid}-${Date.now()}.jpg`);
+        fs.writeFileSync(file, Buffer.from(image.split(",")[1], "base64"));
+        try {
+          json = await askJSON(`The picture of the ticket is the image file at ${file}.\n${ask}`, 400);
+        } finally {
+          fs.rmSync(file, { force: true });
+        }
+      } else json = await askJSON(ask, 400);
+      const s = (v, n) => String(v || "").slice(0, n);
+      return { title: s(json.title, 80), venue: s(json.venue, 80), startsAt: /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(json.startsAt) ? json.startsAt : "", seat: s(json.seat, 60) };
+    },
+    () => ({ title: "", venue: "", startsAt: "", seat: "" }) // no AI: the person fills these in
+  );
+}
+
+// ---------- 5. Attendees: turn a screenshot of an event, or a shared link, into a draft listing ----------
+// image: base64 (no data: prefix). The AI reads the screenshot, then searches the web for the original listing
+// to fill gaps and find its link. Nothing is guessed: anything it can't find comes back null, and the person
+// checks every field before the event goes up (as "unverified").
+// link: { url, text } instead of an image: the page's text, or "" if it couldn't be loaded (Instagram blocks bots)
+async function extractEvent(image, mediaType, { vibes, areas, today, link }) {
+  const m = mode();
+  if (m === "keywords") return { mode: m, draft: null, error: `Reading ${link ? "this page" : "screenshots"} needs the AI (an Anthropic API key or Claude Code). Fill in the details yourself below.` };
+  const what = link ? "page" : "screenshot";
+  const prompt = (where) => `${where}It's ${link ? "a link someone shared to" : "a screenshot someone took of"} an event in the Toronto area (from Eventbrite, Instagram, a poster, a group chat, anything). Today is ${today}.
+1. Read everything the ${what} says about the event.
+2. Search the web for the original listing (the event's own page, ticket page or post) to confirm it and fill in what the ${what} leaves out. Prefer the organizer's or ticket seller's page.
+Never invent anything: use null for whatever neither the ${what} nor the listing you found says.
+"area" must be one of ${JSON.stringify(areas)} (by the venue's location), or null. "vibes" may only use names from ${JSON.stringify(vibes)}.
+"isEvent" is false if it isn't an event at all.
+Respond with JSON only, no other text, in this shape:
+{"isEvent": true, "title": "<string>", "date": "<YYYY-MM-DD>", "time": "<HH:MM 24-hour start>", "endTime": "<HH:MM or null>", "venue": "<venue name>", "address": "<street address>", "area": "<area>", "price": <lowest ticket price in CAD as a number, 0 if free, null if unknown>, "priceNote": "<e.g. $15 to $25, or Free with RSVP>", "organizer": "<name>", "description": "<one to three sentences>", "vibes": ["<vibe>"], "sourceUrl": "<URL of the original listing you found, or null>", "source": "<site name, e.g. Eventbrite or Instagram>"}`;
+
+  let json;
+  if (m === "api") {
+    const content = link
+      ? prompt(`Someone shared this link: ${link.url}\nThe page's text (empty if it couldn't be loaded):\n<page>\n${link.text}\n</page>\n`)
+      : [{ type: "image", source: { type: "base64", media_type: mediaType, data: image } }, { type: "text", text: prompt("The image above is ") }];
+    const search = [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }];
+    // Web search can be turned off for an API org; still read the screenshot without it
+    const text = await askAPI(content, 2000, search).catch((err) => (/web_search/i.test(err.message) ? askAPI(content, 2000) : Promise.reject(err)));
+    json = parseJSON(text);
+  } else if (link) {
+    json = parseJSON(await askClaudeCode(prompt(`Someone shared this link: ${link.url}\nRead it with WebFetch. `), ["--allowedTools", "WebSearch,WebFetch"]));
+  } else {
+    const file = path.join(os.tmpdir(), `sidequest-shot-${Date.now()}.${(mediaType.split("/")[1] || "png").replace(/[^a-z]/g, "")}`);
+    fs.writeFileSync(file, Buffer.from(image, "base64"));
+    try {
+      json = parseJSON(await askClaudeCode(prompt(`Look at the image at ${file}. `), ["--allowedTools", "Read,WebSearch,WebFetch"]));
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  }
+  if (json.isEvent === false) return { mode: m, draft: null, error: `That doesn't look like an event. Try ${link ? "the link to the event's own page" : "a screenshot of the listing or poster"}.` };
+  const str = (v, max) => (v == null ? "" : String(v).trim().slice(0, max));
+  const url = str(json.sourceUrl, 300) || (link ? link.url : "");
+  return {
+    mode: m,
+    draft: {
+      title: str(json.title, 60),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(json.date) ? json.date : "",
+      time: /^\d{2}:\d{2}$/.test(json.time) ? json.time : "",
+      endTime: /^\d{2}:\d{2}$/.test(json.endTime) ? json.endTime : "",
+      venue: str(json.venue, 80),
+      address: str(json.address, 120),
+      area: areas.includes(json.area) ? json.area : "",
+      price: typeof json.price === "number" && json.price >= 0 ? String(json.price) : "",
+      priceNote: str(json.priceNote, 60),
+      organizer: str(json.organizer, 60),
+      description: str(json.description, 300),
+      vibes: (json.vibes || []).filter((v) => vibes.includes(v)).slice(0, 4),
+      sourceUrl: /^https?:\/\//.test(url) ? url : "",
+      source: str(json.source, 40),
+    },
+  };
+}
+
+module.exports = { mode, MODEL, askJSON, feed, match, draft, readTicket, extractEvent, wordsOf, coreWords, phrasesOf, haystack };

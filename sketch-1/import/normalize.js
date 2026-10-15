@@ -249,4 +249,4 @@ function toEvent(raw) {
   };
 }
 
-module.exports = { toEvent, stripHtml, km, travel, place, vibesOf, NA };
+module.exports = { toEvent, stripHtml, trimText, km, travel, place, vibesOf, NA };

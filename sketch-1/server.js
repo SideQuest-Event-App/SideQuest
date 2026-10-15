@@ -22,7 +22,9 @@ const { track, flush: flushAnalytics } = require("./lib/analytics");
 const posters = require("./lib/posters");
 const { geocode } = require("./lib/geocode");
 const { findDuplicate, mergeInto } = require("./import/dedupe");
-const { place, travel: travelTo, vibesOf, NA } = require("./import/normalize");
+const { jsonLdEvents } = require("./import/fetch");
+const { stripHtml, trimText, place, travel: travelTo, vibesOf, NA } = require("./import/normalize");
+const siteName = require("./public/js/sites.js"); // shared with the add-event form
 
 const PORT = process.env.PORT || 3000;
 
@@ -41,6 +43,7 @@ const HOST_TYPES = [
   ["Community group", "You organize for a community or cause"],
   ["Brand", "You host activations and pop-ups"],
 ];
+const FLAG_FIELDS = ["Title", "Date or time", "Venue", "Price", "Organizer", "Description", "Not a real event", "Other"];
 const PAST_SUGGESTIONS = ["Nuit Blanche 2025", "Toronto Zine Fair", "Hot Docs screening", "Night market at Stackt", "Comedy Bar open mic", "Field Trip Festival", "Bloor St Culture Corridor walk", "Fan Expo Canada"];
 
 // Where host-published events are, and how long they take to reach from each starting point
@@ -63,6 +66,13 @@ function travelFor(area) {
 const now = () => new Date();
 const endsAt = (e) => (e.endsAt ? Date.parse(e.endsAt) : Date.parse(e.startsAt) + 2 * 3600 * 1000);
 const isOver = (e) => now().getTime() > endsAt(e);
+// "2026-10-20" + "19:30" -> the start (Toronto summer time, like host publishing) and its label, "Tue Oct 20, 7:30 PM"
+function startOf(date, time) {
+  const start = new Date(`${date}T${time}:00-04:00`);
+  const [hh, mm] = time.split(":").map(Number);
+  const label = `${start.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/Toronto" }).replace(",", "")}, ${hh % 12 || 12}${mm ? `:${String(mm).padStart(2, "0")}` : ""} ${hh < 12 ? "AM" : "PM"}`;
+  return { start, label };
+}
 
 // ---------- Helpers ----------
 const newId = () => crypto.randomBytes(6).toString("hex");
@@ -109,6 +119,7 @@ function newUser(fields = {}) {
     myRequests: [],
     votedRequests: [],
     notifications: [],
+    tickets: [], // the ticket wallet: imported tickets with their scannable codes
     feed: null, // cached taste-avatar picks
     ...fields,
   };
@@ -137,6 +148,7 @@ function applyLimits({ budget, origins, maxMinutes }) {
   const excluded = {}; // event id -> "price" | "travel"
   const pool = db.data.events.filter((e) => {
     if (isOver(e)) return false;
+    if (e.verification && e.verification.status === "reported") return false; // people who checked the listing said it isn't real
     // No listed price counts as over a free-only budget, and within any other
     if (budget != null && (e.price == null ? budget === 0 : e.price > budget)) {
       excluded[e.id] = "price";
@@ -223,13 +235,12 @@ const soonness = (e) => Math.max(0, 1 - (Date.parse(e.startsAt) - now().getTime(
 
 // ---------- What the app sees ----------
 // ---------- Events: thousands of listings, so they're sent separately and only when they change ----------
-// The version moves when listings are imported, published or ended, someone accepts a quest,
+// The version moves when listings are imported, published, ended, verified or flagged, someone accepts a quest,
 // or every 10 minutes (so events that have started drop off the feed).
-let eventEdits = 0; // bumped when a listing changes in place (merged with an added event, or claimed by a host)
 function eventsVersion() {
   const d = db.data;
   const ended = d.events.reduce((n, e) => n + (e.ended ? 1 : 0), 0);
-  return [d.createdAt, d.eventsImportedAt, d.events.length, ended, d.logs.going.length, eventEdits, Math.floor(now().getTime() / 600000)].join("|");
+  return [d.createdAt, d.eventsImportedAt, d.events.length, ended, d.logs.going.length, d.eventEdits || 0, Math.floor(now().getTime() / 600000)].join("|");
 }
 let eventsCache = { version: null, json: null, gzip: null };
 function eventsPayload() {
@@ -254,7 +265,7 @@ function view(userId, hostId) {
     now: now().toISOString(),
     mode: ai.mode(),
     model: ai.MODEL,
-    vocab: { VIBES, ORIGINS, AREAS, WHEN, CREW_SIZES, TRANSIT, RATE_TAGS, HOST_TYPES, PAST_SUGGESTIONS },
+    vocab: { VIBES, ORIGINS, AREAS, WHEN, CREW_SIZES, TRANSIT, RATE_TAGS, HOST_TYPES, PAST_SUGGESTIONS, FLAG_FIELDS },
     friends: db.FRIENDS,
     user: user && { ...user, feedKey: feedKey(user) },
     party: user && { ...d.parties[user.id], blendKey: blendKey(user) },
@@ -618,7 +629,7 @@ const duplicateOf = (e) => findDuplicate(e, db.data.events.filter((x) => !isOver
 // A host takes over a listing that's already on Sidequest: it's theirs from now on (and survives re-imports)
 function claimFor(h, e) {
   Object.assign(e, { organizer: { name: h.name, rating: null, review: "" }, publishedBy: h.id, claimedAt: new Date().toISOString() });
-  eventEdits++;
+  edited();
 }
 
 A.publish = async (ctx, { draft }) => {
@@ -670,7 +681,7 @@ A.submitEvent = async (ctx, { draft }) => {
   const dup = duplicateOf(e);
   if (dup) {
     mergeInto(dup, e);
-    eventEdits++;
+    edited();
     return { eventId: dup.id, merged: true };
   }
   Object.assign(e, { source: "Sidequest member", sourceUrl: e.ticketLink || null, submittedBy: u.id });
@@ -713,6 +724,159 @@ A.endEvent = (ctx, { eventId }) => {
       notify(u, `How was ${e.title}?`, "Tell us if you went and rate it. It trains your taste avatar.", { eventId: e.id, rate: true });
     }
   }
+};
+
+// --- ticket wallet: tickets imported from screenshots, PDFs and Apple Wallet passes ---
+// The browser decodes each code and re-draws it (checking the copy scans the same); the server only stores it.
+const DATA_IMAGE = /^data:image\/(svg\+xml|png);base64,[A-Za-z0-9+/=]+$/;
+function cleanCode(c) {
+  if (!c) return null;
+  if (!/^[A-Za-z0-9]{2,20}$/.test(c.format || "")) throw new Error("Unknown code type.");
+  const image = String(c.image || "");
+  if (!DATA_IMAGE.test(image) || image.length > 400000) throw new Error("That code couldn't be saved.");
+  return { format: c.format, text: clean(c.text, 5000), image };
+}
+A.addTickets = (ctx, { tickets }) => {
+  const u = needUser(ctx);
+  if (!Array.isArray(tickets) || !tickets.length || tickets.length > 20) throw new Error("Nothing to add.");
+  u.tickets = u.tickets || [];
+  for (const t of tickets) {
+    const e = findEvent(t.eventId);
+    u.tickets.push({
+      id: newId(),
+      addedAt: now().toISOString(),
+      title: clean(t.title, 80) || (e && e.title) || "Ticket",
+      venue: clean(t.venue, 80),
+      startsAt: /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(t.startsAt || "") ? t.startsAt : "", // Toronto local time
+      seat: clean(t.seat, 60),
+      eventId: e ? e.id : null,
+      source: ["image", "pdf", "pkpass"].includes(t.source) ? t.source : "image",
+      code: cleanCode(t.code),
+    });
+  }
+  return { added: tickets.length };
+};
+A.removeTicket = (ctx, { id }) => {
+  const u = needUser(ctx);
+  u.tickets = (u.tickets || []).filter((t) => t.id !== id);
+};
+// --- events found by attendees: from a screenshot, unverified until someone else checks the listing ---
+const validUrl = (u) => {
+  try {
+    const url = new URL(clean(u, 300));
+    return /^https?:$/.test(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
+};
+const edited = () => (db.data.eventEdits = (db.data.eventEdits || 0) + 1); // so apps re-fetch events
+A.importEvent = (ctx, { draft }) => {
+  const u = needUser(ctx);
+  const d = draft || {};
+  const title = clean(d.title, 60);
+  if (!title) throw new Error("Add the event's name.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date || "")) throw new Error("Add the event's date.");
+  const sourceUrl = validUrl(d.sourceUrl);
+  if (!sourceUrl) throw new Error("Add a link to where you found it (the listing, ticket page or post).");
+  // Already on Sidequest? Send them to that one instead of making a copy
+  const same = db.data.events.find((e) => e.sourceUrl === sourceUrl || e.ticketLink === sourceUrl);
+  if (same) return { eventId: same.id, existing: true };
+  const time = /^\d{2}:\d{2}$/.test(d.time || "") ? d.time : "20:00";
+  const { start, label } = startOf(d.date, time);
+  if (isNaN(start)) throw new Error("That date doesn't look right.");
+  const end = /^\d{2}:\d{2}$/.test(d.endTime || "") ? startOf(d.date, d.endTime).start : null;
+  if (end && end < start) end.setDate(end.getDate() + 1); // ends after midnight
+  if ((end || new Date(start.getTime() + 2 * 3600 * 1000)) < now()) throw new Error("That event has already happened.");
+  const area = AREAS.includes(d.area) ? d.area : "Downtown";
+  const price = budgetOf(d.price);
+  const vibes = (d.vibes || []).filter((v) => VIBES.includes(v)).slice(0, 4);
+  const source = clean(d.source, 40) || siteName(sourceUrl);
+  const venue = clean(d.venue, 80);
+  const e = {
+    id: db.data.events.reduce((m, x) => Math.max(m, x.id), 0) + 1,
+    source,
+    sourceUrl,
+    title,
+    date: label,
+    startsAt: start.toISOString(),
+    endsAt: end ? end.toISOString() : null,
+    neighbourhood: area,
+    area,
+    venue: venue ? { name: venue, address: clean(d.address, 120) || "N/A" } : null,
+    scene: "Found by the community",
+    price,
+    priceNote: clean(d.priceNote, 60) || (price == null ? "N/A" : price ? `$${price}` : "Free"),
+    description: clean(d.description, 300) || "N/A",
+    tags: vibes.map((v) => v.toLowerCase()),
+    vibes,
+    rating: null,
+    reviews: [],
+    going: 0,
+    attendees: [],
+    organizer: { name: clean(d.organizer, 60) || "N/A", rating: null, review: "" },
+    friends: [],
+    travel: { ...travelFor(area), estimated: true },
+    ticketLink: sourceUrl,
+    dayInfo: { entrance: venue || "N/A", home: "Subway runs until about 1:30 AM", coat: "N/A" },
+    importedBy: u.id,
+    importedAt: now().toISOString(),
+    // opened: people who tapped through to the listing; only they can vote real or fake
+    verification: { status: "unverified", opened: [], real: [], fake: [] },
+    flags: [],
+  };
+  db.data.events.push(e);
+  // The listing's photo arrives a moment later; apps re-fetch events once it's in
+  fetchPage(sourceUrl).then((html) => {
+    const image = imageOf(html);
+    if (image && !e.image) {
+      e.image = image;
+      edited();
+      db.save();
+    }
+  });
+  return { eventId: e.id };
+};
+// Tapping the ticket button: records that this person has seen the original listing
+A.openTicket = (ctx, { eventId }) => {
+  const u = needUser(ctx);
+  const e = findEvent(eventId);
+  if (!e) throw new Error("Unknown quest.");
+  if (e.verification && !e.verification.opened.includes(u.id)) {
+    e.verification.opened.push(u.id);
+    edited();
+  }
+};
+// ponytail: one vote decides (the majority of people who opened the listing); add a minimum count if people game it
+A.verify = (ctx, { eventId, real }) => {
+  const u = needUser(ctx);
+  const e = findEvent(eventId);
+  const v = e && e.verification;
+  if (!v) throw new Error("This event doesn't need verifying.");
+  if (e.importedBy === u.id) throw new Error("Someone else has to verify an event you added.");
+  if (!v.opened.includes(u.id)) throw new Error("Open the listing first, then tell us if it's real.");
+  v.real = v.real.filter((id) => id !== u.id);
+  v.fake = v.fake.filter((id) => id !== u.id);
+  (real ? v.real : v.fake).push(u.id);
+  edited();
+  const was = v.status;
+  v.status = v.real.length > v.fake.length ? "verified" : v.fake.length > v.real.length ? "reported" : "unverified";
+  const finder = db.data.users[e.importedBy];
+  if (finder && v.status !== was && v.status !== "unverified") {
+    notify(finder, v.status === "verified" ? "Your event was verified" : "Your event was reported", v.status === "verified" ? `Someone checked the listing for "${e.title}" and confirmed it's real.` : `Someone checked the listing for "${e.title}" and says it isn't real. It's hidden from feeds for now.`, { eventId: e.id });
+  }
+  return { status: v.status };
+};
+// Anyone can flag wrong info on any event's page
+A.flagInfo = (ctx, { eventId, field, note }) => {
+  const u = needUser(ctx);
+  const e = findEvent(eventId);
+  if (!e) throw new Error("Unknown quest.");
+  if (!FLAG_FIELDS.includes(field)) throw new Error("Pick what's wrong.");
+  const text = clean(note, 200);
+  if (!text) throw new Error("Say what's wrong, like \"It starts at 9, not 8\".");
+  edited();
+  (e.flags = e.flags || []).push({ id: newId(), userId: u.id, field, note: text, time: now().toISOString() });
+  return { flags: e.flags.length };
 };
 
 A.reset = () => {
@@ -846,7 +1010,9 @@ async function apiSearch({ userId, query }) {
   const { pool, excluded } = applyLimits({ budget: user.budget, origins, maxMinutes: user.maxMinutes });
   const people = [{ name: user.name || "You", interests, origin: user.origin }];
   const words = ai.wordsOf(interests);
-  const candidates = shortlist(pool, (e) => wordHits(e, words) * 3 + vibeOverlap(e, user.vibes) * 0.5 + soonness(e) * 0.2, 35);
+  // Searching an event's name finds it, even when its words ("art", "con") also hit hundreds of others
+  const phrase = interests.toLowerCase();
+  const candidates = shortlist(pool, (e) => (e.title.toLowerCase().includes(phrase) ? 20 : 0) + wordHits(e, words) * 3 + vibeOverlap(e, user.vibes) * 0.5 + soonness(e) * 0.2, 35);
   const result = candidates.length ? await ai.match(people, candidates) : { mode: ai.mode(), matches: [], unmet: ai.phrasesOf(interests).map((i) => ({ person: people[0].name, interest: i })) };
   const unmet = result.unmet.map((u) => ({ ...u, reason: unmetReason(u.interest, excluded) }));
   db.data.logs.searches.push({ time: new Date().toISOString(), mode: result.mode, userId, interests, budget: user.budget, origins, maxMinutes: user.maxMinutes, matchedIds: result.matches.map((m) => m.id), unmet });
@@ -934,10 +1100,116 @@ async function apiDraft({ hostId, requestId }) {
   return ai.draft(r, host, VIBES);
 }
 
+// Read a ticket's details (what, where, when, seat) from its picture or text, and find the quest it's for
+async function apiReadTicket({ userId, image, text }) {
+  if (!db.data.users[userId]) throw new Error("Sign up first.");
+  if (image && !/^data:image\/jpeg;base64,/.test(image)) throw new Error("Send the ticket as a JPEG.");
+  if ((image || "").length > 3000000) throw new Error("That picture is too big.");
+  const out = await ai.readTicket({ image, text: clean(text, 8000) });
+  // The quest: same day, and its title shares a word with the ticket's
+  const words = ai.coreWords(out.title || "");
+  const day = (out.startsAt || "").slice(0, 10);
+  const match = day && words.length && db.data.events.find((e) => new Date(e.startsAt).toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) === day && ai.coreWords(e.title).some((w) => words.includes(w)));
+  return { ...out, eventId: match ? match.id : null };
+}
+
+// Screenshot -> draft event. The person checks the draft, then importEvent saves it.
+async function apiExtract({ userId, image }) {
+  if (!db.data.users[userId]) throw new Error("Sign up first.");
+  const m = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(image || ""));
+  if (!m) throw new Error("Pick a PNG, JPEG, GIF or WebP screenshot.");
+  const today = now().toLocaleDateString("en-CA", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "America/Toronto" });
+  return { time: new Date().toISOString(), ...(await ai.extractEvent(m[2], m[1], { vibes: VIBES, areas: AREAS, today })) };
+}
+
+// Shared link -> draft event. Event sites (Eventbrite, DICE, Luma, Meetup…) put the event's details in the page as
+// schema.org JSON-LD, so most links need no AI; anything else (or a page that blocks us) goes to the AI.
+// "2026-10-30T21:00:00-04:00" -> { date: "2026-10-30", time: "21:00" } in Toronto; a time with no zone is already local
+function torontoParts(iso) {
+  if (!iso || isNaN(Date.parse(iso))) return { date: "", time: "" };
+  const local = /(Z|[+-]\d\d:?\d\d)$/i.test(iso) ? new Date(iso).toLocaleString("sv-SE", { timeZone: "America/Toronto" }) : String(iso).replace("T", " ");
+  return { date: local.slice(0, 10), time: /\d\d:\d\d/.test(local.slice(11, 16)) ? local.slice(11, 16) : "" };
+}
+function draftFromLd(ld, url) {
+  const loc = [].concat(ld.location || [])[0] || {};
+  const addr = loc.address || {};
+  const street = typeof addr === "string" ? addr : addr.streetAddress || "";
+  const address = addr.addressLocality && !street.includes(addr.addressLocality) ? `${street}, ${addr.addressLocality}` : street;
+  const lat = Number(loc.geo && loc.geo.latitude);
+  const lng = Number(loc.geo && loc.geo.longitude);
+  const area = Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng) ? place(lat, lng, addr.addressLocality).area : "";
+  // Only CAD prices go in the price field; others (Eventbrite sometimes shows USD) go in the note as-is
+  const offers = [].concat(ld.offers || []).map((o) => ({ low: Number(o.lowPrice != null ? o.lowPrice : o.price), currency: o.priceCurrency || "CAD" })).filter((o) => Number.isFinite(o.low));
+  const low = offers.length ? offers.reduce((a, b) => (b.low < a.low ? b : a)) : null;
+  const org = [].concat(ld.organizer || [])[0];
+  const start = torontoParts(ld.startDate);
+  const short = ld.endDate && Date.parse(ld.endDate) - Date.parse(ld.startDate) < 86400000; // a multi-day run has no single end time
+  const description = trimText(ld.description || "", 300);
+  return {
+    title: stripHtml(ld.name).slice(0, 60),
+    date: start.date,
+    time: start.time,
+    endTime: short ? torontoParts(ld.endDate).time : "",
+    venue: stripHtml(loc.name).slice(0, 80),
+    address: stripHtml(address).slice(0, 120),
+    area: AREAS.includes(area) ? area : "",
+    price: low && low.currency === "CAD" ? String(low.low) : "",
+    priceNote: low && low.currency !== "CAD" ? `${low.low} ${low.currency}` : "",
+    organizer: stripHtml(typeof org === "string" ? org : org && org.name).slice(0, 60),
+    description,
+    vibes: vibesOf(`${ld.name} ${description}`).filter((v) => VIBES.includes(v)),
+    sourceUrl: url,
+    source: siteName(url),
+  };
+}
+// ponytail: blocks obvious internal hosts only; a public name that resolves to a private IP still gets through. Resolve and check the IP before deploying somewhere with internal services.
+const publicHost = (link) => {
+  const host = new URL(link).hostname;
+  return !/^(localhost|.*\.(local|internal|localhost))$/i.test(host) && !/^[\d.]+$|:/.test(host);
+};
+// One shared event page's HTML, or "" if it can't be read
+async function fetchPage(link) {
+  if (!publicHost(link)) return "";
+  try {
+    const res = await fetch(link, { headers: { "user-agent": "SidequestSketch/1.0 (reads one event page someone shared)", "accept-language": "en-CA,en;q=0.8" }, redirect: "follow", signal: AbortSignal.timeout(15000) });
+    return res.ok ? (await res.text()).slice(0, 3000000) : "";
+  } catch {
+    return "";
+  }
+}
+// The event's photo: its JSON-LD image, else the og:image sites set for link previews
+function imageOf(html) {
+  const ld = jsonLdEvents(html).find((x) => x.image);
+  const img = ld && [].concat(ld.image)[0];
+  const og = [...html.matchAll(/<meta\b[^>]*>/gi)].map((m) => m[0]).find((t) => /property=["']og:image(:url)?["']/i.test(t));
+  const src = (img && (img.url || img)) || (og && (/content=["']([^"']+)/i.exec(og) || [])[1]);
+  try {
+    const url = new URL(String(src).replace(/&amp;/g, "&"));
+    return /^https?:$/.test(url.protocol) && url.href.length < 1000 ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+async function apiFromLink({ userId, url }) {
+  if (!db.data.users[userId]) throw new Error("Sign up first.");
+  const link = validUrl(url);
+  if (!link || !publicHost(link)) throw new Error("Paste the event's web link, like https://www.eventbrite.ca/e/…");
+  const same = db.data.events.find((e) => e.sourceUrl === link || e.ticketLink === link);
+  if (same) return { existingId: same.id };
+  const html = await fetchPage(link);
+  const ld = jsonLdEvents(html).find((e) => e.name && e.startDate);
+  if (ld) return { time: new Date().toISOString(), mode: "listing", draft: draftFromLd(ld, link) };
+  const today = now().toLocaleDateString("en-CA", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "America/Toronto" });
+  const text = stripHtml(html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")).slice(0, 8000);
+  const out = await ai.extractEvent(null, null, { vibes: VIBES, areas: AREAS, today, link: { url: link, text } });
+  if (out.draft) Object.assign(out.draft, { sourceUrl: link, source: out.draft.source || siteName(link) }); // the link they shared is the source
+  return { time: new Date().toISOString(), ...out };
+}
+
 // ---------- Tiny web server ----------
 // ---------- Analytics: what each action records (ids, choices and counts; never names, emails or text) ----------
-const SAFE_ARGS = ["eventId", "requestId", "stars", "tags", "attended", "audience", "size", "when", "source", "origin", "transit", "budget", "maxMinutes", "registered", "toggleVibe", "type", "area", "submit"];
-const SAFE_RESULT = ["eventId", "requestId", "merged", "votes", "learned", "told", "reached", "requesters", "followers"];
+const SAFE_ARGS = ["real", "field", "eventId", "requestId", "stars", "tags", "attended", "audience", "size", "when", "source", "origin", "transit", "budget", "maxMinutes", "registered", "toggleVibe", "type", "area", "submit"];
+const SAFE_RESULT = ["added", "existing", "status", "flags", "eventId", "requestId", "merged", "votes", "learned", "told", "reached", "requesters", "followers"];
 const DEMO_ACTIONS = ["demoLogin", "hostLoginAs", "hostApprove", "skipToAfter", "reset"]; // sketch shortcuts, left out of real numbers
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj && obj[k] !== undefined).map((k) => [k, obj[k]]));
 function trackAction(type, { userId, hostId, sessionId, args, result, error }) {
@@ -968,17 +1240,16 @@ function trackAI(route, body, started, out, error) {
 // Screens the app reports from the browser (anything else is ignored)
 const SCREEN_ID = /^[a-z0-9-]{1,40}$/;
 
+const MAX_BODY = 8 * 1024 * 1024; // a screenshot, shrunk by the app before upload, fits easily
 function readBody(req) {
   return new Promise((resolve) => {
     let body = "";
-    let tooBig = false;
     req.on("data", (c) => {
-      if (tooBig) return;
       body += c;
-      // A poster upload is the biggest thing anyone sends; past that, the request is read as empty
-      if (body.length > 12 * 1024 * 1024) {
+      if (body.length > MAX_BODY) {
         body = "";
-        tooBig = true;
+        req.destroy();
+        resolve({});
       }
     });
     req.on("end", () => {
@@ -1036,7 +1307,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/host-report") {
       return sendJSON(res, 200, hostReport(db.data.hosts[url.searchParams.get("host")] || null));
     }
-    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster };
+    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster, "/api/extract": apiExtract, "/api/from-link": apiFromLink, "/api/read-ticket": apiReadTicket };
     if (req.method === "POST" && ROUTES[url.pathname]) {
       const body = await readBody(req);
       const route = url.pathname.slice("/api/".length);

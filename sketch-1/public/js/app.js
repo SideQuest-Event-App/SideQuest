@@ -60,6 +60,8 @@
     published: null,
     poster: null, // "Add from a poster": { for: "host" | "attendee", loading, error, result, pick }
     spotDraft: null, // the attendee's event form, filled from their poster
+    shot: null, // the event being added from a screenshot
+    flag: null, // { eventId, field, note }: the "Flag incorrect info" form
     theme: store.get("sq1.theme") || "system",
   };
 
@@ -299,6 +301,13 @@
     e.preventDefault();
     run(el);
   });
+  // File pickers: data-file="action" runs once a file is chosen (data-act would block the picker from opening)
+  screenEl.addEventListener("change", async (e) => {
+    const fn = e.target.type === "file" && SQ.actions[e.target.dataset.file];
+    if (!fn) return;
+    await fn(null, e.target);
+    render(false);
+  });
   screenEl.addEventListener("submit", (e) => {
     e.preventDefault();
     run(e.target);
@@ -350,6 +359,19 @@
     let obj = SQ.u;
     for (const k of keys.slice(0, -1)) obj = obj[k];
     obj[keys[keys.length - 1]] = e.target.value;
+    // Typing the listing's link fills in "Found on", unless they wrote their own
+    if (path === "shot.draft.sourceUrl") {
+      const d = SQ.u.shot.draft;
+      let site = "";
+      try {
+        site = /^https?:\/\/[^/]+\.[^/]+/.test(d.sourceUrl) ? SQ.siteName(d.sourceUrl) : "";
+      } catch {}
+      if (!d.source || d.source === d.autoSource) {
+        d.source = d.autoSource = site;
+        const el = screenEl.querySelector('[data-bind="shot.draft.source"]');
+        if (el) el.value = site;
+      }
+    }
   });
 
   // ---------- Desktop side panel ----------
@@ -410,7 +432,7 @@
     } catch {}
     const u = SQ.d.user;
     const fallback = u ? (u.registered ? "discover" : "ob-vibes") : "landing";
-    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", "search", "host-request", "host-checkin", "host-recap", "host-published", "host-create-dayinfo", "spot"].includes(last) ? last : fallback);
+    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", "search", "host-request", "host-checkin", "host-recap", "host-published", "host-create-dayinfo", "spot", "add-event"].includes(last) ? last : fallback);
     trackScreen(SQ.u.screen, null);
     render(true);
   })();

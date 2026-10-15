@@ -102,10 +102,116 @@
     U().logTab = "Upcoming";
     return "questlog";
   };
+  A.addQuestTicket = () => A.addTicket(U().quest);
   A.notForMe = async (id) => {
     await SQ.act("notForMe", { eventId: Number(id) });
     toast("Got it. Your taste avatar will skip things like that.");
     if (U().screen === "quest") SQ.back();
+  };
+
+  // ---------- events found by attendees: a link, a screenshot, or typed in -> draft -> unverified event ----------
+  // open: the draft form is showing; mode: what filled it ("listing" = the page's own event data, or the AI)
+  SQ.emptyShot = () => ({ link: "", open: false, preview: "", loading: false, error: null, mode: null, draft: { title: "", date: "", time: "", endTime: "", venue: "", address: "", area: "", price: "", priceNote: "", organizer: "", description: "", vibes: [], sourceUrl: "", source: "" } });
+  A.addEvent = () => {
+    U().shot = SQ.emptyShot();
+    return "add-event";
+  };
+  // Shrink the screenshot to at most 1600px (JPEG) so uploads are quick and fit the AI's image limits
+  const shrink = (file) => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * k);
+      c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      resolve(c.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => reject(new Error("That file isn't an image we can read."));
+    img.src = URL.createObjectURL(file);
+  });
+  A.readShot = async (_, input) => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const s = (U().shot = SQ.emptyShot());
+    s.loading = true;
+    try {
+      s.preview = await shrink(file);
+      SQ.render();
+      const r = await SQ.post("/api/extract", { userId: SQ.userId(), image: s.preview });
+      s.mode = r.mode;
+      s.error = r.error || null;
+      if (r.draft) Object.assign(s.draft, r.draft);
+    } catch (err) {
+      s.error = err.message;
+    }
+    s.loading = false;
+    s.open = true;
+  };
+  A.readLink = async () => {
+    const url = U().shot.link.trim();
+    if (!url) return toast("Paste the event's link first.");
+    const s = (U().shot = { ...SQ.emptyShot(), link: url, loading: true });
+    SQ.render();
+    try {
+      const r = await SQ.post("/api/from-link", { userId: SQ.userId(), url });
+      if (r.existingId) {
+        U().shot = null;
+        U().quest = r.existingId;
+        toast("That event is already on Sidequest. Here it is.");
+        return "quest";
+      }
+      s.mode = r.mode;
+      s.error = r.error || null;
+      Object.assign(s.draft, r.draft || { sourceUrl: url });
+    } catch (err) {
+      s.error = err.message;
+      s.draft.sourceUrl = url;
+    }
+    s.loading = false;
+    s.open = true;
+  };
+  A.manualEvent = () => {
+    U().shot = { ...SQ.emptyShot(), open: true };
+  };
+  A.shotArea = (a) => {
+    U().shot.draft.area = U().shot.draft.area === a ? "" : a;
+  };
+  A.shotVibe = (v) => toggle(U().shot.draft.vibes, v);
+  A.importEvent = async () => {
+    const r = await SQ.act("importEvent", { draft: U().shot.draft });
+    U().shot = null;
+    U().quest = r.eventId;
+    toast(r.existing ? "That event is already on Sidequest. Here it is." : "Added as unverified. It's verified once someone else checks the listing.");
+    return "quest";
+  };
+  // The purchase-ticket button: open the original listing, and remember this person has seen it so they can verify.
+  // window.open goes first, before any await, or the browser blocks it as a popup.
+  A.openTicket = async (id) => {
+    const e = SQ.ev(id);
+    window.open(e.ticketLink || e.sourceUrl, "_blank", "noopener");
+    if (e.verification) await SQ.act("openTicket", { eventId: e.id });
+  };
+  A.verifyReal = async (id) => {
+    await SQ.act("verify", { eventId: Number(id), real: true });
+    toast("Thanks. You confirmed this event is real.");
+  };
+  A.verifyFake = async (id) => {
+    const r = await SQ.act("verify", { eventId: Number(id), real: false });
+    toast(r.status === "reported" ? "Thanks. It's hidden from feeds while it's reported." : "Thanks. Your report is in.");
+  };
+  A.openFlag = (id) => {
+    U().flag = U().flag && U().flag.eventId === Number(id) ? null : { eventId: Number(id), field: "", note: "" };
+  };
+  A.flagField = (f) => {
+    U().flag.field = f;
+  };
+  A.sendFlag = async () => {
+    const f = U().flag;
+    await SQ.act("flagInfo", f);
+    U().flag = null;
+    toast("Flagged. Everyone looking at this event will see it.");
   };
 
   // ---------- parties ----------

@@ -92,8 +92,9 @@ function same(a, b) {
 
 // How much a listing tells us, to keep the fuller one of two duplicates
 const fullness = (e) => (e.price != null) + !!e.image + (e.description !== NA) + (e.organizer.name !== NA) + !!e.endsAt + !!(e.venue && e.venue.address !== NA);
-// Which listing of a group to keep: one a host published or claimed, then one a member added, then the fullest
-const rank = (e) => (e.publishedBy ? 100 : 0) + (e.submittedBy ? 50 : 0) + fullness(e);
+// Which listing of a group to keep: one a host published or claimed, then one an attendee added (from a poster,
+// or from a screenshot or link, with its verification votes), then the fullest
+const rank = (e) => (e.publishedBy ? 100 : 0) + (e.submittedBy || e.importedBy ? 50 : 0) + fullness(e);
 
 // Fill the kept listing's gaps from the other one, and remember where else it's listed
 function mergeInto(keep, other) {

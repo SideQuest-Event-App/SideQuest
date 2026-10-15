@@ -93,11 +93,11 @@ async function load() {
     await write();
     return data;
   }
-  // A fresh import replaces the listings but keeps accounts, logs, requests, and the quests hosts published
-  // or claimed and the events members added; where one of those is also in the import, it's kept as one listing
+  // A fresh import replaces the listings but keeps accounts, logs, requests, the quests hosts published or claimed,
+  // and the events attendees added; where one of those is also in the import, it's kept as one listing
   const fresh = seedEvents();
   if (data.eventsImportedAt !== fresh.importedAt) {
-    data.events = dedupe([...data.events.filter((e) => e.publishedBy || e.submittedBy), ...fresh.events]).events;
+    data.events = dedupe([...data.events.filter((e) => e.publishedBy || e.submittedBy || e.importedBy), ...fresh.events]).events;
     data.eventsImportedAt = fresh.importedAt;
     replaceEvents = true;
     await write();

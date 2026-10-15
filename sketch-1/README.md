@@ -78,8 +78,18 @@ With thousands of real listings, the AI doesn't read them all: each job first sh
 | **Search** | Discover search bar | Sketch 0's matching: what you're in the mood for, in; up to 5 picks with reasons out. Interests nothing fit are listed with the reason (nothing listed, over budget, too far) and can become a Quest Request. |
 | **Crew Blend** | Parties → your party | Sketch 0's crew matching: picks the whole party would enjoy, with a line per person and each person's trip time. The party's budget is the lowest anyone set. |
 | **Draft from a request** | Host → Demand Insights → claim → Create a quest | Writes a title, description, vibes, price and start time that answer the request and fit the host. |
+| **Read a screenshot or link** | Discover → + button | Reads a screenshot of an event (Eventbrite, Instagram, a poster…), or a shared link whose page has no event data of its own, searches the web for the original listing, and fills in a draft. Nothing is guessed: blanks show as N/A. Needs the API or Claude Code; without either, the person fills the form in by hand. |
 
 Budget and travel limits are applied **before** the AI sees anything, and only events from the eligible list are accepted back, so nothing over budget or too far can be picked.
+
+## Events found by attendees
+
+Anyone can add an event Sidequest doesn't have: tap **+** on Discover, then paste the event's link, pick a screenshot, or tap **Enter it yourself**. A link from Eventbrite, DICE, Luma, Meetup and most ticket sites fills the form straight from the page's own event data (no AI needed); other pages and screenshots go to the AI. Check the draft and make sure it links to the original listing (required). It goes up marked **Unverified** and is linked to that listing; the same link twice opens the existing event instead of making a copy.
+
+- **Verifying:** another attendee opens the event and taps **Get tickets** (the purchase-ticket button, on the quest page or after accepting). That opens the original listing and unlocks **It's real** / **Not real**. The person who added an event can't verify it. Whichever answer has more votes wins: **Verified**, or **Reported** (hidden from feeds and search). The person who added it is notified either way.
+- **Flagging:** every event page has **Flag incorrect info**: pick what's wrong (title, date, venue, price…) and say what. Flags show on the event page for everyone.
+
+These events live in the same `events` store as everything else (Supabase or `data/db.json`), with `importedBy`, `verification` and `flags` fields, so no schema change is needed, and they're kept when listings are re-imported.
 
 ## The database
 
@@ -96,6 +106,15 @@ Events are stored one row each, and everything else is one `app_state` row, so a
 **Analytics.** Every tap, screen view and AI call is also recorded as one row in the `analytics_events` table (or `data/analytics.jsonl` without Supabase keys), for the launch questions: confirmed attendance and ratings by week, the funnel from signup to rating, retention, which recommendations lead to accepts, AI speed and fallbacks, and what happens to Quest Requests. `supabase/analytics-queries.sql` has a query for each; paste them into Supabase's SQL Editor. Rows hold ids, choices and counts only, never names, emails, chat or search text. Demo shortcuts (`demo: true`) and failed taps (`ok: false`) are recorded but left out of the queries.
 
 Your browser only remembers which attendee and host account are yours (and your theme). There are no passwords; anyone on the same server can act as any host from the sample list.
+
+## Ticket wallet
+
+Quest Log → the ticket icon opens the wallet. "Add a ticket" takes a screenshot or photo, a PDF ticket, or an Apple Wallet pass (`.pkpass`), so every ticket sits in one place. Accepting a quest also offers "Add my ticket to my wallet", and Event day mode shows the ticket.
+
+- **Codes stay scannable.** The browser finds every QR code, PDF417, Aztec, Data Matrix or barcode in the file ([zxing-wasm](https://github.com/Sec-ant/zxing-wasm), loaded only on this screen), redraws it sharp from its exact contents, then decodes the redraw and keeps it only if it reads back byte for byte. If it can't be redrawn, the original pixels are kept, cropped and never resized. Codes always show on white, and the screen stays awake while a ticket is open.
+- **Details** (event, venue, date, seat) are read by the AI from the picture or the PDF's text; a Wallet pass's own fields fill them without AI. You check them before saving. A ticket is linked to its quest when the date matches and the titles share a word.
+- Tickets live on the attendee, in the same database as everything else (`data/db.json` or Supabase's `app_state`), so no new table is needed.
+- Tickets whose code changes every few seconds (Ticketmaster SafeTix) can't be copied by anyone and stay in their own app.
 
 ## What's honest about the numbers
 
@@ -114,6 +133,7 @@ Sketch 0's rule carries over: tapping **Accept quest** is intent only. After the
 - `public/js/ui.js`: icons, event images (or an "Image: N/A" box), and shared components
 - `public/js/screens-attendee.js`, `public/js/screens-host.js`: every screen
 - `public/js/actions.js`: what each button does
+- `public/js/wallet.js`: the ticket wallet (importing, code reading and redrawing, its screens)
 - `public/js/app.js`: navigation, rendering, and talking to the server
 - `strategy.md`: the product strategy the AI is steered by (copied from Sketch 0)
 
@@ -124,5 +144,5 @@ Sketch 0's rule carries over: tapping **Accept quest** is intent only. After the
 - Copying other platforms' listings is fine for a class prototype, not for a launched product. The research's advice still stands: real launch data should come from hosts and partner feeds.
 - Claude Code can take 10 to 30 seconds per AI call. The app shows a loading state and caches results, but the API is much faster.
 - Friends are sample profiles, not other people using the app, so party votes and chat replies are simulated.
-- Out of scope, as in the wireframe: social sign-in, uploads other than posters (photos, venue maps), ticket scanning, scheduling, chat moderation, payouts.
-- Not built from the spec's later list: Find my party with real locations, rideshare, in-app tickets.
+- Out of scope, as in the wireframe: social sign-in, uploads other than posters, event screenshots and tickets (photos, venue maps), ticket scanning, scheduling, chat moderation, payouts.
+- Not built from the spec's later list: Find my party with real locations, rideshare.

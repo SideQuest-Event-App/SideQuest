@@ -49,6 +49,42 @@
     ["Source", [e.source, ...(e.alsoOn || []).map((o) => o.source)].join(", ")],
   ];
 
+  // Events attendees added from a screenshot: anyone else who opens the listing (the ticket button) can say if it's real
+  function verifyCard(e) {
+    const v = e.verification;
+    if (!v) return "";
+    const u = me();
+    const n = (k) => `${v[k].length} ${v[k].length === 1 ? "person" : "people"}`;
+    const [title, text] = {
+      unverified: ["Unverified", "Someone on Sidequest added this from a screenshot. Nobody has confirmed the listing yet."],
+      verified: ["Verified", `${n("real")} opened the listing and confirmed it's real.`],
+      reported: ["Reported", `${n("fake")} opened the listing and said it isn't real, so it's hidden from feeds.`],
+    }[v.status];
+    const vote = v.real.includes(u.id) ? "real" : v.fake.includes(u.id) ? "fake" : null;
+    let body;
+    if (e.importedBy === u.id) body = '<p class="small muted">You added this one, so someone else has to verify it.</p>';
+    else if (!v.opened.includes(u.id)) body = `${btn(`Get tickets on ${e.source}`, { "data-act": "openTicket", "data-arg": e.id }, "outline", "external")}<span class="caption muted">Opens the original listing. Come back after to tell us if it's real.</span>`;
+    else body = `<span class="small">You opened the listing. Is this event real?</span>
+      <div class="btn-row">${btn("It's real", { "data-act": "verifyReal", "data-arg": e.id, "aria-pressed": String(vote === "real") }, vote === "real" ? "primary" : "secondary", "check")}${btn("Not real", { "data-act": "verifyFake", "data-arg": e.id, "aria-pressed": String(vote === "fake") }, vote === "fake" ? "primary" : "secondary", "x")}</div>
+      <button class="link muted" data-act="openTicket" data-arg="${e.id}">${icon("external", "sm")}Open the listing again</button>`;
+    return `<div class="card${v.status === "unverified" ? " hot" : ""} stack-sm"><span class="label row start" style="gap:6px">${icon("shield", "sm")}${title}</span><p class="small muted">${esc(text)}</p>${body}</div>`;
+  }
+  // Anyone can flag wrong info on any event; flags show to everyone who opens it
+  function flagSection(e) {
+    const f = U().flag && U().flag.eventId === e.id ? U().flag : null;
+    const flags = e.flags || [];
+    const list = flags.length ? `<div class="card stack-sm"><span class="label">Flagged as incorrect</span>
+      ${flags.slice(-5).map((x) => `<p class="small"><strong>${esc(x.field)}:</strong> ${esc(x.note)}</p>`).join("")}
+      ${flags.length > 5 ? `<span class="caption muted">and ${flags.length - 5} earlier</span>` : ""}</div>` : "";
+    const form = f ? `<form class="card stack-sm" data-act="sendFlag">
+        <span class="label">What's wrong?</span>
+        <div class="chips">${V().FLAG_FIELDS.map((x) => chip(x, f.field === x, { "data-act": "flagField", "data-arg": x })).join("")}</div>
+        ${SQ.textarea("Details", "flag.note", f.note, "It starts at 9, not 8", 2)}
+        <div class="btn-row">${btn("Send flag", { type: "submit" })}${btn("Cancel", { "data-act": "openFlag", "data-arg": e.id }, "ghost")}</div>
+      </form>` : `<button class="link muted center" data-act="openFlag" data-arg="${e.id}">${icon("edit", "sm")}Flag incorrect info</button>`;
+    return list + form;
+  }
+
   function featureCard(e) {
     const p = pick(e);
     return `<button class="feature-card" data-act="openQuest" data-arg="${e.id}">
@@ -279,6 +315,7 @@
         <div class="row">
           <div class="stack-xs"><span class="small muted">${hello}, ${esc(u.name || "there")}</span><h1 class="display-l">For You</h1></div>
           <div class="row start" style="gap:2px">
+            <button class="icon-btn" data-act="addEvent" aria-label="Add an event" title="Add an event">${icon("plus")}</button>
             <button class="icon-btn" data-go="notifications" aria-label="Notifications${unread ? `, ${unread} unread` : ""}">${icon("bell")}${unread ? `<span class="dot">${unread}</span>` : ""}</button>
             <button data-go="profile" aria-label="Profile">${avatar(u.name || "You", "lg")}</button>
           </div>
@@ -325,6 +362,12 @@
           ${r.unmet.map((x) => `<div class="row"><span class="small"><strong>${esc(x.interest)}</strong> <span class="muted">${x.reason === "price" ? "· over your budget" : x.reason === "travel" ? "· too far for your trip time" : "· nothing listed yet"}</span></span>
             <button class="btn btn-secondary sm" data-act="requestGap" data-arg="${esc(x.interest)}">${icon("megaphone")}Request it</button></div>`).join("")}
           <p class="small muted">Requests go to hosts. If one puts it on, you hear first.</p>
+        </div>` : ""}
+        ${r.unmet.length || !shown.length ? `<div class="card stack-sm">
+          <span class="label">Missing something?</span>
+          <div class="row"><span class="small">Know of an event like this? Add it to SideQuest!</span>
+            <button class="btn btn-secondary sm" data-act="addEvent">${icon("plus")}Add event</button></div>
+          <p class="small muted">Paste its link, use a screenshot, or type it in.</p>
         </div>` : ""}`;
     }
     return screen(`
@@ -372,6 +415,7 @@
       </div>
       <div class="pad stack">
         ${fromReq ? `<div class="notice">${icon("megaphone")}<span><strong>Made from a Quest Request.</strong> ${fromReq.votes} people asked for "${esc(fromReq.text)}".</span></div>` : ""}
+        ${verifyCard(e)}
         ${p ? `<div class="card hot stack-sm">
           <div class="row"><span class="label">Why this is for you</span>${aiTag(u.feed && u.feed.mode)}</div>
           <p>${esc(p.reason)}</p>
@@ -408,6 +452,7 @@
           ${btn("Send to party", { "data-act": "sendToParty", "data-arg": e.id }, "secondary", "users")}
           ${logged && logged.status === "going" ? btn("Event day", { "data-act": "openEventDay", "data-arg": e.id }, "secondary", "door") : btn(saved ? "Saved" : "Save", { "data-act": "save", "data-arg": e.id }, "secondary", "bookmark")}
         </div>
+        ${flagSection(e)}
         ${!logged ? `<button class="link muted center" data-act="notForMe" data-arg="${e.id}">${icon("thumbDown", "sm")}Not for me</button>` : ""}
       </div>`, { footer, cls: "immersive" });
   } };
@@ -424,10 +469,49 @@
           ${poster(e, "", { style: "height:120px;border-radius:14px" })}
           <strong>${esc(e.title)}</strong>
           <span class="small muted">${esc(whenLabel(e))} · ${esc(e.neighbourhood)}</span>
-          ${link ? `<a class="btn btn-outline" href="${esc(link)}" target="_blank" rel="noopener">${icon("external")}Get tickets on ${esc(e.source || "the host's site")} · ${priceLabel(e)}</a>
+          ${link ? `${btn(`Get tickets on ${e.source || "the host's site"} · ${priceLabel(e)}`, { "data-act": "openTicket", "data-arg": e.id }, "outline", "external")}
             <span class="caption muted">Sidequest links out to the real listing; prices can change there.</span>` : `<div class="notice">${icon("ticket")}<span>No ticket needed. Just show up.</span></div>`}
         </div>
-      </div>`, { title: "Tickets", footer: `<div class="action-bar" style="flex-direction:column;gap:8px">${btn(link ? "I have my ticket" : "Got it", { "data-act": "gotTicket" })}${btn("Tell my party", { "data-act": "sendToParty", "data-arg": e.id }, "ghost", "users")}</div>` });
+        <div style="text-align:left">${verifyCard(e)}</div>
+      </div>`, { title: "Tickets", footer: `<div class="action-bar" style="flex-direction:column;gap:8px">${link ? btn("Add my ticket to my wallet", { "data-act": "addQuestTicket" }, "primary", "wallet") : ""}${btn(link ? "I'll add it later" : "Got it", { "data-act": "gotTicket" }, link ? "secondary" : "primary")}${btn("Tell my party", { "data-act": "sendToParty", "data-arg": e.id }, "ghost", "users")}</div>` });
+  } };
+
+  /* ===================== Add an event: from a link, a screenshot, or typed in ===================== */
+  S["add-event"] = { role: "attendee", label: "Add an event", render: () => {
+    const s = U().shot || (U().shot = SQ.emptyShot());
+    const d = s.draft;
+    const form = s.open && !s.loading ? `
+        <div class="row"><span class="label">${s.mode ? "Check every field" : "Event details"}</span>${s.mode === "listing" ? `<span class="ai-tag">${icon("external")}From the listing</span>` : aiTag(s.mode)}</div>
+        <p class="small muted">Leave blank anything you don't know. It shows as N/A, never a guess.</p>
+        ${field("Event name", "shot.draft.title", d.title)}
+        ${field("Date", "shot.draft.date", d.date, "date")}
+        <div class="btn-row">${field("Starts", "shot.draft.time", d.time, "time")}${field("Ends", "shot.draft.endTime", d.endTime, "time")}</div>
+        ${field("Venue", "shot.draft.venue", d.venue)}
+        ${field("Address", "shot.draft.address", d.address)}
+        <span class="label">Area</span>
+        <div class="chips">${V().AREAS.map((a) => chip(a, d.area === a, { "data-act": "shotArea", "data-arg": a })).join("")}</div>
+        <div class="btn-row">${field("Price from (CAD)", "shot.draft.price", d.price, "number", "0 if free", { min: 0, inputmode: "decimal" })}${field("Price details", "shot.draft.priceNote", d.priceNote, "text", "$15 to $25")}</div>
+        ${field("Organizer", "shot.draft.organizer", d.organizer)}
+        ${SQ.textarea("Description", "shot.draft.description", d.description, "", 3)}
+        <span class="label">Vibes</span>
+        <div class="chips">${V().VIBES.map((v) => chip(v, d.vibes.includes(v), { "data-act": "shotVibe", "data-arg": v }, SQ.VIBE_ICON[v])).join("")}</div>
+        ${field("Link to the original listing", "shot.draft.sourceUrl", d.sourceUrl, "url", "https://", { required: true })}
+        ${field("Found on", "shot.draft.source", d.source, "text", "Eventbrite, Instagram…")}` : "";
+    return screen(`
+      <div class="pad stack">
+        <h2 class="display-l">Add an event</h2>
+        <p class="muted">Paste a link from Eventbrite, Instagram or anywhere, or use a screenshot, and we'll fill in what we can. Or type it in yourself. It goes up as unverified until someone else opens the listing and confirms it's real.</p>
+        <form class="search" data-act="readLink">
+          ${icon("external")}<input type="url" data-bind="shot.link" value="${esc(s.link)}" placeholder="Paste the event's link" aria-label="Event link" enterkeyhint="go">
+          <button class="icon-btn" type="submit" aria-label="Fill in from link">${icon("sparkle")}</button>
+        </form>
+        <label class="btn btn-outline">${icon("camera")}${s.preview ? "Use a different screenshot" : "Use a screenshot"}<input type="file" accept="image/*" data-file="readShot" hidden></label>
+        ${s.open ? "" : btn("Enter it yourself", { "data-act": "manualEvent" }, "ghost", "edit")}
+        ${s.preview ? `<img src="${s.preview}" alt="Your screenshot" style="width:100%;max-height:240px;object-fit:contain;border-radius:14px">` : ""}
+        ${s.loading ? thinking(`Reading your ${s.preview ? "screenshot" : "link"} and looking up the listing${SQ.d.mode === "claude-code" ? " (Claude Code can take a minute)" : ""}…`) : ""}
+        ${s.error ? `<div class="notice hot">${icon("x")}<span>${esc(s.error)}</span></div>` : ""}
+        ${form}
+      </div>`, { title: "Add an event", footer: `<div class="action-bar">${btn("Add as unverified event", { "data-act": "importEvent", disabled: !s.open || s.loading })}</div>` });
   } };
 
   /* ===================== Parties and Crew Blend ===================== */
@@ -672,7 +756,7 @@
       <div class="pad stack">
         <div class="chips">${["Upcoming", "Saved", "Completed"].map((t) => chip(t, tab === t, { "data-act": "setLogTab", "data-arg": t })).join("")}</div>
         ${list}
-      </div>`, { title: "Quest Log", large: true, tabbar: attendeeTabs("questlog") });
+      </div>`, { title: "Quest Log", large: true, right: `<button class="icon-btn" data-act="openWallet" aria-label="Ticket wallet">${icon("wallet")}</button>`, tabbar: attendeeTabs("questlog") });
   } };
 
   S.rate = { role: "attendee", label: "Rate a quest", render: () => {
@@ -714,6 +798,7 @@
         <div class="meta-row"><span class="ic-box">${icon("coat")}</span><span><strong>Coat check and re-entry</strong><span class="small muted">${esc(e.dayInfo.coat)}</span></span></div>
         <div class="card ${last ? "hot" : ""} stack-xs"><span class="row"><span class="label">${icon("megaphone", "sm")} Host update</span>${last ? `<span class="caption muted">${new Date(last.time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>` : ""}</span>
           <p class="small">${last ? esc(last.text) : `No updates from ${esc(e.organizer.name)} yet. They'll show up here live.`}</p></div>
+        ${SQ.ticketFor(e.id) ? btn("Show my ticket", { "data-act": "openTicket", "data-arg": SQ.ticketFor(e.id).id }, "primary", "ticket") : btn("Add my ticket", { "data-act": "addTicket", "data-arg": e.id }, "outline", "ticket")}
         <div class="btn-row">${btn("Group chat", { "data-go": "eventday-chat" }, "secondary", "chat")}${btn("Find my party", { "data-act": "findParty", "data-arg": e.id }, "primary", "users")}</div>
       </div>`, { title: "Event day" });
   } };
