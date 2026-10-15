@@ -131,10 +131,22 @@
     img.onerror = () => reject(new Error("That file isn't an image we can read."));
     img.src = URL.createObjectURL(file);
   });
+  // A fresh form that keeps the link they already pasted (after "we can't read that link")
+  function freshShot() {
+    const link = ((U().shot || {}).link || "").trim();
+    const s = { ...SQ.emptyShot(), link };
+    if (link) {
+      s.draft.sourceUrl = link;
+      try {
+        s.draft.source = SQ.siteName(link);
+      } catch {}
+    }
+    return (U().shot = s);
+  }
   A.readShot = async (_, input) => {
     const file = input.files && input.files[0];
     if (!file) return;
-    const s = (U().shot = SQ.emptyShot());
+    const s = freshShot();
     s.loading = true;
     try {
       s.preview = await shrink(file);
@@ -142,7 +154,7 @@
       const r = await SQ.post("/api/extract", { userId: SQ.userId(), image: s.preview });
       s.mode = r.mode;
       s.error = r.error || null;
-      if (r.draft) Object.assign(s.draft, r.draft);
+      if (r.draft) Object.assign(s.draft, r.draft, { sourceUrl: r.draft.sourceUrl || s.draft.sourceUrl, source: r.draft.source || s.draft.source });
     } catch (err) {
       s.error = err.message;
     }
@@ -165,6 +177,10 @@
       s.mode = r.mode;
       s.error = r.error || null;
       Object.assign(s.draft, r.draft || { sourceUrl: url });
+      if (r.mode === "unsupported") {
+        s.loading = false; // no form: the message points to the screenshot and "Enter it yourself" buttons
+        return;
+      }
     } catch (err) {
       s.error = err.message;
       s.draft.sourceUrl = url;
@@ -173,14 +189,14 @@
     s.open = true;
   };
   A.manualEvent = () => {
-    U().shot = { ...SQ.emptyShot(), open: true };
+    freshShot().open = true;
   };
   A.shotArea = (a) => {
     U().shot.draft.area = U().shot.draft.area === a ? "" : a;
   };
   A.shotVibe = (v) => toggle(U().shot.draft.vibes, v);
   A.importEvent = async () => {
-    const r = await SQ.act("importEvent", { draft: U().shot.draft });
+    const r = await SQ.act("importEvent", { draft: U().shot.draft, screenshot: U().shot.preview || null });
     U().shot = null;
     U().quest = r.eventId;
     toast(r.existing ? "That event is already on Sidequest. Here it is." : "Added as unverified. It's verified once someone else checks the listing.");

@@ -779,7 +779,7 @@ function requireAll(fields, vibes) {
   if (missing.length) throw new Error(`Fill in every field. Missing: ${missing.join(", ")}.`);
   if (!(vibes || []).some((v) => VIBES.includes(v))) throw new Error("Pick at least one vibe.");
 }
-A.importEvent = (ctx, { draft }) => {
+A.importEvent = (ctx, { draft, screenshot }) => {
   const u = needUser(ctx);
   const d = draft || {};
   requireAll({ "event name": d.title, date: d.date, "start time": d.time, "end time": d.endTime, venue: d.venue, address: d.address, area: AREAS.includes(d.area) ? d.area : "", price: d.price, "price details": d.priceNote, organizer: d.organizer, description: d.description, link: d.sourceUrl, "found on": d.source }, d.vibes);
@@ -835,7 +835,8 @@ A.importEvent = (ctx, { draft }) => {
     flags: [],
   };
   db.data.events.push(e);
-  photoFromLink(e, sourceUrl);
+  const shot = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(String(screenshot || ""));
+  photoFromLink(e, sourceUrl, shot && Buffer.from(shot[1], "base64"));
   return { eventId: e.id };
 };
 // Tapping the ticket button: records that this person has seen the original listing
@@ -1194,13 +1195,17 @@ function imageOf(html) {
 }
 // The event's photo from its link (a post's first image, an event page's main image), kept as our own
 // copy since Instagram's image links expire within days. Arrives a moment after the event is saved.
-async function photoFromLink(e, link) {
-  const src = imageOf(await fetchPage(link));
-  if (!src) return;
+// fallback: an image to use when the link has none (the screenshot they added it from)
+async function photoFromLink(e, link, fallback) {
+  let buf = null;
   try {
-    const res = await fetch(src, { signal: AbortSignal.timeout(15000) });
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (!res.ok || buf.length > 8 * 1024 * 1024 || !posters.imageType(buf)) return;
+    const src = imageOf(await fetchPage(link));
+    const res = src && (await fetch(src, { signal: AbortSignal.timeout(15000) }));
+    const got = res && res.ok && Buffer.from(await res.arrayBuffer());
+    if (got && got.length <= 8 * 1024 * 1024 && posters.imageType(got)) buf = got;
+  } catch {}
+  if (!(buf = buf || fallback)) return;
+  try {
     e.image = await posters.savePoster(buf);
     edited();
     db.save();
@@ -1215,9 +1220,13 @@ async function apiFromLink({ userId, url }) {
   const html = await fetchPage(link);
   const ld = jsonLdEvents(html).find((e) => e.name && e.startDate);
   if (ld) return { time: new Date().toISOString(), mode: "listing", draft: draftFromLd(ld, link) };
+  // Pages we can't read (blocked, behind a login, or with nothing about the event on them)
+  const unsupported = { time: new Date().toISOString(), mode: "unsupported", draft: null, error: `We can't read events from ${siteName(link)} links yet. Use a screenshot of the event, or enter the details yourself.` };
   const today = now().toLocaleDateString("en-CA", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "America/Toronto" });
   const text = stripHtml(html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")).slice(0, 8000);
+  if (text.length < 200) return unsupported;
   const out = await ai.extractEvent(null, null, { vibes: VIBES, areas: AREAS, today, link: { url: link, text } });
+  if (out.mode !== "keywords" && !(out.draft && out.draft.title)) return unsupported;
   if (out.draft) Object.assign(out.draft, { sourceUrl: link, source: out.draft.source || siteName(link) }); // the link they shared is the source
   return { time: new Date().toISOString(), ...out };
 }
