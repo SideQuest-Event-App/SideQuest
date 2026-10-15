@@ -58,6 +58,8 @@
     drafting: false,
     msg: { eventId: null, text: "", audience: "attendees" },
     published: null,
+    poster: null, // "Add from a poster": { for: "host" | "attendee", loading, error, result, pick }
+    spotDraft: null, // the attendee's event form, filled from their poster
     theme: store.get("sq1.theme") || "system",
   };
 
@@ -301,6 +303,45 @@
     e.preventDefault();
     run(e.target);
   });
+  // File pickers (<input type="file" data-upload="action">) hand the chosen file to that action
+  screenEl.addEventListener("change", async (e) => {
+    const input = e.target;
+    const name = input.dataset && input.dataset.upload;
+    if (!name || !input.files || !input.files[0]) return;
+    const fn = SQ.actions[name];
+    if (!fn || busy) return;
+    busy = true;
+    let next;
+    try {
+      next = await fn(input.files[0]);
+    } catch (err) {
+      console.error(err);
+    }
+    busy = false;
+    if (typeof next === "string") SQ.go(next);
+    else render(false);
+  });
+  // A photo or screenshot, shrunk to at most 1600px on its long side and sent as JPEG (phone photos are huge)
+  SQ.readImage = (file) => new Promise((resolve, reject) => {
+    if (!/^image\//.test(file.type)) return reject(new Error("Pick a photo or screenshot."));
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", 0.88));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("That image couldn't be opened. Try a JPEG or PNG screenshot."));
+    };
+    img.src = url;
+  });
+
   // Inputs write straight into UI state (data-bind="search.q", "hostReg.team.0.email", …)
   screenEl.addEventListener("input", (e) => {
     const path = e.target.dataset && e.target.dataset.bind;
@@ -369,7 +410,7 @@
     } catch {}
     const u = SQ.d.user;
     const fallback = u ? (u.registered ? "discover" : "ob-vibes") : "landing";
-    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", "search", "host-request", "host-checkin", "host-recap", "host-published", "host-create-dayinfo"].includes(last) ? last : fallback);
+    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", "search", "host-request", "host-checkin", "host-recap", "host-published", "host-create-dayinfo", "spot"].includes(last) ? last : fallback);
     trackScreen(SQ.u.screen, null);
     render(true);
   })();

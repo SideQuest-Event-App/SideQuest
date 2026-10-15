@@ -5,6 +5,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { dedupe } = require("../import/dedupe");
 
 const ROOT = path.join(__dirname, "..");
 const DATA_DIR = path.join(ROOT, "data");
@@ -92,10 +93,11 @@ async function load() {
     await write();
     return data;
   }
-  // A fresh import replaces the listings but keeps accounts, logs, requests and host-published quests
+  // A fresh import replaces the listings but keeps accounts, logs, requests, and the quests hosts published
+  // or claimed and the events members added; where one of those is also in the import, it's kept as one listing
   const fresh = seedEvents();
   if (data.eventsImportedAt !== fresh.importedAt) {
-    data.events = [...fresh.events, ...data.events.filter((e) => e.publishedBy)];
+    data.events = dedupe([...data.events.filter((e) => e.publishedBy || e.submittedBy), ...fresh.events]).events;
     data.eventsImportedAt = fresh.importedAt;
     replaceEvents = true;
     await write();

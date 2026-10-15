@@ -1,0 +1,338 @@
+{
+ "thegarrisonto": {
+  "venue": "The Garrison",
+  "address": "1197 Dundas Street West, Toronto, Ontario M6J 1X3, Canada",
+  "lat": 43.649125,
+  "lng": -79.422352
+ },
+ "backroomcomedyclub": {
+  "venue": "Backroom Comedy Club",
+  "address": "814 Bloor St W, Toronto, ON B, Toronto, ON M6G 1L9",
+  "lat": 43.6627898,
+  "lng": -79.4228141
+ },
+ "keyscomedyclub": {
+  "venue": "Key's Stand up Comedy Club Toronto Improv Bar and Grill",
+  "address": "844 Bloor Street West, Toronto, ON M6G 1M2",
+  "lat": 43.6624772,
+  "lng": -79.4240429
+ },
+ "standardtime.to": {
+  "venue": "Standard Time",
+  "address": "165 Geary Avenue, Toronto, Ontario M6H 2B8, Canada",
+  "lat": 43.669848,
+  "lng": -79.436222
+ },
+ "societyclubhouse": {
+  "venue": "Society Clubhouse",
+  "address": "967 College Street, Toronto, ON M6H 1A6",
+  "lat": 43.6532867,
+  "lng": -79.4271279
+ },
+ "trackandfieldbar": {
+  "venue": "Track & Field",
+  "address": "582 College Street, Toronto, ON M6G 1B3",
+  "lat": 43.6554339,
+  "lng": -79.41331989999999
+ },
+ "hardluckbar": {
+  "venue": "Hard Luck Bar",
+  "address": "772a Dundas Street West, Toronto, Ontario M6J 1V1, Canada",
+  "lat": 43.65215,
+  "lng": -79.407552
+ },
+ "monarchtavern": {
+  "venue": "The Monarch Tavern",
+  "address": "12 Clinton Street, Toronto, Ontario M6J 2N8, Canada",
+  "lat": 43.654032,
+  "lng": -79.413677
+ },
+ "galleryarcturus": {
+  "venue": "Gallery Arcturus",
+  "address": "80 Gerrard Street East, Toronto, ON M5B 1G6",
+  "lat": 43.660075,
+  "lng": -79.37800900000002
+ },
+ "socapcomedy": {
+  "venue": "The Social Capital Theatre",
+  "address": "154 Danforth Avenue 2nd Floor, Toronto, ON M4K 1N1",
+  "lat": 43.676598,
+  "lng": -79.35753019999999
+ },
+ "rivolitoronto": {
+  "venue": "Rivoli Toronto",
+  "address": "334 Queen Street West, Toronto, ON M5V 2A2",
+  "lat": 43.6492669,
+  "lng": -79.39489490000001
+ },
+ "gretabaryyz": {
+  "venue": "GRETA Bar YYZ",
+  "address": "590 King Street West, Toronto, ON M5V 1M3",
+  "lat": 43.6447161,
+  "lng": -79.39957439999999
+ },
+ "wavelengthmusic": {
+  "venue": null
+ },
+ "lulalounge": {
+  "venue": "Lula Lounge",
+  "address": "1585 Dundas Street W, Toronto, ON M6K 1T9",
+  "lat": 43.6496464,
+  "lng": -79.4345494
+ },
+ "barcathedral": {
+  "venue": "Bar Cathedral",
+  "address": "54 The Esplanade, Toronto, ON M5E 1A6",
+  "lat": 43.6471355,
+  "lng": -79.3744061
+ },
+ "mysttoronto": {
+  "venue": "Myst Toronto",
+  "address": "423 College Street, Toronto, ON M5T 1T1",
+  "lat": 43.6562985,
+  "lng": -79.40704439999999
+ },
+ "solunatoronto": {
+  "venue": "Soluna Toronto",
+  "address": "314 Queen Street West, Toronto, ON M5V 2A2",
+  "lat": 43.649458,
+  "lng": -79.3942659
+ },
+ "evergreencanada": {
+  "venue": "Evergreen Brick Works",
+  "address": "550 Bayview Ave, East York, ON, M4W 3X8",
+  "lat": 43.683783348,
+  "lng": -79.365627973
+ },
+ "sweetactiontheatre": {
+  "venue": "Sweet Action Theatre",
+  "address": "180 Shaw Street ##106, Toronto, ON M6J 2W5",
+  "lat": 43.6469436,
+  "lng": -79.417518
+ },
+ "lavelletoronto": {
+  "venue": "Lavelle",
+  "address": "627 King Street West, Toronto, ON M5V 1M5",
+  "lat": 43.6439805,
+  "lng": -79.40152479999999
+ },
+ "bombaesocial": {
+  "venue": "Bombae Social",
+  "address": "3300 Steeles Avenue West #1, Vaughan, ON L4K 4B5",
+  "lat": 43.7743189,
+  "lng": -79.5295897
+ },
+ "houndstoothto": {
+  "venue": "Houndstooth",
+  "address": "818 College Street, Toronto, Ontario M6G 1C8, Canada",
+  "lat": 43.654709,
+  "lng": -79.422216
+ },
+ "batashoemuseum": {
+  "venue": "Bata Shoe Museum",
+  "address": "327 Bloor St W, Toronto, ON, M5S 1W7",
+  "lat": 43.667232212,
+  "lng": -79.400148381
+ },
+ "nickel9distillery": {
+  "venue": "Nickel 9 Distillery",
+  "address": "90 Cawthra Avenue #100, Toronto, ON M6N 3C2",
+  "lat": 43.6707344,
+  "lng": -79.4645713
+ },
+ "canadianstage": {
+  "venue": null
+ },
+ "yogakawa": {
+  "venue": null
+ },
+ "thedrakehotel": {
+  "venue": "The Drake Hotel",
+  "address": "1150 Queen St W, Toronto",
+  "lat": 43.643247,
+  "lng": -79.424521
+ },
+ "horseshoetavern": {
+  "venue": "Horseshoe Tavern",
+  "address": "370 Queen Street West, Toronto, ON M5V 2A2",
+  "lat": 43.6490702,
+  "lng": -79.3958951
+ },
+ "leespalace": {
+  "venue": "Lee's Palace",
+  "address": "529 Bloor Street West, Toronto, ON M5S 1Y5",
+  "lat": 43.6653194,
+  "lng": -79.4095028
+ },
+ "historytoronto": {
+  "venue": "HISTORY",
+  "address": "1663 Queen St E, Toronto",
+  "lat": 43.666703,
+  "lng": -79.313306
+ },
+ "masseyhall": {
+  "venue": "Massey Hall",
+  "address": "178 Victoria St, Toronto",
+  "lat": 43.653967,
+  "lng": -79.378981
+ },
+ "bovinesexclub": {
+  "venue": "Bovine Sex Club",
+  "address": "542 Queen Street West, Toronto, ON M5V 2B5",
+  "lat": 43.6476403,
+  "lng": -79.4027839
+ },
+ "codatoronto": {
+  "venue": "CODA",
+  "address": "794 Bathurst St, Toronto",
+  "lat": 43.665374,
+  "lng": -79.41154
+ },
+ "agotoronto": {
+  "venue": "Art Gallery of Ontario",
+  "address": "317 Dundas St W, Toronto, ON, M5T 1G4",
+  "lat": 43.653511557,
+  "lng": -79.392569777
+ },
+ "mocatoronto": {
+  "venue": "MOCA",
+  "address": "158 Sterling Rd, Toronto",
+  "lat": 43.654614,
+  "lng": -79.445203
+ },
+ "harbourfrontcentre": {
+  "venue": "Harbourfront Centre",
+  "address": "235 Queens Quay W, Toronto, ON, M5J 2G8",
+  "lat": 43.63923186,
+  "lng": -79.383105327
+ },
+ "tiff_net": {
+  "venue": "TIFF Lightbox",
+  "address": "350 King St W, Toronto, ON, M5V 3X5",
+  "lat": 43.646646277,
+  "lng": -79.390400897
+ },
+ "revuecinema": {
+  "venue": "Revue Cinema",
+  "address": "400 Roncesvalles Ave, Toronto",
+  "lat": 43.651037,
+  "lng": -79.45122
+ },
+ "baddogtheatre": {
+  "venue": null
+ },
+ "factorytheatre": {
+  "venue": "Factory Theatre",
+  "address": "125 Bathurst St, Toronto",
+  "lat": 43.645503,
+  "lng": -79.402821
+ },
+ "stacktmarket": {
+  "venue": "STACKT Market",
+  "address": "28 Bathurst St, Toronto, ON, M5V 0R4",
+  "lat": 43.640948,
+  "lng": -79.402169
+ },
+ "hendersonbrewing": {
+  "venue": "Henderson Brewing",
+  "address": "128 Sterling Rd, Toronto",
+  "lat": 43.653603,
+  "lng": -79.445155
+ },
+ "thedakotatavern": {
+  "venue": "The Dakota Tavern",
+  "address": "249 Ossington Ave, Toronto",
+  "lat": 43.649727,
+  "lng": -79.420699
+ },
+ "jazzbistroto": {
+  "venue": "Jazz Bistro",
+  "address": "251 Victoria St, Toronto",
+  "lat": 43.655813,
+  "lng": -79.379061
+ },
+ "dromtaberna": {
+  "venue": "Drom Taberna",
+  "address": "458 Queen St W, Toronto",
+  "lat": 43.648206,
+  "lng": -79.399558
+ },
+ "poetryjazzcafe": {
+  "venue": "Poetry Jazz Cafe",
+  "address": "224 Augusta Ave, Toronto",
+  "lat": 43.654889,
+  "lng": -79.402276
+ },
+ "scotiabankarena": {
+  "venue": "Scotiabank Arena",
+  "address": "40 Bay St., Toronto, ON M5J 3A5, Canada",
+  "lat": 43.643518,
+  "lng": -79.379092
+ },
+ "listeningroomtoronto": {
+  "venue": null
+ },
+ "nina.philflow": {
+  "venue": null
+ },
+ "futurenightlife": {
+  "venue": "Future",
+  "address": "570 Queen Street West, Toronto, ON M5V 2B5",
+  "lat": 43.6475694,
+  "lng": -79.4036115
+ },
+ "torontoshitshow": {
+  "venue": null
+ },
+ "theboardroom.cafe": {
+  "venue": null
+ },
+ "dancewithsandani": {
+  "venue": null
+ },
+ "thepilot_to": {
+  "venue": "The Pilot",
+  "address": "22 Cumberland Street, Toronto, ON M4W 1J5",
+  "lat": 43.6709707,
+  "lng": -79.38826310000002
+ },
+ "rebeltoronto": {
+  "venue": "REBEL",
+  "address": "11 Polson St, Toronto",
+  "lat": 43.64008,
+  "lng": -79.354445
+ },
+ "handlebar_to": {
+  "venue": "Handlebar",
+  "address": "159 Augusta Ave, Toronto",
+  "lat": 43.652823,
+  "lng": -79.401185
+ },
+ "yukyukstoronto": {
+  "venue": "Yuk Yuk's Toronto",
+  "address": "224 Richmond St W, Toronto",
+  "lat": 43.64987,
+  "lng": -79.38836
+ },
+ "thesecondcity": {
+  "venue": "The Second City Toronto",
+  "address": "110 Harbour St, Toronto, ON, M5J 0B7",
+  "lat": 43.641557,
+  "lng": -79.379778
+ },
+ "soulpeppertheatre": {
+  "venue": "Young Centre for the Performing Arts",
+  "address": "Distillery District, 50 Tank House Lane, Toronto",
+  "lat": 43.650852,
+  "lng": -79.35746
+ },
+ "crowstheatre": {
+  "venue": "Streetcar Crowsnest",
+  "address": "345 Carlaw Ave, Toronto",
+  "lat": 43.665197,
+  "lng": -79.341431
+ },
+ "mirvishproductions": {
+  "venue": null
+ }
+}

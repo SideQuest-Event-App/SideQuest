@@ -37,6 +37,7 @@ async function fetchTicketmaster({ start, end, max, log }) {
       for (const e of evs) {
         const c = (e.classifications || [])[0] || {};
         if (c.segment && /Sports/i.test(c.segment.name)) continue; // outside our three scenes
+        if (/\b(upgrade|parking|voucher|gift card)\b|not a concert ticket/i.test(e.name)) continue; // add-ons, not events
         const v = ((e._embedded && e._embedded.venues) || [])[0] || {};
         const pr = (e.priceRanges || [])[0];
         const img = (e.images || []).filter((i) => i.ratio === "16_9" && i.width >= 600).sort((a, b) => a.width - b.width)[0];

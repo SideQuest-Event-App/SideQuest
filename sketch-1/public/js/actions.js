@@ -13,7 +13,8 @@
   };
 
   SQ.defaultReqDraft = () => ({ text: "", origin: (me() && me().origin) || "union", when: "Fridays", size: "2 to 4", budget: me() && me().budget != null ? String(me().budget) : "", source: "manual" });
-  SQ.emptyHostDraft = (over = {}) => ({ title: "", description: "", date: "", time: "20:00", price: "", vibes: [], ticketLink: (SQ.d.host && SQ.d.host.ticketLink) || "", dayInfo: { entrance: "", transit: "", home: "", coat: "" }, fromRequest: null, aiMode: null, ...over });
+  SQ.emptyHostDraft = (over = {}) => ({ title: "", description: "", date: "", time: "20:00", endTime: "", price: "", vibes: [], venue: { name: SQ.d.host && SQ.d.host.type === "Venue" ? SQ.d.host.name : "", address: "" }, image: null, ticketLink: (SQ.d.host && SQ.d.host.ticketLink) || "", dayInfo: { entrance: "", transit: "", home: "", coat: "" }, fromRequest: null, aiMode: null, ...over });
+  SQ.emptySpotDraft = () => ({ title: "", description: "", date: "", time: "20:00", endTime: "", price: "", vibes: [], venue: { name: "", address: "" }, organizer: "", ticketLink: "", image: null });
 
   // ---------- general ----------
   A.toast = (msg) => toast(msg);
@@ -268,16 +269,77 @@
     toast("Approved. Your host tools are unlocked.");
   };
 
+  // ---------- Add from a poster (hosts and attendees) ----------
+  // Fill a form from one of the events read off the poster
+  function fillFrom(target, draft) {
+    const keep = target === "host" ? U().hostDraft : U().spotDraft;
+    const d = JSON.parse(JSON.stringify(draft));
+    if (target === "host") {
+      if (!d.venue.name) d.venue = keep.venue; // a poster without a venue is at the host's own
+      Object.assign(keep, { title: d.title, description: d.description, date: d.date, time: d.time || keep.time, endTime: d.endTime, price: d.price, vibes: d.vibes.length ? d.vibes : keep.vibes, venue: d.venue, image: d.image, ticketLink: d.ticketLink || keep.ticketLink });
+    } else Object.assign(keep, d);
+  }
+  async function readPoster(target, file) {
+    const st = (U().poster = { for: target, loading: true, error: null, result: null, pick: 0 });
+    SQ.render();
+    try {
+      const image = await SQ.readImage(file);
+      st.result = await SQ.post("/api/poster", { userId: SQ.userId(), hostId: SQ.hostId(), image });
+      if (!st.result.events.length) st.error = "We couldn't find an event with a date on that image. You can still fill the form in yourself.";
+      else fillFrom(target, st.result.events[0].draft);
+      if (!st.result.events.length && target === "host") U().hostDraft.image = st.result.image; // still use it as the quest's poster
+    } catch (err) {
+      st.error = err.message;
+    }
+    st.loading = false;
+  }
+  A.posterHost = (file) => readPoster("host", file);
+  A.posterSpot = (file) => readPoster("attendee", file);
+  A.posterPick = (i) => {
+    const st = U().poster;
+    st.pick = Number(i);
+    fillFrom(st.for, st.result.events[st.pick].draft);
+  };
+  A.spotEvent = () => {
+    U().poster = null;
+    U().spotDraft = SQ.emptySpotDraft();
+    return "spot";
+  };
+  A.spotVibe = (v) => toggle(U().spotDraft.vibes, v);
+  A.submitSpot = async () => {
+    const d = U().spotDraft;
+    if (!d.title.trim() || !d.date) return toast("Add a title and a date.");
+    if (!d.venue.name.trim() && !d.venue.address.trim()) return toast("Add the venue or its address, so people can find it.");
+    const r = await SQ.act("submitEvent", { draft: d });
+    toast(r.merged ? "It was already on Sidequest. We added what your poster had that the listing didn't." : "Added. Thanks for sharing it with Toronto.");
+    U().poster = null;
+    U().spotDraft = SQ.emptySpotDraft();
+    U().quest = r.eventId;
+    SQ.u.history = [];
+    return "quest";
+  };
+  A.claimListing = async (id) => {
+    await SQ.act("claimListing", { eventId: Number(id) });
+    toast("It's yours now: it shows in your quests, and you can message the people going.");
+    U().poster = null;
+    U().hostDraft = SQ.emptyHostDraft();
+    U().hostQuest = Number(id);
+    SQ.u.history = [];
+    return "host-quests";
+  };
+
   // ---------- host: create and publish ----------
   A.newDraft = () => {
     U().hostDraft = SQ.emptyHostDraft();
+    U().poster = null;
     return "host-create";
   };
   A.duplicate = (id) => {
     const e = SQ.ev(id);
     const start = new Date(e.startsAt);
     const time = start.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "America/Toronto" });
-    U().hostDraft = SQ.emptyHostDraft({ title: `${e.title} (next one)`, description: e.description, time, price: String(e.price), vibes: [...(e.vibes || [])], ticketLink: e.ticketLink || "", dayInfo: { entrance: e.dayInfo.entrance || "", transit: e.dayInfo.transit || "", home: e.dayInfo.home || "", coat: e.dayInfo.coat || "" } });
+    U().hostDraft = SQ.emptyHostDraft({ title: `${e.title} (next one)`, description: e.description === "N/A" ? "" : e.description, time, price: e.price == null ? "" : String(e.price), vibes: [...(e.vibes || [])], ...(e.venue && { venue: { name: e.venue.name === "N/A" ? "" : e.venue.name, address: e.venue.address === "N/A" ? "" : e.venue.address } }), ticketLink: e.ticketLink || "", dayInfo: { entrance: e.dayInfo.entrance || "", transit: e.dayInfo.transit || "", home: e.dayInfo.home || "", coat: e.dayInfo.coat || "" } });
+    U().poster = null;
     toast("Copied. Pick a new day.");
     return "host-create";
   };
@@ -307,9 +369,11 @@
   };
   A.publish = async () => {
     const r = await SQ.act("publish", { draft: U().hostDraft });
+    if (r.merged) toast("That event was already listed, so we merged your details into it. It's yours now.");
     U().hostQuest = r.eventId;
     U().published = r;
     U().hostDraft = SQ.emptyHostDraft();
+    U().poster = null;
     SQ.u.history = [];
     return "host-published";
   };
@@ -344,6 +408,7 @@
   }
   A.draftFromRequest = (id) => {
     const r = SQ.req(id);
+    U().poster = null;
     U().hostDraft = SQ.emptyHostDraft({ fromRequest: r.id, title: r.text.replace(/^\w/, (c) => c.toUpperCase()), date: nextDateFor(r.when), price: r.budget == null ? "" : String(r.budget) });
     setTimeout(() => A.aiDraft().then(SQ.render), 0); // draft with AI straight away
     return "host-create";

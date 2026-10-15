@@ -434,6 +434,11 @@ button.card { display: block; text-align: left; }
 .timeline li.current { color: var(--sq-text-primary); font-weight: 600; }
 .timeline li.current::before { border-color: var(--sq-accent-hot); }
 .upload { border: 1.5px dashed var(--sq-border-subtle); border-radius: var(--radius-lg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--sq-text-secondary); font-size: var(--size-body-s); font-weight: 600; width: 100%; }
+.poster-upload { position: relative; min-height: 96px; padding: 14px; cursor: pointer; text-align: center; }
+.poster-upload .caption { font-weight: 400; }
+/* The file input stays in the page (so keyboards and screen readers reach it) but invisible; the label is the target */
+.poster-upload input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.poster-upload:focus-within { outline: 2px solid var(--sq-accent-primary); outline-offset: 2px; }
 .day-strip { display: flex; gap: 8px; overflow-x: auto; margin: 0 -20px; padding: 0 20px; scrollbar-width: none; }
 .day-strip::-webkit-scrollbar { display: none; }
 .day { flex: none; width: 54px; padding: 8px 0; border-radius: var(--radius-md); background: var(--sq-bg-surface); border: 1px solid var(--sq-border-subtle); display: flex; flex-direction: column; align-items: center; font-size: var(--size-caption); font-weight: 700; color: var(--sq-text-secondary); text-transform: uppercase; }

@@ -161,5 +161,44 @@ window.SQ = window.SQ || {};
   // The date label with its status badge beside it
   const whenRow = (e) => `<span class="row start" style="gap:8px;flex-wrap:wrap"><span class="label" style="letter-spacing:.04em">${esc(whenLabel(e))}</span>${statusBadge(e)}</span>`;
 
+  // ---------- Add from a poster: the upload, what was read, and "already on Sidequest" ----------
+  const shortDay = (key) => (key ? new Date(`${key}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "No date");
+  function posterPanel(target, action) {
+    const st = SQ.u.poster && SQ.u.poster.for === target ? SQ.u.poster : null;
+    if (st && st.loading) return `<div class="card stack-sm">${thinking("Reading the poster…")}<span class="small muted">Usually 10 to 30 seconds.</span></div>`;
+    const events = st && st.result ? st.result.events : [];
+    const done = target === "host" ? "publish" : "add it";
+    return `<div class="stack-sm">
+      <label class="upload poster-upload">${icon("upload", "lg")}<span>${st && st.result ? "Use a different poster" : "Add from a poster or screenshot"}</span>
+        <span class="caption muted">We read the date, time, venue and price off it</span>
+        <input type="file" accept="image/*" data-upload="${action}"></label>
+      ${st && st.error ? `<div class="notice">${icon("x")}<span>${esc(st.error)}</span></div>` : ""}
+      ${events.length ? `<div class="notice">${icon("sparkle")}<span>Filled in from your poster. Check everything before you ${done}.</span></div>` : ""}
+      ${events.length > 1 ? `<span class="label">This poster lists ${events.length} events. Which one?</span>
+        <div class="chips scroll-x">${events.map((x, i) => chip(`${x.draft.title || "Untitled"} · ${shortDay(x.draft.date)}`, i === st.pick, { "data-act": "posterPick", "data-arg": i })).join("")}</div>` : ""}
+    </div>`;
+  }
+  function posterDuplicate(target) {
+    const st = SQ.u.poster && SQ.u.poster.for === target ? SQ.u.poster : null;
+    const x = st && st.result && st.result.events[st.pick];
+    const e = x && x.duplicateOf ? ev(x.duplicateOf) : null;
+    if (!e) return "";
+    const row = `<div class="row start" style="gap:12px">${poster(e, "thumb")}<span class="stack-xs grow">${whenRow(e)}<strong class="ellipsis">${esc(e.title)}</strong><span class="small muted ellipsis">${esc(e.venue ? e.venue.name : e.neighbourhood)}${e.source ? ` · from ${esc(e.source)}` : ""}</span></span></div>`;
+    if (target === "host") return `<div class="card hot stack-sm">
+      <span class="label">${icon("copy", "sm")} Already on Sidequest</span>
+      ${row}
+      <span class="small">Claim it instead of publishing a copy: it becomes your quest, and people going get your updates.</span>
+      ${btn("Claim this listing", { "data-act": "claimListing", "data-arg": e.id }, "primary sm", "shield")}
+      <span class="caption muted">Publishing anyway merges your details and poster into that listing.</span>
+    </div>`;
+    return `<div class="card hot stack-sm">
+      <span class="label">${icon("copy", "sm")} Already on Sidequest</span>
+      ${row}
+      ${btn("Open it", { "data-act": "openQuest", "data-arg": e.id }, "secondary sm", "chev")}
+      <span class="caption muted">Adding it anyway won't make a copy: it fills in anything your poster has that the listing doesn't.</span>
+    </div>`;
+  }
+
+  Object.assign(SQ, { posterPanel, posterDuplicate });
   Object.assign(SQ, { esc, attr, icon, VIBE_ICON, poster, avatar, avatars, bar, btn, chip, field, textarea, progress, meter, empty, stars, tabs, screen, thinking, aiLabel, aiTag, me, ev, req, now, whenLabel, isToday, isWeekend, priceLabel, trip, tripLabel, originShort, pick, partyNames, partyGoing, isPast, eventStatus, statusBadge, whenRow, hash });
 })();

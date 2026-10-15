@@ -19,6 +19,10 @@ if (fs.existsSync(envPath)) {
 const db = require("./lib/db");
 const ai = require("./lib/ai");
 const { track, flush: flushAnalytics } = require("./lib/analytics");
+const posters = require("./lib/posters");
+const { geocode } = require("./lib/geocode");
+const { findDuplicate, mergeInto } = require("./import/dedupe");
+const { place, travel: travelTo, vibesOf, NA } = require("./import/normalize");
 
 const PORT = process.env.PORT || 3000;
 
@@ -221,10 +225,11 @@ const soonness = (e) => Math.max(0, 1 - (Date.parse(e.startsAt) - now().getTime(
 // ---------- Events: thousands of listings, so they're sent separately and only when they change ----------
 // The version moves when listings are imported, published or ended, someone accepts a quest,
 // or every 10 minutes (so events that have started drop off the feed).
+let eventEdits = 0; // bumped when a listing changes in place (merged with an added event, or claimed by a host)
 function eventsVersion() {
   const d = db.data;
   const ended = d.events.reduce((n, e) => n + (e.ended ? 1 : 0), 0);
-  return [d.createdAt, d.eventsImportedAt, d.events.length, ended, d.logs.going.length, Math.floor(now().getTime() / 600000)].join("|");
+  return [d.createdAt, d.eventsImportedAt, d.events.length, ended, d.logs.going.length, eventEdits, Math.floor(now().getTime() / 600000)].join("|");
 }
 let eventsCache = { version: null, json: null, gzip: null };
 function eventsPayload() {
@@ -531,51 +536,106 @@ A.unclaim = (ctx, { requestId }) => {
   const r = findRequest(requestId);
   if (r && r.claimedBy === h.name && r.status === "claimed") Object.assign(r, { status: "open", claimedBy: null, claimedAt: null });
 };
-A.publish = (ctx, { draft }) => {
-  const h = needHost(ctx);
-  const d = draft || {};
-  const title = clean(d.title, 60);
-  if (!title) throw new Error("Give your quest a title.");
+// ---------- Adding events: hosts publish quests; anyone can add one from a poster ----------
+const POSTER_URL = /^(\/posters\/[0-9a-f]{20}\.(jpg|png|webp|gif)|https:\/\/[a-z0-9.-]+\/storage\/v1\/object\/public\/posters\/[0-9a-f]{20}\.(jpg|png|webp|gif))$/;
+const inGTA = (v) => v && v.lat > 43.35 && v.lat < 44.15 && v.lng > -80.1 && v.lng < -78.8;
+const normName = (s) => String(s || "").toLowerCase().replace(/^the /, "").replace(/[^a-z0-9]/g, "");
+
+// A venue we can put on the map: one already in our listings, else looked up by name and address
+async function placeVenue(name, address) {
+  name = clean(name, 80);
+  address = clean(address, 120);
+  if (!name && !address) return null;
+  const n = normName(name);
+  const known = n && db.data.events.find((e) => e.venue && normName(e.venue.name) === n && inGTA(e.venue));
+  if (known) return { name: known.venue.name, address: address || known.venue.address, lat: known.venue.lat, lng: known.venue.lng };
+  const hit = (name && address && (await geocode(`${name}, ${address}`))) || (address && (await geocode(address))) || (name && (await geocode(name)));
+  return hit && inGTA(hit) ? { name: name || address, address: address || hit.address || NA, lat: hit.lat, lng: hit.lng } : null;
+}
+
+function dateLabelOf(start) {
+  const day = start.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/Toronto" }).replace(",", "");
+  const time = start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Toronto" }).replace(":00", "");
+  return `${day}, ${time}`;
+}
+
+// An event from the create form (typed in, or filled from a poster). Throws with a message the app shows.
+async function eventFromDraft(d, { organizer, fallbackArea }) {
+  const title = clean(d.title, 80);
+  if (!title) throw new Error("Give it a title.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date || "")) throw new Error("Pick a day.");
   const time = /^\d{2}:\d{2}$/.test(d.time || "") ? d.time : "20:00";
-  const start = new Date(`${d.date}T${time}:00-04:00`);
-  const price = budgetOf(d.price) || 0;
-  const area = AREAS.includes(h.area) ? h.area : "Downtown";
-  const vibes = (d.vibes || []).filter((v) => VIBES.includes(v));
-  const [hh, mm] = time.split(":").map(Number);
-  const label = `${start.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/Toronto" }).replace(",", "")}, ${hh % 12 || 12}${mm ? `:${String(mm).padStart(2, "0")}` : ""} ${hh < 12 ? "AM" : "PM"}`;
-  const travel = travelFor(area);
-  const e = {
+  const startsAt = posters.torontoISO(`${d.date}T${time}`);
+  if (!startsAt) throw new Error("That day and time don't exist.");
+  if (Date.parse(startsAt) < now().getTime() - 3600000) throw new Error("That day has already passed.");
+  const endsAt = /^\d{2}:\d{2}$/.test(d.endTime || "") ? posters.torontoISO(`${d.endTime < time ? new Date(Date.parse(`${d.date}T00:00Z`) + 86400000).toISOString().slice(0, 10) : d.date}T${d.endTime}`) : null;
+  const v = d.venue || {};
+  const venue = await placeVenue(v.name, v.address);
+  if (!venue && !fallbackArea) throw new Error("We couldn't find that venue on the map. Add its street address.");
+  const price = budgetOf(d.price);
+  const description = clean(d.description, 600);
+  const picked = (d.vibes || []).filter((x) => VIBES.includes(x));
+  const vibes = picked.length ? picked : vibesOf(`${title} ${description}`);
+  const where = venue ? place(venue.lat, venue.lng) : { neighbourhood: fallbackArea, area: fallbackArea };
+  const start = new Date(startsAt);
+  return {
     id: db.data.events.reduce((m, x) => Math.max(m, x.id), 0) + 1,
     title,
-    date: label,
-    startsAt: start.toISOString(),
-    neighbourhood: area,
-    area,
+    date: dateLabelOf(start),
+    startsAt,
+    endsAt,
+    neighbourhood: where.neighbourhood,
+    area: AREAS.includes(where.area) ? where.area : "Downtown",
+    venue: venue || { name: clean(v.name, 80) || NA, address: clean(v.address, 120) || NA },
     scene: "New on Sidequest",
     price,
-    priceNote: price ? `$${price}` : "Free",
-    description: clean(d.description, 300) || `A new quest from ${h.name}.`,
-    tags: vibes.map((v) => v.toLowerCase()),
+    priceNote: price == null ? NA : price ? `$${price}` : "Free",
+    description: description || NA,
+    tags: vibes.map((x) => x.toLowerCase()),
     vibes,
     rating: null,
     reviews: [],
     going: 0,
     attendees: [],
-    organizer: { name: h.name, rating: null, review: "" },
+    organizer: { name: clean(organizer, 80) || NA, rating: null, review: "" },
     friends: [],
-    travel,
-    ticketLink: clean(d.ticketLink, 200) || h.ticketLink,
+    travel: venue ? travelTo(venue.lat, venue.lng) : travelFor(fallbackArea),
+    ticketLink: posters.asLink(d.ticketLink),
+    image: POSTER_URL.test(d.image || "") ? d.image : null,
     dayInfo: {
-      entrance: clean((d.dayInfo || {}).entrance, 120) || "Main door",
+      entrance: clean((d.dayInfo || {}).entrance, 120) || (venue ? venue.name : "Main door"),
       transit: clean((d.dayInfo || {}).transit, 120),
       home: clean((d.dayInfo || {}).home, 120) || "Subway runs until about 1:30 AM",
       coat: clean((d.dayInfo || {}).coat, 120) || "Ask at the door",
     },
     fromRequest: null,
-    publishedBy: h.id,
     publishedAt: new Date().toISOString(),
   };
+}
+// An upcoming listing this one duplicates, if any
+const duplicateOf = (e) => findDuplicate(e, db.data.events.filter((x) => !isOver(x)));
+
+// A host takes over a listing that's already on Sidequest: it's theirs from now on (and survives re-imports)
+function claimFor(h, e) {
+  Object.assign(e, { organizer: { name: h.name, rating: null, review: "" }, publishedBy: h.id, claimedAt: new Date().toISOString() });
+  eventEdits++;
+}
+
+A.publish = async (ctx, { draft }) => {
+  const h = needHost(ctx);
+  const d = draft || {};
+  const e = await eventFromDraft(d, { organizer: h.name, fallbackArea: AREAS.includes(h.area) ? h.area : "Downtown" });
+  if (!e.ticketLink) e.ticketLink = h.ticketLink;
+  // Already listed (imported, or added by someone else): fill that listing's gaps and make it the host's
+  const dup = d.fromRequest ? null : duplicateOf(e);
+  if (dup) {
+    mergeInto(dup, e);
+    if (e.image && !dup.publishedBy) dup.image = e.image; // the host's own poster wins
+    claimFor(h, dup);
+    return { eventId: dup.id, merged: true, requesters: 0, followers: 0 };
+  }
+  Object.assign(e, { source: "Sidequest", sourceUrl: e.ticketLink, publishedBy: h.id });
+  if (!e.sourceUrl) delete e.source; // nothing to link to: no "Listing details" source line
   db.data.events.push(e);
   const r = d.fromRequest && findRequest(d.fromRequest);
   if (r) {
@@ -592,6 +652,32 @@ A.publish = (ctx, { draft }) => {
   }
   return { eventId: e.id, requesters: r ? r.votes : 0, followers };
 };
+// "This is ours": a host claims a listing that's already on Sidequest instead of publishing a copy
+A.claimListing = (ctx, { eventId }) => {
+  const h = needHost(ctx);
+  const e = findEvent(eventId);
+  if (!e) throw new Error("That listing is gone.");
+  if (e.publishedBy && e.publishedBy !== h.id) throw new Error("Another host already runs this listing.");
+  claimFor(h, e);
+  return { eventId: e.id };
+};
+// An attendee adds an event they spotted (from a poster or screenshot). If it's already listed, the
+// listing gets whatever the poster adds (the poster itself, a price) instead of a copy.
+A.submitEvent = async (ctx, { draft }) => {
+  const u = needUser(ctx);
+  const d = draft || {};
+  const e = await eventFromDraft(d, { organizer: d.organizer });
+  const dup = duplicateOf(e);
+  if (dup) {
+    mergeInto(dup, e);
+    eventEdits++;
+    return { eventId: dup.id, merged: true };
+  }
+  Object.assign(e, { source: "Sidequest member", sourceUrl: e.ticketLink || null, submittedBy: u.id });
+  db.data.events.push(e);
+  return { eventId: e.id };
+};
+
 A.hostMessage = (ctx, { eventId, text, audience }) => {
   const h = needHost(ctx);
   const t = clean(text, 300);
@@ -796,6 +882,51 @@ function limitsSummary(budget, pool, excluded) {
   return { budget, fit: pool.length, total: db.data.events.length, excludedPrice, excludedTravel: Object.keys(excluded).length - excludedPrice };
 }
 
+// "Add from a poster": read an uploaded poster or screenshot, keep a copy, and return form drafts for the
+// events on it, each with the listing it duplicates (if it's already on Sidequest)
+async function apiPoster({ image }) {
+  if (ai.mode() === "keywords") throw new Error("Reading posters needs the AI (Claude Code or an API key), and neither is available right now.");
+  const m = /^data:image\/[a-z+]+;base64,(.+)$/.exec(String(image || ""));
+  if (!m) throw new Error("Upload a photo or screenshot (JPEG, PNG or WebP).");
+  const buf = Buffer.from(m[1], "base64");
+  if (!posters.imageType(buf)) throw new Error("That file isn't a JPEG, PNG, WebP or GIF image.");
+  if (buf.length > 8 * 1024 * 1024) throw new Error("That image is too big (8 MB at most).");
+  const tmp = path.join(require("os").tmpdir(), `sq-upload-${newId()}.${{ "image/png": "png", "image/webp": "webp", "image/gif": "gif" }[posters.imageType(buf)] || "jpg"}`);
+  fs.writeFileSync(tmp, buf);
+  let read;
+  try {
+    read = (await posters.readPosters([{ id: "upload", images: [tmp] }])).upload || { events: [], posterText: "" };
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+  const url = await posters.savePoster(buf);
+  const upcoming = db.data.events.filter((x) => !isOver(x));
+  const events = [];
+  for (const ev of read.events.slice(0, 12)) {
+    const [date, time] = String(ev.start || "").split("T");
+    const draft = {
+      title: clean(ev.title, 80),
+      description: clean(ev.description, 600),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(date || "") ? date : "",
+      time: /^\d{2}:\d{2}/.test(time || "") ? time.slice(0, 5) : "20:00",
+      endTime: /T\d{2}:\d{2}/.test(ev.end || "") ? ev.end.split("T")[1].slice(0, 5) : "",
+      price: ev.price == null || ev.price === "" ? "" : String(ev.price),
+      venue: { name: clean(ev.venue, 80), address: clean(ev.address, 120) },
+      organizer: clean(ev.organizer, 80),
+      ticketLink: posters.asLink(ev.ticketUrl),
+      vibes: vibesOf(`${ev.title} ${ev.description}`),
+      image: url,
+    };
+    // Already on Sidequest? Checked against the venue on the map when we can place it
+    const venue = await placeVenue(draft.venue.name, draft.venue.address);
+    const startsAt = draft.date && posters.torontoISO(`${draft.date}T${draft.time}`);
+    const dup = venue && startsAt ? findDuplicate({ id: -1, title: draft.title, startsAt, venue, image: url }, upcoming) : null;
+    if (venue && !draft.venue.address) draft.venue.address = venue.address === NA ? "" : venue.address;
+    events.push({ draft, duplicateOf: dup ? dup.id : null, placed: !!venue });
+  }
+  return { mode: ai.mode(), image: url, posterText: read.posterText, events };
+}
+
 async function apiDraft({ hostId, requestId }) {
   const host = db.data.hosts[hostId];
   const r = findRequest(requestId);
@@ -830,7 +961,7 @@ function trackAI(route, body, started, out, error) {
     ms: Date.now() - started,
     fresh,
     mode: out && out.mode,
-    results: out ? (out.matches || Object.keys(out.picks || {})).length : 0,
+    results: out ? (out.matches || out.events || Object.keys(out.picks || {})).length : 0,
     unmet: out && out.unmet ? out.unmet.length : 0,
   });
 }
@@ -840,7 +971,16 @@ const SCREEN_ID = /^[a-z0-9-]{1,40}$/;
 function readBody(req) {
   return new Promise((resolve) => {
     let body = "";
-    req.on("data", (c) => (body += c));
+    let tooBig = false;
+    req.on("data", (c) => {
+      if (tooBig) return;
+      body += c;
+      // A poster upload is the biggest thing anyone sends; past that, the request is read as empty
+      if (body.length > 12 * 1024 * 1024) {
+        body = "";
+        tooBig = true;
+      }
+    });
     req.on("end", () => {
       try {
         resolve(JSON.parse(body || "{}"));
@@ -878,7 +1018,7 @@ const server = http.createServer(async (req, res) => {
       const ctx = { user, party: user && db.data.parties[user.id], host: db.data.hosts[hostId] || null };
       let result;
       try {
-        result = fn(ctx, args || {}) || {};
+        result = (await fn(ctx, args || {})) || {};
       } catch (err) {
         trackAction(type, { userId, hostId, sessionId, args, error: err.message });
         return sendJSON(res, 400, { error: err.message });
@@ -896,7 +1036,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/host-report") {
       return sendJSON(res, 200, hostReport(db.data.hosts[url.searchParams.get("host")] || null));
     }
-    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft };
+    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster };
     if (req.method === "POST" && ROUTES[url.pathname]) {
       const body = await readBody(req);
       const route = url.pathname.slice("/api/".length);
@@ -919,6 +1059,17 @@ const server = http.createServer(async (req, res) => {
   } catch (err) {
     console.error(err);
     return sendJSON(res, 500, { error: err.message });
+  }
+
+  // Posters people uploaded (when they're kept on this machine rather than in Supabase Storage)
+  if (req.method === "GET" && url.pathname.startsWith("/posters/")) {
+    const file = posters.localPoster(url.pathname.slice("/posters/".length));
+    if (!file) {
+      res.writeHead(404);
+      return res.end("Not found");
+    }
+    res.writeHead(200, { "content-type": { ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif" }[path.extname(file)] || "image/jpeg", "cache-control": "public, max-age=31536000, immutable" });
+    return fs.createReadStream(file).pipe(res);
   }
 
   // Static files from public/

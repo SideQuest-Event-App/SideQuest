@@ -9,3 +9,9 @@ node_modules/
 
 # OS
 .DS_Store
+
+# Sketch 1 importer caches and downloaded images (re-created by the importer and the app)
+sketch-1/import/.cache/
+sketch-1/import/instagram-images/
+sketch-1/data/posters/
+sketch-1/data/geocode.json

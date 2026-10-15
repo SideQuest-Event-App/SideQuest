@@ -3,7 +3,7 @@
    Inputs use data-bind="path" to write straight into SQ.u (UI state), so typing survives re-renders. */
 (function () {
   const SQ = window.SQ;
-  const { esc, icon, poster, avatar, avatars, btn, chip, field, progress, meter, empty, stars, tabs, screen, thinking, aiTag, me, ev, req, whenLabel, isToday, isWeekend, priceLabel, trip, tripLabel, originShort, pick, partyGoing, isPast, statusBadge, whenRow } = SQ;
+  const { esc, icon, poster, avatar, avatars, btn, chip, field, textarea, progress, meter, empty, stars, tabs, screen, thinking, aiTag, me, ev, req, whenLabel, isToday, isWeekend, priceLabel, trip, tripLabel, originShort, pick, partyGoing, isPast, statusBadge, whenRow } = SQ;
 
   const V = () => SQ.d.vocab;
   const U = () => SQ.u;
@@ -45,7 +45,7 @@
     ["Address", e.venue ? e.venue.address : "N/A"],
     ["Price", e.priceNote || priceLabel(e)],
     ["Organizer", e.organizer.name],
-    ["Image", e.image ? "From the listing" : "N/A"],
+    ["Image", e.image ? (/\/posters\//.test(e.image) ? "Poster" : "From the listing") : "N/A"],
     ["Source", [e.source, ...(e.alsoOn || []).map((o) => o.source)].join(", ")],
   ];
 
@@ -386,7 +386,8 @@
           <span class="label">Listing details</span>
           <dl class="facts">${listingFacts(e).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
         </div>
-        <a class="link" href="${esc(e.sourceUrl)}" target="_blank" rel="noopener">${icon("external", "sm")}Full listing on ${esc(e.source)}</a>
+        ${e.submittedBy ? '<p class="caption muted">Added by a Sidequest member.</p>' : ""}
+        ${e.sourceUrl ? `<a class="link" href="${esc(e.sourceUrl)}" target="_blank" rel="noopener">${icon("external", "sm")}${e.submittedBy || e.publishedBy ? "Tickets and info" : `Full listing on ${esc(e.source)}`}</a>` : ""}
         ${(e.alsoOn || []).map((o) => `<a class="link" href="${esc(o.url)}" target="_blank" rel="noopener">${icon("external", "sm")}Also listed on ${esc(o.source)}</a>`).join("")}` : ""}
         ${going.length || e.going ? `<div class="card stack-sm">
           <span class="label">Who's going</span>
@@ -570,6 +571,7 @@
         <p class="muted">Tell hosts what you want. Upvote what you'd go to. If a host puts it on, you hear first.</p>
         ${news.map((n) => `<button class="notice hot" style="width:100%;text-align:left" data-act="openNotif" data-arg="${n.id}">${icon("flame")}<span><strong>${esc(n.title)}.</strong> ${esc(n.body)}</span></button>`).join("")}
         ${btn("Request a quest", { "data-act": "newRequest" }, "primary", "megaphone")}
+        ${btn("Spotted an event? Add it from a poster", { "data-act": "spotEvent" }, "outline", "camera")}
         ${mine.length ? `<h3 class="section-title">Your requests</h3>${mine.map(requestCard).join("")}` : ""}
         <div class="row"><h3 class="section-title">Trending in Toronto</h3><span class="small muted">${rest.length}</span></div>
         ${rest.map(requestCard).join("")}
@@ -593,6 +595,31 @@
         <div class="chips">${BUDGETS.map(([v, l]) => chip(l, String(d.budget) === v, { "data-act": "reqSet", "data-arg": "budget:" + v })).join("")}</div>
         <p class="small muted">If someone already asked for the same thing, your request adds to theirs so hosts see one strong signal.</p>
       </div>`, { title: "Request a quest", footer: `<div class="action-bar">${btn("Post request", { "data-act": "postRequest" }, "primary", "send")}</div>` });
+  } };
+
+  // Add an event someone spotted: a poster on a pole, a screenshot of a story. The AI fills the form in.
+  S.spot = { role: "attendee", label: "Add an event from a poster", render: () => {
+    const d = U().spotDraft || (U().spotDraft = SQ.emptySpotDraft());
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
+    return screen(`
+      <div class="pad stack">
+        <p class="muted">Saw a poster on a pole, in a café, or on someone's story? Add it so people looking for nights like it can find it.</p>
+        ${SQ.posterPanel("attendee", "posterSpot")}
+        ${SQ.posterDuplicate("attendee")}
+        ${d.image ? poster({ id: "spot", title: d.title || "Your poster", image: d.image }, "", { style: "height:220px" }) : ""}
+        ${field("Title", "spotDraft.title", d.title, "text", "Neon Moths with Cold Lake")}
+        ${field("Date", "spotDraft.date", d.date, "date", "", { min: today })}
+        <div class="btn-row">${field("Start time", "spotDraft.time", d.time, "time")}${field("End time (optional)", "spotDraft.endTime", d.endTime, "time")}</div>
+        ${field("Venue", "spotDraft.venue.name", d.venue.name, "text", "The Garrison")}
+        ${field("Street address", "spotDraft.venue.address", d.venue.address, "text", "1197 Dundas St W")}
+        ${field("Price (CAD, 0 = free, empty if not listed)", "spotDraft.price", d.price, "number", "", { min: 0, inputmode: "numeric" })}
+        ${field("Who's putting it on (optional)", "spotDraft.organizer", d.organizer, "text", "")}
+        ${field("Ticket or info link (optional)", "spotDraft.ticketLink", d.ticketLink, "url", "https://")}
+        ${textarea("Description (optional)", "spotDraft.description", d.description, "Lineup, what to expect")}
+        <h3 class="section-title">Vibes</h3>
+        <div class="chips">${V().VIBES.map((v) => chip(v, d.vibes.includes(v), { "data-act": "spotVibe", "data-arg": v }, SQ.VIBE_ICON[v])).join("")}</div>
+        <p class="small muted">It's listed as added by a Sidequest member. If it's already on Sidequest, your poster fills in the gaps of that listing instead of making a copy.</p>
+      </div>`, { title: "Add an event", footer: `<div class="action-bar">${btn("Add to Sidequest", { "data-act": "submitSpot" }, "primary", "plus")}</div>` });
   } };
 
   S.notifications = { role: "attendee", label: "Notifications", render: () => {
@@ -740,6 +767,7 @@
           <div class="chips">${[["dark", "Dark"], ["light", "Light"], ["system", "System"]].map(([v, l]) => chip(l, theme === v, { "data-act": "setTheme", "data-arg": v })).join("")}</div>
           <span class="small muted">Matching: ${esc(SQ.aiLabel(SQ.d.mode))}${SQ.d.mode === "api" ? ` (${esc(SQ.d.model)})` : ""}</span>
         </section>
+        ${btn("Add an event from a poster", { "data-act": "spotEvent" }, "outline", "camera")}
         ${btn(SQ.hostId() && SQ.d.host ? "Switch to host profile" : "Become a host", { "data-act": "switchToHost" }, "outline", "grid")}
         <button class="link muted center" data-act="signOut">${icon("logout", "sm")}Sign out</button>
       </div>`, { title: "Profile", large: true, tabbar: attendeeTabs("profile") });

@@ -192,9 +192,12 @@
   S["host-create"] = { role: "host", label: "Host: create a quest", render: () => {
     const d = U().hostDraft;
     const r = d.fromRequest ? req(d.fromRequest) : null;
-    const preview = { id: "draft", title: d.title || "Your quest", scene: "New on Sidequest", vibes: d.vibes };
+    const preview = { id: "draft", title: d.title || "Your quest", scene: "New on Sidequest", vibes: d.vibes, image: d.image };
+    const inStrip = nextDays(21).some((x) => x.key === d.date);
     return screen(`
       <div class="pad stack">
+        ${r ? "" : SQ.posterPanel("host", "posterHost")}
+        ${SQ.posterDuplicate("host")}
         ${r ? `<div class="card hot stack-sm">
           <span class="label">${icon("megaphone", "sm")} Linked to a Quest Request</span>
           <strong>"${esc(r.text)}"</strong>
@@ -202,13 +205,18 @@
           ${U().drafting ? thinking("Drafting from the request…") : btn("Draft it with AI", { "data-act": "aiDraft" }, "violet sm", "sparkle")}
           ${d.aiMode ? aiTag(d.aiMode) : ""}
         </div>` : ""}
-        <div style="position:relative">${poster(preview, "", { style: "height:170px" })}
-          <button class="btn btn-secondary sm" style="position:absolute;right:12px;top:12px" data-act="toast" data-arg="Poster upload is out of scope. Sidequest generates art from your title and vibes.">${icon("upload")}Upload poster</button></div>
+        ${r ? `<div style="position:relative">${poster(preview, "", { style: "height:170px" })}</div>` : d.image ? poster(preview, "", { style: "height:220px" }) : ""}
         ${field("Title", "hostDraft.title", d.title, "text", "Name your quest")}
         ${textarea("Description", "hostDraft.description", d.description, "What will people do, see or hear?")}
         <h3 class="section-title">Day</h3>
         <div class="day-strip">${nextDays(21).map((x) => `<button class="day${d.date === x.key ? " on" : ""}" data-act="draftSet" data-arg="date:${x.key}" aria-pressed="${d.date === x.key}">${esc(x.dow)}<strong>${esc(x.num)}</strong></button>`).join("")}</div>
-        <div class="btn-row">${field("Start time", "hostDraft.time", d.time, "time")}${field("Price (CAD, 0 = free)", "hostDraft.price", d.price, "number", "15", { min: 0, inputmode: "numeric" })}</div>
+        ${field(inStrip || !d.date ? "Or pick a later date" : "Date", "hostDraft.date", d.date, "date", "", { min: nextDays(1)[0].key })}
+        <div class="btn-row">${field("Start time", "hostDraft.time", d.time, "time")}${field("End time (optional)", "hostDraft.endTime", d.endTime, "time")}</div>
+        ${field("Price (CAD, 0 = free)", "hostDraft.price", d.price, "number", "15", { min: 0, inputmode: "numeric" })}
+        <h3 class="section-title">Where</h3>
+        ${field("Venue", "hostDraft.venue.name", d.venue.name, "text", "The Garrison")}
+        ${field("Street address", "hostDraft.venue.address", d.venue.address, "text", "1197 Dundas St W")}
+        <p class="small muted">We put it on the map from these, for trip times. Leave them empty to use your neighbourhood.</p>
         <h3 class="section-title">Vibe tags</h3>
         <p class="small muted">These decide whose For You feed it lands in.</p>
         <div class="chips">${V().VIBES.map((v) => chip(v, d.vibes.includes(v), { "data-act": "draftVibe", "data-arg": v }, SQ.VIBE_ICON[v])).join("")}</div>

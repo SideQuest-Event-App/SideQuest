@@ -38,12 +38,20 @@ function strategyBlock() {
 }
 
 // ---------- The two AI backends ----------
-function askClaudeCode(prompt) {
+// files: images for it to look at, copied into a fresh folder it may read (and nothing else)
+function askClaudeCode(prompt, files = []) {
+  let dir = null;
+  const args = ["-p", prompt, "--output-format", "json"];
+  if (files.length) {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "sq-images-"));
+    for (const f of files) fs.copyFileSync(f.path, path.join(dir, f.name));
+    args.push("--allowedTools", "Read");
+  }
   return new Promise((resolve, reject) => {
     const child = execFile(
       "claude",
-      ["-p", prompt, "--output-format", "json"],
-      { cwd: os.tmpdir(), timeout: 120000, maxBuffer: 10 * 1024 * 1024 },
+      args,
+      { cwd: dir || os.tmpdir(), timeout: files.length ? 300000 : 120000, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout, stderr) => {
         let out = null;
         try {
@@ -52,7 +60,7 @@ function askClaudeCode(prompt) {
         if (err || (out && out.is_error)) {
           if (err && err.code === "ENOENT") claudeCodeAvailable = false;
           const cleanStderr = (stderr || "").split("\n").filter((l) => l.trim() && !l.includes("no stdin data received")).join(" ");
-          const reason = (out && out.result) || cleanStderr || (stdout || "").trim() || (err && err.killed ? "it took longer than 2 minutes" : err && err.message) || "unknown error";
+          const reason = (out && out.result) || cleanStderr || (stdout || "").trim() || (err && err.killed ? "it took too long" : err && err.message) || "unknown error";
           console.error("Claude Code error details:", { code: err && err.code, stdout, stderr });
           return reject(new Error(`Claude Code failed: ${reason}`));
         }
@@ -60,14 +68,20 @@ function askClaudeCode(prompt) {
       }
     );
     child.stdin.end(); // so Claude Code doesn't wait for piped input
-  });
+  }).finally(() => dir && fs.rmSync(dir, { recursive: true, force: true }));
 }
 
-async function askAPI(prompt, maxTokens) {
+const MEDIA_TYPES = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif" };
+async function askAPI(prompt, maxTokens, files = []) {
+  // Each image goes in labelled with its file name, so the prompt can refer to it
+  const images = files.flatMap((f) => [
+    { type: "text", text: `Image file ${f.name}:` },
+    { type: "image", source: { type: "base64", media_type: MEDIA_TYPES[path.extname(f.name).toLowerCase()] || "image/jpeg", data: fs.readFileSync(f.path).toString("base64") } },
+  ]);
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages: [{ role: "user", content: files.length ? [...images, { type: "text", text: prompt }] : prompt }] }),
   });
   if (!res.ok) throw new Error(`AI request failed (${res.status}): ${await res.text()}`);
   const data = await res.json();
@@ -75,10 +89,11 @@ async function askAPI(prompt, maxTokens) {
 }
 
 // Ask whichever AI is available and parse its JSON answer. Throws if there's no AI or it fails.
-async function askJSON(prompt, maxTokens = 2000) {
+// files: optional images ([{ name, path }]) for it to read; the prompt refers to them by name.
+async function askJSON(prompt, maxTokens = 2000, files = []) {
   const m = mode();
   if (m === "keywords") throw new Error("No AI available");
-  const text = m === "api" ? await askAPI(prompt, maxTokens) : await askClaudeCode(prompt);
+  const text = m === "api" ? await askAPI(prompt, maxTokens, files) : await askClaudeCode(prompt, files);
   try {
     return JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
   } catch {
@@ -319,4 +334,4 @@ Respond with JSON only, no other text, in this shape:
   );
 }
 
-module.exports = { mode, MODEL, feed, match, draft, wordsOf, coreWords, phrasesOf, haystack };
+module.exports = { mode, MODEL, askJSON, feed, match, draft, wordsOf, coreWords, phrasesOf, haystack };
