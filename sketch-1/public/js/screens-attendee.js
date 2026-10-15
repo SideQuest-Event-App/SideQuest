@@ -495,7 +495,12 @@
         ${SQ.textarea("Description", "shot.draft.description", d.description, "", 3)}
         <span class="label">Vibes (pick at least one)</span>
         <div class="chips" data-req="shot.draft.vibes">${V().VIBES.map((v) => chip(v, d.vibes.includes(v), { "data-act": "shotVibe", "data-arg": v }, SQ.VIBE_ICON[v])).join("")}</div>
-        ${field("Link to the original listing", "shot.draft.sourceUrl", d.sourceUrl, "url", "https://", { required: true })}
+        ${field("Link to the original listing", "shot.draft.sourceUrl", d.sourceUrl, "url", "https://", { required: true, "data-change": "loadCover" })}
+        <span class="label">Cover image</span>
+        ${s.coverLoading ? '<p class="small muted">Looking for the listing\'s photo…</p>'
+          : s.cover ? `<img src="${esc(s.cover)}" alt="Cover image from the listing" style="width:100%;max-height:220px;object-fit:cover;border-radius:14px" onerror="this.nextElementSibling.textContent='The listing has a photo, but it can\\'t be previewed here. It will still be used.';this.remove()"><p class="caption muted">From the listing</p>`
+          : s.preview ? `<img src="${s.preview}" alt="Cover image from your screenshot" style="width:100%;max-height:220px;object-fit:cover;border-radius:14px"><p class="caption muted">Your screenshot${d.sourceUrl ? ", since the listing has no photo we can use" : ""}</p>`
+          : '<p class="small muted">No cover image yet. Add the listing\'s link or use a screenshot.</p>'}
         ${field("Found on", "shot.draft.source", d.source, "text", "Eventbrite, Instagram…")}` : "";
     return screen(`
       <div class="pad stack">

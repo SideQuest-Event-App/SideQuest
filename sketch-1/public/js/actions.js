@@ -155,6 +155,7 @@
       s.mode = r.mode;
       s.error = r.error || null;
       if (r.draft) Object.assign(s.draft, r.draft, { sourceUrl: r.draft.sourceUrl || s.draft.sourceUrl, source: r.draft.source || s.draft.source });
+      if (s.draft.sourceUrl) A.loadCover(s.draft.sourceUrl).then(() => SQ.render());
     } catch (err) {
       s.error = err.message;
     }
@@ -177,6 +178,7 @@
       s.mode = r.mode;
       s.error = r.error || null;
       Object.assign(s.draft, r.draft || { sourceUrl: url });
+      s.cover = (r.draft && r.draft.image) || null;
       if (r.mode === "unsupported") {
         s.loading = false; // no form: the message points to the screenshot and "Enter it yourself" buttons
         return;
@@ -188,8 +190,23 @@
     s.loading = false;
     s.open = true;
   };
+  // The cover preview: the listing's photo for the link in "Link to the original listing"
+  A.loadCover = async (url) => {
+    const s = U().shot;
+    s.cover = null;
+    if (!/^https?:\/\/\S+\.\S+/.test(url.trim())) return;
+    s.coverLoading = true;
+    SQ.render();
+    try {
+      const r = await SQ.post("/api/cover", { userId: SQ.userId(), url: url.trim() });
+      if (s.draft.sourceUrl.trim() === url.trim()) s.cover = r.image;
+    } catch {}
+    s.coverLoading = false;
+  };
   A.manualEvent = () => {
-    freshShot().open = true;
+    const s = freshShot();
+    s.open = true;
+    if (s.link) A.loadCover(s.link).then(() => SQ.render());
   };
   A.shotArea = (a) => {
     U().shot.draft.area = U().shot.draft.area === a ? "" : a;

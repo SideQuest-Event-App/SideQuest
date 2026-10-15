@@ -313,6 +313,13 @@
     await fn(null, e.target);
     render(false);
   });
+  // data-change="action": runs with the input's value once it's changed (on blur or Enter)
+  screenEl.addEventListener("change", async (e) => {
+    const fn = e.target.dataset && SQ.actions[e.target.dataset.change];
+    if (!fn) return;
+    await fn(e.target.value, e.target);
+    render(false);
+  });
   screenEl.addEventListener("submit", (e) => {
     e.preventDefault();
     run(e.target);
