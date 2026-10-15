@@ -490,7 +490,7 @@
         ${field("Address", "shot.draft.address", d.address)}
         <span class="label">Area</span>
         <div class="chips" data-req="shot.draft.area">${V().AREAS.map((a) => chip(a, d.area === a, { "data-act": "shotArea", "data-arg": a })).join("")}</div>
-        <div class="btn-row">${field("Price from (CAD)", "shot.draft.price", d.price, "number", "0 if free", { min: 0, inputmode: "decimal" })}${field("Price details", "shot.draft.priceNote", d.priceNote, "text", "$15 to $25")}</div>
+        <div class="btn-row">${field("Price from (CAD)", "shot.draft.price", d.price, "number", "0 if free", { min: 0, inputmode: "decimal" })}${field("Price to (optional)", "shot.draft.priceTo", d.priceTo, "number", "Top of the range", { min: 0, inputmode: "decimal" })}</div>
         ${field("Organizer", "shot.draft.organizer", d.organizer)}
         ${SQ.textarea("Description", "shot.draft.description", d.description, "", 3)}
         <span class="label">Vibes (pick at least one)</span>
