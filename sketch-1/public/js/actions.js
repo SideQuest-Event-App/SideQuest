@@ -195,7 +195,20 @@
     U().shot.draft.area = U().shot.draft.area === a ? "" : a;
   };
   A.shotVibe = (v) => toggle(U().shot.draft.vibes, v);
+  // Fields of an add-event form (paths into UI state) that are still empty; the form shows them in red
+  SQ.missing = (paths) => paths.filter((p) => {
+    const v = p.split(".").reduce((o, k) => o && o[k], U());
+    return Array.isArray(v) ? !v.length : !String(v == null ? "" : v).trim();
+  });
+  const SHOT_FIELDS = ["shot.draft.title","shot.draft.date","shot.draft.time","shot.draft.endTime","shot.draft.venue","shot.draft.address","shot.draft.area","shot.draft.price","shot.draft.priceNote","shot.draft.organizer","shot.draft.description","shot.draft.vibes","shot.draft.sourceUrl","shot.draft.source"];
+  const SPOT_FIELDS = ["spotDraft.title","spotDraft.date","spotDraft.time","spotDraft.endTime","spotDraft.venue.name","spotDraft.venue.address","spotDraft.price","spotDraft.organizer","spotDraft.ticketLink","spotDraft.description","spotDraft.vibes"];
+  function checkFilled(paths) {
+    U().invalid = SQ.missing(paths);
+    if (U().invalid.length) toast("Fill in the fields marked in red.");
+    return !U().invalid.length;
+  }
   A.importEvent = async () => {
+    if (!checkFilled(SHOT_FIELDS)) return;
     const r = await SQ.act("importEvent", { draft: U().shot.draft, screenshot: U().shot.preview || null });
     U().shot = null;
     U().quest = r.eventId;
@@ -430,6 +443,7 @@
   A.spotVibe = (v) => toggle(U().spotDraft.vibes, v);
   A.submitSpot = async () => {
     const d = U().spotDraft;
+    if (!checkFilled(SPOT_FIELDS)) return;
     const r = await SQ.act("submitEvent", { draft: d });
     toast(r.merged ? "It was already on Sidequest. We added what your poster had that the listing didn't." : "Added. Thanks for sharing it with Toronto.");
     U().poster = null;

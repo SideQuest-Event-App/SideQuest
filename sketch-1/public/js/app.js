@@ -248,6 +248,11 @@
       }
     }
     if (resetScroll) screenEl.focus({ preventScroll: true });
+    // Required fields left empty on submit stay red until filled in
+    if (SQ.u.invalid && SQ.u.invalid.length) {
+      SQ.u.invalid = SQ.missing(SQ.u.invalid);
+      for (const p of SQ.u.invalid) screenEl.querySelectorAll(`[data-bind="${CSS.escape(p)}"], [data-req="${CSS.escape(p)}"]`).forEach((el) => el.classList.add("invalid"));
+    }
     renderSide();
     ensure();
   }
@@ -359,6 +364,7 @@
     let obj = SQ.u;
     for (const k of keys.slice(0, -1)) obj = obj[k];
     obj[keys[keys.length - 1]] = e.target.value;
+    if (e.target.value.trim()) e.target.classList.remove("invalid");
     // Typing the listing's link fills in "Found on", unless they wrote their own
     if (path === "shot.draft.sourceUrl") {
       const d = SQ.u.shot.draft;

@@ -489,12 +489,12 @@
         ${field("Venue", "shot.draft.venue", d.venue)}
         ${field("Address", "shot.draft.address", d.address)}
         <span class="label">Area</span>
-        <div class="chips">${V().AREAS.map((a) => chip(a, d.area === a, { "data-act": "shotArea", "data-arg": a })).join("")}</div>
+        <div class="chips" data-req="shot.draft.area">${V().AREAS.map((a) => chip(a, d.area === a, { "data-act": "shotArea", "data-arg": a })).join("")}</div>
         <div class="btn-row">${field("Price from (CAD)", "shot.draft.price", d.price, "number", "0 if free", { min: 0, inputmode: "decimal" })}${field("Price details", "shot.draft.priceNote", d.priceNote, "text", "$15 to $25")}</div>
         ${field("Organizer", "shot.draft.organizer", d.organizer)}
         ${SQ.textarea("Description", "shot.draft.description", d.description, "", 3)}
         <span class="label">Vibes (pick at least one)</span>
-        <div class="chips">${V().VIBES.map((v) => chip(v, d.vibes.includes(v), { "data-act": "shotVibe", "data-arg": v }, SQ.VIBE_ICON[v])).join("")}</div>
+        <div class="chips" data-req="shot.draft.vibes">${V().VIBES.map((v) => chip(v, d.vibes.includes(v), { "data-act": "shotVibe", "data-arg": v }, SQ.VIBE_ICON[v])).join("")}</div>
         ${field("Link to the original listing", "shot.draft.sourceUrl", d.sourceUrl, "url", "https://", { required: true })}
         ${field("Found on", "shot.draft.source", d.source, "text", "Eventbrite, Instagram…")}` : "";
     return screen(`
@@ -701,7 +701,7 @@
         ${field("Ticket or info link", "spotDraft.ticketLink", d.ticketLink, "url", "https://")}
         ${textarea("Description", "spotDraft.description", d.description, "Lineup, what to expect")}
         <h3 class="section-title">Vibes (pick at least one)</h3>
-        <div class="chips">${V().VIBES.map((v) => chip(v, d.vibes.includes(v), { "data-act": "spotVibe", "data-arg": v }, SQ.VIBE_ICON[v])).join("")}</div>
+        <div class="chips" data-req="spotDraft.vibes">${V().VIBES.map((v) => chip(v, d.vibes.includes(v), { "data-act": "spotVibe", "data-arg": v }, SQ.VIBE_ICON[v])).join("")}</div>
         <p class="small muted">It's listed as added by a Sidequest member. If it's already on Sidequest, your poster fills in the gaps of that listing instead of making a copy.</p>
       </div>`, { title: "Add an event", footer: `<div class="action-bar">${btn("Add to Sidequest", { "data-act": "submitSpot" }, "primary", "plus")}</div>` });
   } };
