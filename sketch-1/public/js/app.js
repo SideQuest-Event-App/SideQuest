@@ -318,6 +318,19 @@
     let obj = SQ.u;
     for (const k of keys.slice(0, -1)) obj = obj[k];
     obj[keys[keys.length - 1]] = e.target.value;
+    // Typing the listing's link fills in "Found on", unless they wrote their own
+    if (path === "shot.draft.sourceUrl") {
+      const d = SQ.u.shot.draft;
+      let site = "";
+      try {
+        site = /^https?:\/\/[^/]+\.[^/]+/.test(d.sourceUrl) ? SQ.siteName(d.sourceUrl) : "";
+      } catch {}
+      if (!d.source || d.source === d.autoSource) {
+        d.source = d.autoSource = site;
+        const el = screenEl.querySelector('[data-bind="shot.draft.source"]');
+        if (el) el.value = site;
+      }
+    }
   });
 
   // ---------- Desktop side panel ----------
