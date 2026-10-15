@@ -21,6 +21,7 @@ const ai = require("./lib/ai");
 const { track, flush: flushAnalytics } = require("./lib/analytics");
 const { jsonLdEvents } = require("./import/fetch");
 const { stripHtml, trimText, place, vibesOf } = require("./import/normalize");
+const siteName = require("./public/js/sites.js"); // shared with the add-event form
 
 const PORT = process.env.PORT || 3000;
 
@@ -738,6 +739,15 @@ A.importEvent = (ctx, { draft }) => {
     flags: [],
   };
   db.data.events.push(e);
+  // The listing's photo arrives a moment later; apps re-fetch events once it's in
+  fetchPage(sourceUrl).then((html) => {
+    const image = imageOf(html);
+    if (image && !e.image) {
+      e.image = image;
+      edited();
+      db.save();
+    }
+  });
   return { eventId: e.id };
 };
 // Tapping the ticket button: records that this person has seen the original listing
@@ -983,11 +993,6 @@ async function apiExtract({ userId, image }) {
 
 // Shared link -> draft event. Event sites (Eventbrite, DICE, Luma, Meetup…) put the event's details in the page as
 // schema.org JSON-LD, so most links need no AI; anything else (or a page that blocks us) goes to the AI.
-const SITES = [[/eventbrite\./, "Eventbrite"], [/dice\.fm/, "DICE"], [/meetup\.com/, "Meetup"], [/lu\.ma|luma\.com/, "Luma"], [/ticketmaster\./, "Ticketmaster"], [/instagram\.com/, "Instagram"], [/facebook\.com|fb\.me/, "Facebook"], [/partiful\.com/, "Partiful"], [/ra\.co/, "Resident Advisor"], [/posh\.vip/, "Posh"], [/universe\.com/, "Universe"], [/showclix|showpass/, "Showpass"]];
-const siteName = (url) => {
-  const host = new URL(url).hostname.replace(/^www\./, "");
-  return (SITES.find(([re]) => re.test(host)) || [, host])[1];
-};
 // "2026-10-30T21:00:00-04:00" -> { date: "2026-10-30", time: "21:00" } in Toronto; a time with no zone is already local
 function torontoParts(iso) {
   if (!iso || isNaN(Date.parse(iso))) return { date: "", time: "" };
@@ -1026,25 +1031,47 @@ function draftFromLd(ld, url) {
     source: siteName(url),
   };
 }
+// ponytail: blocks obvious internal hosts only; a public name that resolves to a private IP still gets through. Resolve and check the IP before deploying somewhere with internal services.
+const publicHost = (link) => {
+  const host = new URL(link).hostname;
+  return !/^(localhost|.*\.(local|internal|localhost))$/i.test(host) && !/^[\d.]+$|:/.test(host);
+};
+// One shared event page's HTML, or "" if it can't be read
+async function fetchPage(link) {
+  if (!publicHost(link)) return "";
+  try {
+    const res = await fetch(link, { headers: { "user-agent": "SidequestSketch/1.0 (reads one event page someone shared)", "accept-language": "en-CA,en;q=0.8" }, redirect: "follow", signal: AbortSignal.timeout(15000) });
+    return res.ok ? (await res.text()).slice(0, 3000000) : "";
+  } catch {
+    return "";
+  }
+}
+// The event's photo: its JSON-LD image, else the og:image sites set for link previews
+function imageOf(html) {
+  const ld = jsonLdEvents(html).find((x) => x.image);
+  const img = ld && [].concat(ld.image)[0];
+  const og = [...html.matchAll(/<meta\b[^>]*>/gi)].map((m) => m[0]).find((t) => /property=["']og:image(:url)?["']/i.test(t));
+  const src = (img && (img.url || img)) || (og && (/content=["']([^"']+)/i.exec(og) || [])[1]);
+  try {
+    const url = new URL(String(src).replace(/&amp;/g, "&"));
+    return /^https?:$/.test(url.protocol) && url.href.length < 1000 ? url.href : null;
+  } catch {
+    return null;
+  }
+}
 async function apiFromLink({ userId, url }) {
   if (!db.data.users[userId]) throw new Error("Sign up first.");
   const link = validUrl(url);
-  // ponytail: blocks obvious internal hosts only; a public name that resolves to a private IP still gets through. Resolve and check the IP before deploying somewhere with internal services.
-  const host = link && new URL(link).hostname;
-  if (!link || /^(localhost|.*\.(local|internal|localhost))$/i.test(host) || /^[\d.]+$|:/.test(host)) throw new Error("Paste the event's web link, like https://www.eventbrite.ca/e/…");
+  if (!link || !publicHost(link)) throw new Error("Paste the event's web link, like https://www.eventbrite.ca/e/…");
   const same = db.data.events.find((e) => e.sourceUrl === link || e.ticketLink === link);
   if (same) return { existingId: same.id };
-  let html = "";
-  try {
-    const res = await fetch(link, { headers: { "user-agent": "SidequestSketch/1.0 (reads one event page someone shared)", "accept-language": "en-CA,en;q=0.8" }, redirect: "follow", signal: AbortSignal.timeout(15000) });
-    if (res.ok) html = (await res.text()).slice(0, 3000000);
-  } catch {}
+  const html = await fetchPage(link);
   const ld = jsonLdEvents(html).find((e) => e.name && e.startDate);
   if (ld) return { time: new Date().toISOString(), mode: "listing", draft: draftFromLd(ld, link) };
   const today = now().toLocaleDateString("en-CA", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "America/Toronto" });
   const text = stripHtml(html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")).slice(0, 8000);
   const out = await ai.extractEvent(null, null, { vibes: VIBES, areas: AREAS, today, link: { url: link, text } });
-  if (out.draft) out.draft.sourceUrl = link; // the link they shared is the source
+  if (out.draft) Object.assign(out.draft, { sourceUrl: link, source: out.draft.source || siteName(link) }); // the link they shared is the source
   return { time: new Date().toISOString(), ...out };
 }
 
