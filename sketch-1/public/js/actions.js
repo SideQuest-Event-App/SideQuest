@@ -414,8 +414,6 @@
   A.spotVibe = (v) => toggle(U().spotDraft.vibes, v);
   A.submitSpot = async () => {
     const d = U().spotDraft;
-    if (!d.title.trim() || !d.date) return toast("Add a title and a date.");
-    if (!d.venue.name.trim() && !d.venue.address.trim()) return toast("Add the venue or its address, so people can find it.");
     const r = await SQ.act("submitEvent", { draft: d });
     toast(r.merged ? "It was already on Sidequest. We added what your poster had that the listing didn't." : "Added. Thanks for sharing it with Toronto.");
     U().poster = null;

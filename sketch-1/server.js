@@ -677,6 +677,8 @@ A.claimListing = (ctx, { eventId }) => {
 A.submitEvent = async (ctx, { draft }) => {
   const u = needUser(ctx);
   const d = draft || {};
+  const v = d.venue || {};
+  requireAll({ title: d.title, date: d.date, "start time": d.time, "end time": d.endTime, venue: v.name, "street address": v.address, price: d.price, organizer: d.organizer, "ticket or info link": posters.asLink(d.ticketLink), description: d.description }, d.vibes);
   const e = await eventFromDraft(d, { organizer: d.organizer });
   const dup = duplicateOf(e);
   if (dup) {
@@ -686,6 +688,7 @@ A.submitEvent = async (ctx, { draft }) => {
   }
   Object.assign(e, { source: "Sidequest member", sourceUrl: e.ticketLink || null, submittedBy: u.id });
   db.data.events.push(e);
+  if (e.ticketLink) photoFromLink(e, e.ticketLink); // the listing's photo replaces the screenshot
   return { eventId: e.id };
 };
 
@@ -770,9 +773,16 @@ const validUrl = (u) => {
   }
 };
 const edited = () => (db.data.eventEdits = (db.data.eventEdits || 0) + 1); // so apps re-fetch events
+// Events people add need every field (no N/A) and at least one vibe
+function requireAll(fields, vibes) {
+  const missing = Object.entries(fields).filter(([, v]) => !String(v == null ? "" : v).trim()).map(([k]) => k);
+  if (missing.length) throw new Error(`Fill in every field. Missing: ${missing.join(", ")}.`);
+  if (!(vibes || []).some((v) => VIBES.includes(v))) throw new Error("Pick at least one vibe.");
+}
 A.importEvent = (ctx, { draft }) => {
   const u = needUser(ctx);
   const d = draft || {};
+  requireAll({ "event name": d.title, date: d.date, "start time": d.time, "end time": d.endTime, venue: d.venue, address: d.address, area: AREAS.includes(d.area) ? d.area : "", price: d.price, "price details": d.priceNote, organizer: d.organizer, description: d.description, link: d.sourceUrl, "found on": d.source }, d.vibes);
   const title = clean(d.title, 60);
   if (!title) throw new Error("Add the event's name.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date || "")) throw new Error("Add the event's date.");
@@ -825,15 +835,7 @@ A.importEvent = (ctx, { draft }) => {
     flags: [],
   };
   db.data.events.push(e);
-  // The listing's photo arrives a moment later; apps re-fetch events once it's in
-  fetchPage(sourceUrl).then((html) => {
-    const image = imageOf(html);
-    if (image && !e.image) {
-      e.image = image;
-      edited();
-      db.save();
-    }
-  });
+  photoFromLink(e, sourceUrl);
   return { eventId: e.id };
 };
 // Tapping the ticket button: records that this person has seen the original listing
@@ -1189,6 +1191,20 @@ function imageOf(html) {
   } catch {
     return null;
   }
+}
+// The event's photo from its link (a post's first image, an event page's main image), kept as our own
+// copy since Instagram's image links expire within days. Arrives a moment after the event is saved.
+async function photoFromLink(e, link) {
+  const src = imageOf(await fetchPage(link));
+  if (!src) return;
+  try {
+    const res = await fetch(src, { signal: AbortSignal.timeout(15000) });
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!res.ok || buf.length > 8 * 1024 * 1024 || !posters.imageType(buf)) return;
+    e.image = await posters.savePoster(buf);
+    edited();
+    db.save();
+  } catch {}
 }
 async function apiFromLink({ userId, url }) {
   if (!db.data.users[userId]) throw new Error("Sign up first.");
