@@ -86,6 +86,7 @@ const toggle = (arr, v) => {
 const findEvent = (id) => db.data.events.find((e) => e.id === Number(id));
 const findRequest = (id) => db.data.requests.find((r) => r.id === Number(id));
 const hostEvents = (host) => db.data.events.filter((e) => e.organizer && e.organizer.name === host.name);
+const money = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2)); // 23.8 -> "23.80"
 const budgetOf = (v) => (v !== "" && v != null && Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : null);
 
 function notify(user, title, body, extra = {}) {
@@ -782,7 +783,7 @@ function requireAll(fields, vibes) {
 A.importEvent = (ctx, { draft, screenshot }) => {
   const u = needUser(ctx);
   const d = draft || {};
-  requireAll({ "event name": d.title, date: d.date, "start time": d.time, "end time": d.endTime, venue: d.venue, address: d.address, area: AREAS.includes(d.area) ? d.area : "", price: d.price, "price details": d.priceNote, organizer: d.organizer, description: d.description, link: d.sourceUrl, "found on": d.source }, d.vibes);
+  requireAll({ "event name": d.title, date: d.date, "start time": d.time, "end time": d.endTime, venue: d.venue, address: d.address, area: AREAS.includes(d.area) ? d.area : "", "price from": d.price, organizer: d.organizer, description: d.description, link: d.sourceUrl, "found on": d.source }, d.vibes);
   const title = clean(d.title, 60);
   if (!title) throw new Error("Add the event's name.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date || "")) throw new Error("Add the event's date.");
@@ -799,6 +800,8 @@ A.importEvent = (ctx, { draft, screenshot }) => {
   if ((end || new Date(start.getTime() + 2 * 3600 * 1000)) < now()) throw new Error("That event has already happened.");
   const area = AREAS.includes(d.area) ? d.area : "Downtown";
   const price = budgetOf(d.price);
+  const priceTo = budgetOf(d.priceTo); // optional: the top of a price range
+  if (priceTo != null && priceTo < price) throw new Error("\"Price to\" can't be lower than \"Price from\".");
   const vibes = (d.vibes || []).filter((v) => VIBES.includes(v)).slice(0, 4);
   const source = clean(d.source, 40) || siteName(sourceUrl);
   const venue = clean(d.venue, 80);
@@ -815,7 +818,7 @@ A.importEvent = (ctx, { draft, screenshot }) => {
     venue: venue ? { name: venue, address: clean(d.address, 120) || "N/A" } : null,
     scene: "Found by the community",
     price,
-    priceNote: clean(d.priceNote, 60) || (price == null ? "N/A" : price ? `$${price}` : "Free"),
+    priceNote: `${price ? `$${money(price)}` : "Free"}${priceTo > price ? ` to $${money(priceTo)}` : ""}`,
     description: clean(d.description, 300) || "N/A",
     tags: vibes.map((v) => v.toLowerCase()),
     vibes,
@@ -1142,8 +1145,9 @@ function draftFromLd(ld, url) {
   const lng = Number(loc.geo && loc.geo.longitude);
   const area = Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng) ? place(lat, lng, addr.addressLocality).area : "";
   // Only CAD prices go in the price field; others (Eventbrite sometimes shows USD) go in the note as-is
-  const offers = [].concat(ld.offers || []).map((o) => ({ low: Number(o.lowPrice != null ? o.lowPrice : o.price), currency: o.priceCurrency || "CAD" })).filter((o) => Number.isFinite(o.low));
+  const offers = [].concat(ld.offers || []).map((o) => ({ low: Number(o.lowPrice != null ? o.lowPrice : o.price), high: Number(o.highPrice != null ? o.highPrice : o.price), currency: o.priceCurrency || "CAD" })).filter((o) => Number.isFinite(o.low));
   const low = offers.length ? offers.reduce((a, b) => (b.low < a.low ? b : a)) : null;
+  const high = Math.max(...offers.filter((o) => o.currency === "CAD" && Number.isFinite(o.high)).map((o) => o.high));
   const org = [].concat(ld.organizer || [])[0];
   const start = torontoParts(ld.startDate);
   const short = ld.endDate && Date.parse(ld.endDate) - Date.parse(ld.startDate) < 86400000; // a multi-day run has no single end time
@@ -1157,7 +1161,7 @@ function draftFromLd(ld, url) {
     address: stripHtml(address).slice(0, 120),
     area: AREAS.includes(area) ? area : "",
     price: low && low.currency === "CAD" ? String(low.low) : "",
-    priceNote: low && low.currency !== "CAD" ? `${low.low} ${low.currency}` : "",
+    priceTo: low && low.currency === "CAD" && high > low.low ? String(high) : "",
     organizer: stripHtml(typeof org === "string" ? org : org && org.name).slice(0, 60),
     description,
     vibes: vibesOf(`${ld.name} ${description}`).filter((v) => VIBES.includes(v)),

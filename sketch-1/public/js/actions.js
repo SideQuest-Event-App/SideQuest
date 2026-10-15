@@ -111,7 +111,7 @@
 
   // ---------- events found by attendees: a link, a screenshot, or typed in -> draft -> unverified event ----------
   // open: the draft form is showing; mode: what filled it ("listing" = the page's own event data, or the AI)
-  SQ.emptyShot = () => ({ link: "", open: false, preview: "", loading: false, error: null, mode: null, draft: { title: "", date: "", time: "", endTime: "", venue: "", address: "", area: "", price: "", priceNote: "", organizer: "", description: "", vibes: [], sourceUrl: "", source: "" } });
+  SQ.emptyShot = () => ({ link: "", open: false, preview: "", loading: false, error: null, mode: null, draft: { title: "", date: "", time: "", endTime: "", venue: "", address: "", area: "", price: "", priceTo: "", organizer: "", description: "", vibes: [], sourceUrl: "", source: "" } });
   A.addEvent = () => {
     U().shot = SQ.emptyShot();
     return "add-event";
@@ -217,7 +217,7 @@
     const v = p.split(".").reduce((o, k) => o && o[k], U());
     return Array.isArray(v) ? !v.length : !String(v == null ? "" : v).trim();
   });
-  const SHOT_FIELDS = ["shot.draft.title","shot.draft.date","shot.draft.time","shot.draft.endTime","shot.draft.venue","shot.draft.address","shot.draft.area","shot.draft.price","shot.draft.priceNote","shot.draft.organizer","shot.draft.description","shot.draft.vibes","shot.draft.sourceUrl","shot.draft.source"];
+  const SHOT_FIELDS = ["shot.draft.title","shot.draft.date","shot.draft.time","shot.draft.endTime","shot.draft.venue","shot.draft.address","shot.draft.area","shot.draft.price","shot.draft.organizer","shot.draft.description","shot.draft.vibes","shot.draft.sourceUrl","shot.draft.source"];
   const SPOT_FIELDS = ["spotDraft.title","spotDraft.date","spotDraft.time","spotDraft.endTime","spotDraft.venue.name","spotDraft.venue.address","spotDraft.price","spotDraft.organizer","spotDraft.ticketLink","spotDraft.description","spotDraft.vibes"];
   function checkFilled(paths) {
     U().invalid = SQ.missing(paths);
