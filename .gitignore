@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 Instagram-API/
+sketch1/data/db.json
 
 # Dependencies
 node_modules/
