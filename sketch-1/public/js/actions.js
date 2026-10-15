@@ -155,6 +155,7 @@
       s.mode = r.mode;
       s.error = r.error || null;
       if (r.draft) Object.assign(s.draft, r.draft, { sourceUrl: r.draft.sourceUrl || s.draft.sourceUrl, source: r.draft.source || s.draft.source });
+      if (s.draft.sourceUrl) A.loadCover(s.draft.sourceUrl).then(() => SQ.render());
     } catch (err) {
       s.error = err.message;
     }
@@ -177,6 +178,7 @@
       s.mode = r.mode;
       s.error = r.error || null;
       Object.assign(s.draft, r.draft || { sourceUrl: url });
+      s.cover = (r.draft && r.draft.image) || null;
       if (r.mode === "unsupported") {
         s.loading = false; // no form: the message points to the screenshot and "Enter it yourself" buttons
         return;
@@ -188,14 +190,42 @@
     s.loading = false;
     s.open = true;
   };
+  // The cover preview: the listing's photo for the link in "Link to the original listing"
+  A.loadCover = async (url) => {
+    const s = U().shot;
+    s.cover = null;
+    if (!/^https?:\/\/\S+\.\S+/.test(url.trim())) return;
+    s.coverLoading = true;
+    SQ.render();
+    try {
+      const r = await SQ.post("/api/cover", { userId: SQ.userId(), url: url.trim() });
+      if (s.draft.sourceUrl.trim() === url.trim()) s.cover = r.image;
+    } catch {}
+    s.coverLoading = false;
+  };
   A.manualEvent = () => {
-    freshShot().open = true;
+    const s = freshShot();
+    s.open = true;
+    if (s.link) A.loadCover(s.link).then(() => SQ.render());
   };
   A.shotArea = (a) => {
     U().shot.draft.area = U().shot.draft.area === a ? "" : a;
   };
   A.shotVibe = (v) => toggle(U().shot.draft.vibes, v);
+  // Fields of an add-event form (paths into UI state) that are still empty; the form shows them in red
+  SQ.missing = (paths) => paths.filter((p) => {
+    const v = p.split(".").reduce((o, k) => o && o[k], U());
+    return Array.isArray(v) ? !v.length : !String(v == null ? "" : v).trim();
+  });
+  const SHOT_FIELDS = ["shot.draft.title","shot.draft.date","shot.draft.time","shot.draft.endTime","shot.draft.venue","shot.draft.address","shot.draft.area","shot.draft.price","shot.draft.priceNote","shot.draft.organizer","shot.draft.description","shot.draft.vibes","shot.draft.sourceUrl","shot.draft.source"];
+  const SPOT_FIELDS = ["spotDraft.title","spotDraft.date","spotDraft.time","spotDraft.endTime","spotDraft.venue.name","spotDraft.venue.address","spotDraft.price","spotDraft.organizer","spotDraft.ticketLink","spotDraft.description","spotDraft.vibes"];
+  function checkFilled(paths) {
+    U().invalid = SQ.missing(paths);
+    if (U().invalid.length) toast("Fill in the fields marked in red.");
+    return !U().invalid.length;
+  }
   A.importEvent = async () => {
+    if (!checkFilled(SHOT_FIELDS)) return;
     const r = await SQ.act("importEvent", { draft: U().shot.draft, screenshot: U().shot.preview || null });
     U().shot = null;
     U().quest = r.eventId;
@@ -430,6 +460,7 @@
   A.spotVibe = (v) => toggle(U().spotDraft.vibes, v);
   A.submitSpot = async () => {
     const d = U().spotDraft;
+    if (!checkFilled(SPOT_FIELDS)) return;
     const r = await SQ.act("submitEvent", { draft: d });
     toast(r.merged ? "It was already on Sidequest. We added what your poster had that the listing didn't." : "Added. Thanks for sharing it with Toronto.");
     U().poster = null;

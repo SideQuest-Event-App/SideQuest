@@ -1211,6 +1211,12 @@ async function photoFromLink(e, link, fallback) {
     db.save();
   } catch {}
 }
+// The cover image a link would give an added event, for the form's preview
+async function apiCover({ userId, url }) {
+  if (!db.data.users[userId]) throw new Error("Sign up first.");
+  const link = validUrl(url);
+  return { image: link && publicHost(link) ? imageOf(await fetchPage(link)) : null };
+}
 async function apiFromLink({ userId, url }) {
   if (!db.data.users[userId]) throw new Error("Sign up first.");
   const link = validUrl(url);
@@ -1219,7 +1225,7 @@ async function apiFromLink({ userId, url }) {
   if (same) return { existingId: same.id };
   const html = await fetchPage(link);
   const ld = jsonLdEvents(html).find((e) => e.name && e.startDate);
-  if (ld) return { time: new Date().toISOString(), mode: "listing", draft: draftFromLd(ld, link) };
+  if (ld) return { time: new Date().toISOString(), mode: "listing", draft: { ...draftFromLd(ld, link), image: imageOf(html) } };
   // Pages we can't read (blocked, behind a login, or with nothing about the event on them)
   const unsupported = { time: new Date().toISOString(), mode: "unsupported", draft: null, error: `We can't read events from ${siteName(link)} links yet. Use a screenshot of the event, or enter the details yourself.` };
   const today = now().toLocaleDateString("en-CA", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "America/Toronto" });
@@ -1227,7 +1233,7 @@ async function apiFromLink({ userId, url }) {
   if (text.length < 200) return unsupported;
   const out = await ai.extractEvent(null, null, { vibes: VIBES, areas: AREAS, today, link: { url: link, text } });
   if (out.mode !== "keywords" && !(out.draft && out.draft.title)) return unsupported;
-  if (out.draft) Object.assign(out.draft, { sourceUrl: link, source: out.draft.source || siteName(link) }); // the link they shared is the source
+  if (out.draft) Object.assign(out.draft, { sourceUrl: link, source: out.draft.source || siteName(link), image: imageOf(html) }); // the link they shared is the source
   return { time: new Date().toISOString(), ...out };
 }
 
@@ -1332,7 +1338,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/host-report") {
       return sendJSON(res, 200, hostReport(db.data.hosts[url.searchParams.get("host")] || null));
     }
-    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster, "/api/extract": apiExtract, "/api/from-link": apiFromLink, "/api/read-ticket": apiReadTicket };
+    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster, "/api/extract": apiExtract, "/api/from-link": apiFromLink, "/api/cover": apiCover, "/api/read-ticket": apiReadTicket };
     if (req.method === "POST" && ROUTES[url.pathname]) {
       const body = await readBody(req);
       const route = url.pathname.slice("/api/".length);
