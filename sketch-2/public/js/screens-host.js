@@ -182,7 +182,7 @@
       .reduce((keep, e) => (keep.length < 10 && keep.every((x) => Math.hypot(x.venue.lat - e.venue.lat, x.venue.lng - e.venue.lng) > 0.004) ? [...keep, e] : keep), []) // spread out, so one busy venue doesn't hide the rest
       .map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, tier: (e.vibes || []).some((v) => vibes.includes(v)) ? "strong" : "close", label: e.title }));
     return screen(`
-      ${SQ.mapView("host-ready", { pins, home: hood ? area : null, labels: true, view: hood ? { x: SQ.projMap(hood[1], hood[2])[0] + 80, y: SQ.projMap(hood[1], hood[2])[1] + 70, z: 1 } : undefined, style: "height:360px" })}
+      ${SQ.mapView("host-ready", { pins, home: hood ? area : null, labels: true, view: hood ? { lat: hood[1] - 0.0068, lng: hood[2] + 0.0106, zoom: 12.4 } : undefined, style: "height:360px" })}
       <div class="ob-body" style="gap:14px;padding-top:24px">
         <span class="t-overline">Your demand map is ready</span>
         <span class="big-num">${people.toLocaleString("en-US")}</span>
@@ -248,7 +248,7 @@
           <div class="week-bars" role="img" aria-label="Requests by day of the week">${days.map((v, i) => `<span class="wb"><i class="${tone(i)}" style="height:${Math.max(12, (v / max) * 130)}px" title="${Math.round(v)} asks"></i><span class="t-data c-tertiary">${DOW[i]}</span></span>`).join("")}</div></div>
         <div class="stack-sm" style="gap:4px">
           <div class="section-header"><span>Top requests</span><button data-act="toggleDemandMap">${showMap ? "List" : "Map"}</button></div>
-          ${showMap ? `<div style="position:relative;margin-top:10px">${SQ.mapView("demand", { pins: open.map(reqPin).filter(Boolean), home: hood ? area : null, labels: true, view: hood ? { x: SQ.projMap(hood[1], hood[2])[0], y: SQ.projMap(hood[1], hood[2])[1], z: 0.8 } : undefined, style: "height:320px;border-radius:20px" })}${SQ.mapZoom("demand")}</div>${SQ.mapLegend()}` : ""}
+          ${showMap ? `<div style="position:relative;margin-top:10px">${SQ.mapView("demand", { pins: open.map(reqPin).filter(Boolean), home: hood ? area : null, labels: true, view: hood ? { lat: hood[1], lng: hood[2], zoom: 12 } : undefined, style: "height:320px;border-radius:20px" })}${SQ.mapZoom("demand")}</div>${SQ.mapLegend()}` : ""}
           ${open.slice(0, showMap ? 3 : 12).map((x) => `<button class="top-req" data-act="openRequest" data-arg="${x.id}">
             <span class="n">${nf(x.votes)}</span><span class="text"><span class="t-title-m">${esc(x.text.replace(/^\w/, (c) => c.toUpperCase()))}</span><span class="t-body-m c-secondary">${SQ.requestMeta(x)}</span></span>
             ${x.status === "claimed" ? SQ.tag(x.claimedBy === hostName() ? "You're on it" : "Planning", "hot") : icon("chevR")}</button>`).join("") || `<p class="t-body-m c-secondary">No open requests yet.</p>`}
