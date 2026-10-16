@@ -314,15 +314,24 @@ function handleIdeas(want, name, except) {
   for (let n = 2; tries.length < 40; n++) tries.push(`${base}${n}`);
   return [...new Set(tries.filter(Boolean))].filter((h) => !handleTaken(h, except)).slice(0, 3).map((h) => "@" + h);
 }
-A.checkUsername = (ctx, { username, name }) => {
+// A phone is its digits, without a leading 1 (so "+1 416..." and "(416)..." match)
+const phoneOf = (s) => String(s || "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+const PHONE_OK = (s) => /^\d{10}$/.test(phoneOf(s));
+// Which of the sign-up email or phone already belongs to another account (attendee or host)
+const linkedTo = (ctx, email, phone) =>
+  email && (Object.values(db.data.users).some((u) => u !== ctx.user && sameEmail(u.email, email)) || Object.values(db.data.hosts).some((h) => sameEmail(h.email, email))) ? "email"
+  : phone && Object.values(db.data.users).some((u) => u !== ctx.user && phoneOf(u.phone) === phoneOf(phone)) ? "phone" : null;
+A.checkSignup = (ctx, { username, name, email, phone }) => {
   const h = handleOf(username);
-  return handleTaken(h, ctx.user) ? { taken: true, suggestions: handleIdeas(h, name, ctx.user) } : { taken: false };
+  return { linked: linkedTo(ctx, clean(email, 80), clean(phone, 30)), suggestions: handleTaken(h, ctx.user) ? handleIdeas(h, name, ctx.user) : null };
 };
 A.signup = (ctx, { name, email, username, phone }) => {
   const e = clean(email, 80);
   if (!clean(name, 30)) throw new Error("Add your name to continue.");
-  if (!EMAIL.test(e)) throw new Error("Enter an email you can get codes at.");
-  if (Object.values(db.data.users).some((u) => u !== ctx.user && sameEmail(u.email, e))) throw new Error("That email already has an account. Log in instead.");
+  if (!EMAIL.test(e)) throw new Error("Invalid email format.");
+  if (clean(phone, 30) && !PHONE_OK(phone)) throw new Error("Invalid phone number.");
+  const linked = linkedTo(ctx, e, clean(phone, 30));
+  if (linked) throw new Error(`${linked === "email" ? "Email" : "Phone"} already linked to an account. Please log in using those credentials.`);
   if (handleTaken(handleOf(username), ctx.user)) throw new Error("That username is taken. Pick another.");
   const user = ctx.user || newUser();
   user.name = clean(name, 30);
