@@ -20,12 +20,11 @@ function seedEvents() {
 
 // Sample friends you can add to a party (not real people), with the taste profile Crew Blend reads.
 const FRIENDS = {
-  Aiko: { vibes: ["Live music", "Jazz", "Film nights", "Records & vinyl"], origin: "union", budget: 20 },
-  Priya: { vibes: ["Climbing", "Run & ride", "Art & making"], origin: "kipling", budget: 40 },
-  Sam: { vibes: ["Comedy", "Games & social", "Climbing"], origin: "finch", budget: 10 },
-  Leila: { vibes: ["Zines & print", "Art & making", "Writing & poetry"], origin: "union", budget: 20 },
-  Zoe: { vibes: ["Dance", "Indie gigs", "Live music"], origin: "kennedy", budget: 20 },
-  Ben: { vibes: ["Outdoors", "Photography", "Run & ride"], origin: "finch", budget: 0 },
+  Maya: { full: "Maya Chen", handle: "@maya.eats", vibes: ["Food & drink", "Live music", "Markets", "Jazz"], origin: "union", budget: 20 },
+  Kai: { full: "Kai Okafor", handle: "@kaiokafor", vibes: ["Dance", "Electronic", "Indie gigs"], origin: "union", budget: 30 },
+  Leila: { full: "Leila Haddad", handle: "@leila.h", vibes: ["Zines & print", "Art & making", "Writing & poetry"], origin: "union", budget: 20 },
+  Sam: { full: "Sam Ito", handle: "@samito", vibes: ["Comedy", "Games & social", "Climbing"], origin: "finch", budget: 10 },
+  Priya: { full: "Priya Nair", handle: "@priya.n", vibes: ["Climbing", "Run & ride", "Art & making"], origin: "kipling", budget: 40 },
 };
 
 function seed() {

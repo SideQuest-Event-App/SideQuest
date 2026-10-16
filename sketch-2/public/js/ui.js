@@ -112,6 +112,10 @@ window.SQ = window.SQ || {};
   // The Sidequest mark (route S + destination dot) and the Geist Light wordmark
   const LOGO_MARK = '<svg class="logo-mark" width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M6.25 24.375H16.25C17.659 24.375 19.0102 23.8153 20.0065 22.819C21.0028 21.8227 21.5625 20.4715 21.5625 19.0625C21.5625 17.6535 21.0028 16.3023 20.0065 15.306C19.0102 14.3097 17.659 13.75 16.25 13.75H13.75C12.341 13.75 10.9898 13.1903 9.9935 12.194C8.99721 11.1977 8.4375 9.84646 8.4375 8.4375C8.4375 7.02854 8.99721 5.67728 9.9935 4.681C10.9898 3.68471 12.341 3.125 13.75 3.125H21.25" stroke="#A97AF2" stroke-width="2.625" stroke-linecap="round"/><path d="M23.75 5.875C25.2688 5.875 26.5 4.64378 26.5 3.125C26.5 1.60622 25.2688 0.375 23.75 0.375C22.2312 0.375 21 1.60622 21 3.125C21 4.64378 22.2312 5.875 23.75 5.875Z" fill="#F28DC8"/></svg>';
   const logo = () => `<span class="logo">${LOGO_MARK}<span>sidequest</span></span>`;
+  // Sixer, the taste guide: the same mark, in ink on the Signature gradient
+  const SIXER_MARK = '<svg viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M6.25 24.375H16.25C17.659 24.375 19.0102 23.8153 20.0065 22.819C21.0028 21.8227 21.5625 20.4715 21.5625 19.0625C21.5625 17.6535 21.0028 16.3023 20.0065 15.306C19.0102 14.3097 17.659 13.75 16.25 13.75H13.75C12.341 13.75 10.9898 13.1903 9.9935 12.194C8.99721 11.1977 8.4375 9.84646 8.4375 8.4375C8.4375 7.02854 8.99721 5.67728 9.9935 4.681C10.9898 3.68471 12.341 3.125 13.75 3.125H21.25" stroke="currentColor" stroke-width="2.625" stroke-linecap="round"/><circle cx="23.75" cy="3.125" r="2.75" fill="currentColor"/></svg>';
+  const sixer = (cls = "") => `<span class="sixer ${cls}">${SIXER_MARK}</span>`;
+  const sixerMsg = (text) => `<div class="sixer-msg">${sixer()}<div class="bubble-s">${esc(text)}</div></div>`;
   // Match tier icons (14px, ink on the pill)
   const TIER = {
     strong: ['Strong match', '<path d="M11.6668 3.5L5.25016 9.91667L2.3335 7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>'],
@@ -130,19 +134,29 @@ window.SQ = window.SQ || {};
     "Live music": "music", Jazz: "music", "Indie gigs": "music", Comedy: "smile", Dance: "sparkle", Electronic: "wave", "Records & vinyl": "disc",
     "Film nights": "film", "Zines & print": "book", "Art & making": "palette", Photography: "camera", "Writing & poetry": "pen", "Tech & coding": "code",
     "Anime & cosplay": "star", Outdoors: "tree", "Run & ride": "bike", Climbing: "peak", "Games & social": "dice",
+    "Food & drink": "heart", Markets: "pin", Wellness: "sun",
   };
 
   // ---------- Posters: the listing's own photo or poster (shown greyscale, per the design); "N/A" when it has none ----------
   const hash = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  // Listings without artwork get the design's photo for their vibe
+  const VIBE_PHOTO = {
+    "Live music": "sax", Jazz: "jazz-band", "Indie gigs": "sax", "Food & drink": "cheers", "Art & making": "bokeh-2", Photography: "bokeh-2", "Writing & poetry": "bokeh-2",
+    Markets: "lanterns", "Zines & print": "lanterns", "Records & vinyl": "sax", Comedy: "bokeh-1", Dance: "performer", Electronic: "performer",
+    Wellness: "blur", "Run & ride": "blur", Climbing: "blur", "Film nights": "hall", "Games & social": "bokeh-3", "Tech & coding": "bokeh-3", "Anime & cosplay": "bokeh-3", Outdoors: "dragon-boat",
+  };
+  const photoUrl = (name) => `assets/photos/${name}.jpg`;
+  const ph = (name, cls = "", style = "") => `<div class="ph ${cls}" style="background-image:url('${photoUrl(name)}');${style}" aria-hidden="true"></div>`;
+  const eventPhoto = (e) => e.image || photoUrl(VIBE_PHOTO[(e.vibes || [])[0]] || "string-lights");
   function poster(e, cls = "", { style = "" } = {}) {
-    if (e.image) return `<div class="poster has-img ${cls}" style="background-image:url('${esc(e.image)}');${style}" role="img" aria-label="${esc(`Image for ${e.title}`)}"></div>`;
-    return `<div class="poster no-img ${cls}" style="${style}"><span class="na">Image: N/A</span></div>`;
+    return `<div class="poster has-img ${cls}" style="background-image:url('${esc(eventPhoto(e))}');${style}" role="img" aria-label="${esc(`Image for ${e.title}`)}"></div>`;
   }
 
   // ---------- Avatars ----------
   // People rotate through Lavender, Aqua and Pink (Figma: Avatar). Sizes: xs 20, s 28, (m) 40, l 64, xl 96
   const AV_TONES = ["", "aqua", "pink"];
-  const avatar = (name, cls = "") => `<span class="av ${AV_TONES[hash(name) % AV_TONES.length]} ${cls}" title="${esc(name)}">${esc(String(name)[0] || "?").toUpperCase()}</span>`;
+  const AV_TONE = { Maya: "pink", Kai: "aqua", Leila: "", Sam: "aqua", Priya: "pink" }; // as the design draws them
+  const avatar = (name, cls = "") => `<span class="av ${AV_TONE[name] ?? AV_TONES[hash(name) % AV_TONES.length]} ${cls}" title="${esc(name)}">${esc(String(name)[0] || "?").toUpperCase()}</span>`;
   const avatars = (names, max = 4, cls = "s") => names.length ? `<span class="avs">${names.slice(0, max).map((n) => avatar(n, cls)).join("")}${names.length > max ? `<span class="av more ${cls}">+${names.length - max}</span>` : ""}</span>` : "";
 
   // ---------- Components ----------
@@ -164,9 +178,9 @@ window.SQ = window.SQ || {};
   const chip = (label, on, a = {}, ic = "") => `<button class="chip${on ? " on" : ""}" aria-pressed="${on ? "true" : "false"}" ${attr(a)}>${ic ? icon(ic) : ""}${esc(label)}</button>`;
   // Figma: Text field. extra.icon puts a leading icon in the box; extra.help adds the helper line under it.
   const field = (label, bind, value = "", type = "text", placeholder = "", extra = {}) => {
-    const { icon: ic, help, ...rest } = extra;
+    const { icon: ic, help, error, ...rest } = extra; // error: red edge, and the message replaces the helper line
     return `
-    <label class="field">${label ? `<span>${esc(label)}</span>` : ""}<span class="field-box">${ic ? icon(ic) : ""}<input type="${type}" data-bind="${bind}" value="${esc(value)}" placeholder="${esc(placeholder)}" ${attr(rest)}></span>${help ? `<span class="field-help">${esc(help)}</span>` : ""}</label>`;
+    <label class="field">${label ? `<span>${esc(label)}</span>` : ""}<span class="field-box${error ? " invalid" : ""}">${ic ? icon(ic) : ""}<input type="${type}" data-bind="${bind}" value="${esc(value)}" placeholder="${esc(placeholder)}" ${attr(rest)}></span>${error || help ? `<span class="field-help${error ? " error" : ""}">${esc(error || help)}</span>` : ""}</label>`;
   };
   const textarea = (label, bind, value = "", placeholder = "", rows = 3) => `
     <label class="field"><span>${esc(label)}</span><textarea data-bind="${bind}" rows="${rows}" placeholder="${esc(placeholder)}">${esc(value)}</textarea></label>`;
@@ -274,6 +288,6 @@ window.SQ = window.SQ || {};
   }
 
   Object.assign(SQ, { posterPanel, posterDuplicate });
-  Object.assign(SQ, { logo, matchTier, matchPill, iconBtn, tag });
+  Object.assign(SQ, { logo, matchTier, matchPill, iconBtn, tag, ph, photoUrl, eventPhoto, VIBE_PHOTO, SIXER_MARK, sixer, sixerMsg });
   Object.assign(SQ, { esc, attr, icon, VIBE_ICON, poster, avatar, avatars, bar, btn, chip, field, textarea, progress, meter, empty, stars, tabs, screen, thinking, aiLabel, aiTag, me, ev, req, now, whenLabel, isToday, isWeekend, priceLabel, trip, tripLabel, originShort, pick, partyNames, partyGoing, isPast, eventStatus, statusBadge, whenRow, hash });
 })();

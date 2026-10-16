@@ -42,8 +42,13 @@
     quest: null,
     hostQuest: null,
     hostRequest: null,
-    signup: { name: "", email: "" },
-    pastText: "",
+    signup: { name: "", username: "", email: "", phone: "" },
+    login: { email: "", code: "", error: null, resendAt: 0, demoCode: null },
+    role: "attendee",
+    vibeText: "",
+    areaText: "",
+    friendText: "",
+    maps: {}, // each map's centre and zoom, so re-renders keep the view
     search: { q: "", ran: "", loading: false, result: null, error: null },
     reqDraft: null,
     rating: { stars: 0, tags: [] },
@@ -170,14 +175,14 @@
       return;
     }
     const wantsFeed = ["discover", "profile", "ob-avatar", "quest", "search"].includes(SQ.u.screen);
-    if (wantsFeed && u && u.vibes.length >= 3 && !SQ.u.feedError && (!u.feed || u.feed.key !== u.feedKey)) loadFeed();
+    if (wantsFeed && u && u.vibes.length >= 2 && !SQ.u.feedError && (!u.feed || u.feed.key !== u.feedKey)) loadFeed();
     const p = SQ.d.party;
     if (SQ.u.screen === "party" && p && p.members.length && !SQ.u.blendError && (!p.blend || p.blend.key !== p.blendKey)) SQ.loadBlend();
   }
 
   // ---------- Navigation ----------
   const ROOTS = ["discover", "parties", "requests", "questlog", "profile", "host-dashboard", "host-quests", "host-demand", "host-audience", "host-messages"];
-  const OPEN = ["landing", "signup", "host-type", "host-login"]; // screens that work signed out
+  const OPEN = ["landing", "role", "login", "login-code", "signup", "host-type", "host-login"]; // screens that work signed out
   // Where you actually land: signed-out users can't open app screens
   function guard(id) {
     const scr = SQ.screens[id];
@@ -252,10 +257,46 @@
       SQ.u.invalid = SQ.missing(SQ.u.invalid);
       for (const p of SQ.u.invalid) screenEl.querySelectorAll(`[data-bind="${CSS.escape(p)}"], [data-req="${CSS.escape(p)}"]`).forEach((el) => el.classList.add("invalid"));
     }
+    SQ.initMaps(screenEl);
     renderSide();
     ensure();
   }
   SQ.render = () => render(false);
+
+  // "Resend code in 0:42": count down, then re-render so the resend button appears
+  setInterval(() => {
+    for (const el of screenEl.querySelectorAll("[data-until]")) {
+      const left = Math.ceil((Number(el.dataset.until) - Date.now()) / 1000);
+      if (left <= 0) return render(false);
+      el.textContent = el.textContent.replace(/\d+:\d\d/, `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`);
+    }
+  }, 1000);
+
+  // "Slide to explore": drag the handle to the end (or tap, or press Enter) to go on
+  screenEl.addEventListener("pointerdown", (e) => {
+    const slider = e.target.closest("[data-slide]");
+    if (!slider) return;
+    const handle = slider.querySelector(".handle");
+    const max = slider.clientWidth - handle.offsetWidth - 12;
+    const x0 = e.clientX;
+    let dx = 0;
+    slider.setPointerCapture(e.pointerId);
+    const move = (ev) => {
+      dx = Math.max(0, Math.min(max, ev.clientX - x0));
+      handle.style.transform = `translateX(${dx}px)`;
+    };
+    const up = () => {
+      slider.removeEventListener("pointermove", move);
+      if (dx > max * 0.7 || dx < 4) SQ.go(slider.dataset.slide);
+      else handle.style.transform = "";
+    };
+    slider.addEventListener("pointermove", move);
+    slider.addEventListener("pointerup", up, { once: true });
+  });
+  screenEl.addEventListener("keydown", (e) => {
+    const slider = e.target.closest && e.target.closest("[data-slide]");
+    if (slider && (e.key === "Enter" || e.key === " ")) SQ.go(slider.dataset.slide);
+  });
 
   let toastTimer;
   function toast(msg) {
@@ -364,6 +405,7 @@
     for (const k of keys.slice(0, -1)) obj = obj[k];
     obj[keys[keys.length - 1]] = e.target.value;
     if (e.target.value.trim()) e.target.classList.remove("invalid");
+    if (e.target.hasAttribute("data-live")) render(false);
     // Typing the listing's link fills in "Found on", unless they wrote their own
     if (path === "shot.draft.sourceUrl") {
       const d = SQ.u.shot.draft;

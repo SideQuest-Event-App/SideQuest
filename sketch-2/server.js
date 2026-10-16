@@ -1,4 +1,4 @@
-// Sketch 1 — Sidequest at higher fidelity: the proposal's attendee and host apps, on a real server.
+// Sketch 2 — Sidequest redesigned from the Figma screens, on Sketch 1's server.
 // Zero dependencies: needs Node 18+ only. Run with `node server.js`.
 
 const http = require("http");
@@ -29,10 +29,12 @@ const siteName = require("./public/js/sites.js"); // shared with the add-event f
 const PORT = process.env.PORT || 3001; // Sketch 1 uses 3000, so both can run at once
 
 // ---------- Shared vocabulary (sent to the app so both sides agree) ----------
-const VIBES = ["Live music", "Jazz", "Indie gigs", "Comedy", "Dance", "Electronic", "Records & vinyl", "Film nights", "Zines & print", "Art & making", "Photography", "Writing & poetry", "Tech & coding", "Anime & cosplay", "Outdoors", "Run & ride", "Climbing", "Games & social"];
+const VIBES = ["Live music", "Jazz", "Indie gigs", "Comedy", "Dance", "Electronic", "Records & vinyl", "Film nights", "Zines & print", "Art & making", "Photography", "Writing & poetry", "Tech & coding", "Anime & cosplay", "Outdoors", "Run & ride", "Climbing", "Games & social", "Food & drink", "Markets", "Wellness"];
 const ORIGINS = { union: "Downtown (Union)", finch: "North York (Finch)", kennedy: "Scarborough (Kennedy)", kipling: "Etobicoke (Kipling)" };
 const AREAS = ["West End", "Downtown", "East End", "Midtown", "North York", "Scarborough", "Etobicoke"];
 const WHEN = ["Weeknights", "Fridays", "Saturdays", "Sundays", "Any time"];
+const WHEN_OUT = ["Mornings", "Afternoons", "Evenings", "Late nights"]; // onboarding: when you go out
+const DAYS = ["Weekdays", "Weekends", "Both"];
 const CREW_SIZES = ["Solo", "2 to 4", "5+"];
 const TRANSIT = ["TTC", "Bike", "Walk", "Drive", "Rideshare"];
 const RATE_TAGS = ["The people", "The vibe", "The price", "Easy to get to", "My crew"];
@@ -126,7 +128,7 @@ function newUser(fields = {}) {
   };
   db.data.users[user.id] = user;
   // Everyone starts with the party from the proposal, already mid-plan
-  const members = ["Aiko", "Priya", "Sam"];
+  const members = ["Maya", "Kai"];
   db.data.parties[user.id] = {
     id: user.id,
     name: "Friday Crew",
@@ -135,8 +137,8 @@ function newUser(fields = {}) {
     poll: [], // quests in the group vote
     locked: null,
     chat: [
-      { from: "Aiko", text: "Friday? I need live music.", time: new Date().toISOString() },
-      { from: "Sam", text: "Down if it's cheap. Comedy also works.", time: new Date().toISOString() },
+      { from: "Maya", text: "Friday? I need live music.", time: new Date().toISOString() },
+      { from: "Kai", text: "Down if it's cheap. Comedy also works.", time: new Date().toISOString() },
     ],
     blend: null,
   };
@@ -266,7 +268,7 @@ function view(userId, hostId) {
     now: now().toISOString(),
     mode: ai.mode(),
     model: ai.MODEL,
-    vocab: { VIBES, ORIGINS, AREAS, WHEN, CREW_SIZES, TRANSIT, RATE_TAGS, HOST_TYPES, PAST_SUGGESTIONS, FLAG_FIELDS },
+    vocab: { VIBES, ORIGINS, AREAS, WHEN, WHEN_OUT, DAYS, CREW_SIZES, TRANSIT, RATE_TAGS, HOST_TYPES, PAST_SUGGESTIONS, FLAG_FIELDS },
     friends: db.FRIENDS,
     user: user && { ...user, feedKey: feedKey(user) },
     party: user && { ...d.parties[user.id], blendKey: blendKey(user) },
@@ -293,11 +295,66 @@ const needHost = (ctx) => {
 };
 
 // --- attendee account and onboarding ---
-A.signup = (ctx, { name, email }) => {
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const sameEmail = (a, b) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+A.signup = (ctx, { name, email, username, phone }) => {
+  const e = clean(email, 80);
+  if (!clean(name, 30)) throw new Error("Add your name to continue.");
+  if (!EMAIL.test(e)) throw new Error("Enter an email you can get codes at.");
+  if (Object.values(db.data.users).some((u) => u !== ctx.user && sameEmail(u.email, e))) throw new Error("That email already has an account. Log in instead.");
   const user = ctx.user || newUser();
-  user.name = clean(name, 30) || "Alex";
-  user.email = clean(email, 80);
+  user.name = clean(name, 30);
+  user.email = e;
+  user.username = clean(username, 30).replace(/^@?/, "@").replace(/^@$/, "");
+  user.phone = clean(phone, 30);
   return { userId: user.id };
+};
+
+// --- log in: an emailed 6-digit code, for attendee and host accounts alike ---
+// With Supabase set up, Supabase Auth emails the code (its "Magic Link" email template needs {{ .Token }}).
+// Without it there's no email service, so the code comes back to the app and shows in the side panel.
+const CODE_MINUTES = 10;
+const codes = new Map(); // email -> { code, expires, tries } (demo codes only; Supabase keeps its own)
+const accountsFor = (email) => ({
+  user: Object.values(db.data.users).find((u) => sameEmail(u.email, email)) || null,
+  host: Object.values(db.data.hosts).find((h) => sameEmail(h.email, email)) || null,
+});
+async function supabaseAuth(route, body) {
+  const res = await fetch(`${process.env.SUPABASE_URL}/auth/v1/${route}`, { method: "POST", headers: { apikey: process.env.SUPABASE_SECRET_KEY, "content-type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).msg || "").includes("rate") ? "Too many codes sent. Wait a minute, then resend." : "The code didn't go through. Try again.");
+}
+const useSupabaseAuth = () => !!(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY);
+A.requestCode = async (ctx, { email }) => {
+  const e = clean(email, 80).toLowerCase();
+  if (!EMAIL.test(e)) throw new Error("Enter the email on your account.");
+  const { user, host } = accountsFor(e);
+  if (!user && !host) throw new Error("No account uses that email. Check it, or create an account.");
+  const expires = Date.now() + CODE_MINUTES * 60000;
+  if (useSupabaseAuth()) {
+    await supabaseAuth("otp", { email: e, create_user: true });
+    return { sent: true, expires };
+  }
+  const code = String(crypto.randomInt(0, 1e6)).padStart(6, "0");
+  codes.set(e, { code, expires, tries: 0 });
+  return { sent: true, expires, demoCode: code };
+};
+A.verifyCode = async (ctx, { email, code }) => {
+  const e = clean(email, 80).toLowerCase();
+  const c = String(code || "").replace(/\D/g, "");
+  if (c.length !== 6) throw new Error("Enter all 6 digits.");
+  if (useSupabaseAuth()) {
+    await supabaseAuth("verify", { type: "email", email: e, token: c }).catch(() => {
+      throw new Error("That code isn't right, or it expired.");
+    });
+  } else {
+    const sent = codes.get(e);
+    if (!sent || Date.now() > sent.expires) throw new Error("That code expired. Send a new one.");
+    if (++sent.tries > 5) throw new Error("Too many tries. Send a new code.");
+    if (!crypto.timingSafeEqual(Buffer.from(sent.code), Buffer.from(c))) throw new Error("That code isn't right. Check the email and try again.");
+    codes.delete(e);
+  }
+  const { user, host } = accountsFor(e);
+  return { userId: user ? user.id : undefined, hostId: host ? host.id : undefined, role: user ? "attendee" : "host" };
 };
 A.demoLogin = () => {
   const user = newUser({ name: "Alex", email: "alex@email.com", registered: true, contactsSynced: true, vibes: ["Live music", "Jazz", "Zines & print", "Comedy"], past: ["Nuit Blanche 2025", "Toronto Zine Fair"], origin: "union", transit: "TTC", budget: 20 });
@@ -307,6 +364,12 @@ A.setProfile = (ctx, args) => {
   const u = needUser(ctx);
   if (args.toggleVibe && VIBES.includes(args.toggleVibe)) toggle(u.vibes, args.toggleVibe);
   if (args.togglePast) toggle(u.past, clean(args.togglePast, 60));
+  if (Array.isArray(args.vibes)) u.vibes = [...new Set(args.vibes.map((v) => clean(v, 30)).filter(Boolean))].slice(0, 40);
+  if (args.addVibe && clean(args.addVibe, 30) && !u.vibes.includes(clean(args.addVibe, 30))) u.vibes.push(clean(args.addVibe, 30)); // "More vibes: jazz, ramen, pottery…"
+  if (args.toggleWhen && WHEN_OUT.includes(args.toggleWhen)) toggle((u.whenOut = u.whenOut || []), args.toggleWhen);
+  if (args.days !== undefined && DAYS.includes(args.days)) u.days = args.days;
+  if (args.toggleArea) toggle((u.areas = u.areas || []), clean(args.toggleArea, 40));
+  if (args.homeArea !== undefined) u.homeArea = clean(args.homeArea, 40);
   if (args.contactsSynced) u.contactsSynced = true;
   if (args.origin !== undefined && (args.origin === "" || ORIGINS[args.origin])) u.origin = args.origin;
   if (args.transit !== undefined && TRANSIT.includes(args.transit)) u.transit = args.transit;
@@ -314,7 +377,7 @@ A.setProfile = (ctx, args) => {
   if (args.maxMinutes !== undefined) u.maxMinutes = Number(args.maxMinutes) || null;
   if (args.name !== undefined) u.name = clean(args.name, 30) || u.name;
   if (args.registered) {
-    if (u.vibes.length < 3) throw new Error("Pick at least 3 vibes first.");
+    if (u.vibes.length < 2) throw new Error("Pick at least 2 vibes first.");
     u.registered = true;
   }
 };
@@ -1243,7 +1306,7 @@ async function apiFromLink({ userId, url }) {
 
 // ---------- Tiny web server ----------
 // ---------- Analytics: what each action records (ids, choices and counts; never names, emails or text) ----------
-const SAFE_ARGS = ["real", "field", "eventId", "requestId", "stars", "tags", "attended", "audience", "size", "when", "source", "origin", "transit", "budget", "maxMinutes", "registered", "toggleVibe", "type", "area", "submit"];
+const SAFE_ARGS = ["real", "field", "eventId", "requestId", "stars", "tags", "attended", "audience", "size", "when", "source", "origin", "transit", "budget", "maxMinutes", "registered", "toggleVibe", "type", "area", "submit", "toggleWhen", "days"];
 const SAFE_RESULT = ["added", "existing", "status", "flags", "eventId", "requestId", "merged", "votes", "learned", "told", "reached", "requesters", "followers"];
 const DEMO_ACTIONS = ["demoLogin", "hostLoginAs", "hostApprove", "skipToAfter", "reset"]; // sketch shortcuts, left out of real numbers
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj && obj[k] !== undefined).map((k) => [k, obj[k]]));
@@ -1392,7 +1455,7 @@ const server = http.createServer(async (req, res) => {
 
 // Load the database (from Supabase or data/db.json) before taking requests
 db.load().then(() => server.listen(PORT, () => {
-  console.log(`Sketch 1 running at http://localhost:${PORT}`);
+  console.log(`Sketch 2 running at http://localhost:${PORT}`);
   console.log(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY ? "Database: Supabase" : "Database: data/db.json (no Supabase keys in .env)");
   const m = ai.mode();
   if (m === "api") console.log(`Matching with AI via the Anthropic API (${ai.MODEL})`);

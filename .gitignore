@@ -16,3 +16,6 @@ sketch-1/import/.cache/
 sketch-1/import/instagram-images/
 sketch-1/data/posters/
 sketch-1/data/geocode.json
+
+# Sketch 2 local database and generated files
+sketch-2/data/

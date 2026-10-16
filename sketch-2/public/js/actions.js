@@ -1,4 +1,4 @@
-/* Sketch 1 — actions. Each is (arg, el) => optional next screen id (may be async).
+/* Sketch 2 — actions. Each is (arg, el) => optional next screen id (may be async).
    Anything that changes data goes to the server with SQ.act(type, args); the rest is UI state in SQ.u. */
 (function () {
   const SQ = window.SQ;
@@ -26,22 +26,76 @@
     return "discover";
   };
   A.signup = async () => {
-    if (!U().signup.name.trim()) return toast("Add your name to continue.");
     await SQ.act("signup", U().signup);
     return "ob-vibes";
   };
-  A.toggleVibe = (v) => SQ.act("setProfile", { toggleVibe: v });
-  A.vibesNext = () => (me().vibes.length < 3 ? toast("Pick at least 3 vibes to continue.") : "ob-past");
-  A.togglePast = (v) => SQ.act("setProfile", { togglePast: v });
-  A.addPast = async () => {
-    const t = U().pastText.trim();
-    if (!t) return;
-    if (!me().past.includes(t)) await SQ.act("setProfile", { togglePast: t });
-    U().pastText = "";
+  // Log in: email -> 6-digit code -> whichever account (attendee or host) uses that email
+  A.requestCode = async () => {
+    const l = U().login;
+    l.error = null;
+    try {
+      const r = await SQ.post("/api/act", { type: "requestCode", args: { email: l.email } }).then((x) => x.result);
+      Object.assign(l, { code: "", demoCode: r.demoCode || null, resendAt: Date.now() + 60000 });
+      SQ.render();
+      return "login-code";
+    } catch (err) {
+      l.error = err.message;
+    }
   };
+  A.verifyCode = async () => {
+    const l = U().login;
+    l.error = null;
+    try {
+      const r = (await SQ.post("/api/act", { type: "verifyCode", args: { email: l.email, code: l.code } })).result;
+      SQ.setIds({ user: r.userId, host: r.hostId });
+      await SQ.refresh();
+      Object.assign(l, { code: "", demoCode: null });
+      return r.role === "host" ? "host-dashboard" : me() && me().registered ? "discover" : "ob-vibes";
+    } catch (err) {
+      l.error = err.message;
+    }
+  };
+  A.setRole = (r) => {
+    U().role = r;
+  };
+  A.roleNext = () => (U().role === "host" ? "host-type" : "signup");
+  // A vibe tile stands for several vibes: picking it adds them all, unpicking removes them
+  A.toggleTile = (label) => {
+    const t = SQ.TILES.find((x) => x[0] === label);
+    const v = me().vibes;
+    const on = t[2].some((x) => v.includes(x));
+    return SQ.act("setProfile", { vibes: on ? v.filter((x) => !t[2].includes(x)) : [...v, ...t[2]] });
+  };
+  A.toggleVibe = (v) => SQ.act("setProfile", { vibes: me().vibes.includes(v) ? me().vibes.filter((x) => x !== v) : [...me().vibes, v] });
+  A.addVibe = async () => {
+    const t = U().vibeText.trim();
+    if (!t) return;
+    for (const v of t.split(/,\s*/).filter(Boolean)) await SQ.act("setProfile", { addVibe: v });
+    U().vibeText = "";
+  };
+  A.vibesNext = () => (me().vibes.length < 2 ? toast("Pick two or more to continue.") : "ob-past");
+  A.togglePast = (v) => SQ.act("setProfile", { togglePast: v });
+  A.toggleWhen = (w) => SQ.act("setProfile", { toggleWhen: w });
+  A.setDays = (d) => SQ.act("setProfile", { days: d });
+  // The first area picked is home; trip times start from the station nearest it
+  A.toggleArea = (name) => {
+    const u = me();
+    const areas = u.areas || [];
+    const rest = areas.filter((a) => a !== name);
+    const home = areas.includes(name) ? (u.homeArea === name ? rest[0] || "" : u.homeArea) : u.homeArea || name;
+    const h = SQ.HOODS.find((x) => x[0] === home);
+    return SQ.act("setProfile", { toggleArea: name, homeArea: home, origin: h ? h[3] : u.origin });
+  };
+  A.addArea = async () => {
+    const q = U().areaText.trim().toLowerCase();
+    const h = q && SQ.HOODS.find((x) => x[0].toLowerCase().includes(q));
+    if (!h) return q && toast("That neighbourhood isn't on the map yet.");
+    U().areaText = "";
+    if (!(me().areas || []).includes(h[0])) await A.toggleArea(h[0]);
+  };
+  A.findFriend = () => {};
   A.syncContacts = async () => {
     await SQ.act("setProfile", { contactsSynced: true });
-    toast(`Contacts synced. ${Object.keys(SQ.d.friends).length} friends found.`);
   };
   A.toggleMember = (name) => SQ.act("toggleMember", { name });
   A.setOrigin = (o) => SQ.act("setProfile", { origin: o });

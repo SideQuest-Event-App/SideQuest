@@ -500,15 +500,6 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .venue .pin.you { background: var(--sq-accent-primary); left: 46%; top: 120px; }
 .venue .pin.you::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid var(--sq-text-primary); }
 
-/* City map (discover) */
-.citymap { position: relative; height: 470px; border-radius: var(--radius-lg); overflow: hidden; background: var(--sq-bg-surface); border: 1px solid var(--sq-border-subtle); }
-.citymap svg.base { position: absolute; inset: 0; width: 100%; height: 100%; }
-.citymap .mpin { position: absolute; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; }
-.citymap .mpin b { padding: 4px 8px; border-radius: var(--radius-pill); background: var(--sq-accent-hot); color: var(--sq-text-on-hot); font-size: 11px; font-weight: 800; white-space: nowrap; }
-.citymap .mpin.lime b { background: var(--sq-bg-surface); color: var(--sq-text-primary); border: 2px solid var(--sq-text-primary); }
-.citymap .mpin i { width: 2px; height: 8px; background: var(--sq-accent-hot); }
-.citymap .mpin.lime i { background: var(--sq-accent-primary); }
-.citymap .you { position: absolute; width: 16px; height: 16px; margin: -8px; border-radius: 50%; background: var(--sq-accent-secondary); border: 3px solid #fff; }
 
 /* Stars */
 .stars { display: flex; gap: 6px; justify-content: center; }
@@ -528,7 +519,6 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .skeleton { border-radius: var(--radius-lg); background: var(--sq-bg-elevated); }
 
-.taste-orb { width: 132px; height: 132px; border-radius: 50%; margin: 0 auto; background: var(--sq-bg-elevated); border: 2px solid var(--sq-text-secondary); }
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .story { display: flex; flex-direction: column; gap: 6px; text-align: left; }
@@ -554,14 +544,6 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .day strong { font-family: var(--font-display); font-size: 20px; color: var(--sq-text-primary); }
 .day.on { background: var(--sq-accent-primary); border-color: var(--sq-accent-primary); color: var(--sq-text-on-accent); }
 .day.on strong { color: var(--sq-text-on-accent); }
-.landing-collage { position: relative; height: 330px; margin: 0 -20px; }
-.landing-collage .poster { position: absolute; width: 170px; height: 220px; border: 2px solid var(--sq-bg-base); }
-.landing-collage .p1 { left: 20px; top: 40px; }
-.landing-collage .p2 { left: 110px; top: 10px; z-index: 2; }
-.landing-collage .p3 { right: 14px; top: 70px; }
-.landing-collage .badge { position: absolute; z-index: 3; }
-.brand-mark { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 800; }
-.brand-mark i { width: 12px; height: 12px; border-radius: 50%; background: var(--sq-accent-primary); }
 .notif { display: flex; gap: 12px; align-items: flex-start; width: 100%; text-align: left; padding: 14px; border-radius: var(--radius-lg); background: var(--sq-bg-surface); border: 1px solid var(--sq-border-subtle); }
 .notif.unread { border-color: var(--sq-text-primary); background: var(--sq-bg-elevated); }
 .notif .ic-box { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--sq-accent-hot-soft); color: var(--sq-accent-hot); flex: none; }
@@ -591,3 +573,124 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 /* Logo lockup: the route-S mark and the Geist Light wordmark */
 .logo { display: inline-flex; align-items: center; gap: 10px; font-weight: 300; font-size: 28px; line-height: 32px; letter-spacing: -0.84px; color: var(--text-primary); }
 .logo .logo-mark { width: 30px; height: 30px; flex: none; }
+
+/* ---------- Photos from the design (assets/photos), always greyscale ---------- */
+.ph { background: var(--bg-raised) center / cover no-repeat; filter: grayscale(1); }
+
+/* ---------- Onboarding (Figma: 01 and 02 Onboarding) ---------- */
+/* Header: back + progress + "2/7", then the title block */
+.ob-head { display: flex; flex-direction: column; gap: var(--sp-xl); padding: var(--sp-sm) var(--sp-xl) 0; }
+.ob-nav { display: flex; align-items: center; gap: var(--sp-lg); }
+.ob-nav .step { font-family: var(--font-mono); font-weight: 500; font-size: 12px; line-height: 16px; color: var(--text-tertiary); white-space: nowrap; }
+.ob-body { display: flex; flex-direction: column; padding: var(--sp-xl) var(--sp-xl) var(--sp-2xl); }
+.divider-or { display: flex; align-items: center; gap: var(--sp-md); font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
+.divider-or::before, .divider-or::after { content: ""; flex: 1; height: 1px; background: var(--border-subtle); }
+
+/* Landing: photo mosaic, copy, slide to explore */
+.landing-hero { position: relative; height: 470px; overflow: hidden; display: flex; gap: 6px; }
+.landing-hero .col { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.landing-hero .col > * { flex: 1; min-height: 0; }
+.landing-hero .scrim { z-index: 1; }
+.landing-copy { display: flex; flex-direction: column; gap: 18px; padding: 0 var(--sp-2xl); position: relative; z-index: 2; }
+.landing-actions { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 26px var(--sp-2xl) var(--sp-2xl); }
+.slider { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; height: 60px; padding: 0 6px; border-radius: var(--r-full); background: var(--bg-raised); font-weight: 600; font-size: 14px; line-height: 18px; touch-action: none; user-select: none; overflow: hidden; }
+.slider .handle { width: 48px; height: 48px; border-radius: 50%; background: var(--gradient); color: var(--text-on-action); display: grid; place-items: center; flex: none; position: relative; z-index: 1; cursor: grab; }
+.slider .handle .ic { width: 22px; height: 22px; }
+.slider .text { flex: 1; }
+.slider .chev { width: 18px; height: 18px; color: var(--text-tertiary); }
+.slider .chev + .chev { color: var(--text-secondary); margin-right: 8px; }
+.login-line { display: flex; gap: 6px; font-size: 14px; line-height: 20px; color: var(--text-secondary); }
+
+/* Going out or hosting */
+.role-card { position: relative; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; height: 196px; padding: 18px; border-radius: 24px; overflow: hidden; border: 1px solid var(--border-subtle); width: 100%; text-align: left; color: var(--white); isolation: isolate; }
+.role-card.on { border: 2.5px solid var(--action-primary); }
+.role-card > .ph, .role-card > .scrim { position: absolute; inset: 0; z-index: -1; }
+.role-card .role-ic { position: absolute; left: 13.5px; top: 13.5px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--ink-60); color: var(--white); }
+.role-card:not(.on) .role-ic { left: 15px; top: 15px; }
+.role-card.on .role-ic { background: var(--action-primary); color: var(--text-on-action); }
+.role-card .role-check { position: absolute; right: 13.5px; top: 13.5px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--action-primary); color: var(--text-on-action); }
+.role-card .role-check .ic { width: 18px; height: 18px; }
+.role-card .t-body-m { opacity: 0.85; }
+
+/* Log in: 6-digit code */
+.code { position: relative; display: flex; gap: 8px; }
+.code > span { width: 50px; height: 58px; border-radius: 14px; background: var(--bg-raised); border: 1px solid var(--border-default); display: grid; place-items: center; font-weight: 300; font-size: 34px; line-height: 38px; letter-spacing: -1.19px; }
+.code > span.on { border: 2px solid var(--action-primary); }
+.code > span.on:empty::after { content: ""; width: 2px; height: 24px; background: var(--action-primary); animation: blink 1s steps(1) infinite; }
+.code.invalid > span { border-color: var(--status-danger); }
+.code input { position: absolute; inset: 0; width: 100%; opacity: 0; font-size: 16px; caret-color: transparent; }
+@keyframes blink { 50% { opacity: 0; } }
+.resend { display: flex; justify-content: space-between; font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
+.resend button { color: var(--action-primary); font-size: 12px; line-height: 16px; }
+
+/* Vibe tiles: photo, scrim, title, check when picked */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tile { position: relative; height: 78px; padding: var(--sp-md); border-radius: var(--r-xl); overflow: hidden; display: flex; align-items: flex-end; isolation: isolate; text-align: left; color: var(--white); font-weight: 600; font-size: 16px; line-height: 22px; letter-spacing: -0.08px; white-space: nowrap; }
+.tile > .ph, .tile > .scrim { position: absolute; inset: 0; z-index: -1; }
+.tile.on { border: 2.5px solid var(--action-primary); padding: 9.5px; }
+.tile .tick { position: absolute; right: 7.5px; top: 7.5px; width: 24px; height: 24px; border-radius: 50%; background: var(--action-primary); color: var(--text-on-action); display: grid; place-items: center; }
+.tile .tick .ic { width: 16px; height: 16px; }
+
+/* Quests you've been to */
+.pick-row { display: flex; align-items: center; gap: 14px; padding: var(--sp-sm) 0; width: 100%; text-align: left; }
+.pick-row .ph, .pick-row .poster { width: 56px; height: 56px; border-radius: var(--r-lg); flex: none; }
+.pick-row .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pick-row .text > :first-child { font-weight: 600; font-size: 16px; line-height: 22px; letter-spacing: -0.08px; }
+.pick-row .text > :nth-child(2) { font-family: var(--font-mono); font-weight: 500; font-size: 12px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* When you go out */
+.when-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-md); }
+.when { height: 112px; padding: var(--sp-lg); border-radius: var(--r-2xl); background: var(--bg-raised); display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; text-align: left; }
+.when .ic { width: 26px; height: 26px; }
+.when.on { background: var(--action-primary-tint); border: 2px solid var(--action-primary); padding: 14px; }
+.when.on .ic { color: var(--text-accent); }
+.when strong { font-weight: 600; font-size: 16px; line-height: 22px; letter-spacing: -0.08px; }
+.when span { font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+
+/* Assemble your party */
+.person { display: flex; align-items: center; gap: var(--sp-md); padding: var(--sp-sm) 0; }
+.person .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; white-space: nowrap; }
+.person .text > :first-child { font-weight: 600; font-size: 16px; line-height: 22px; letter-spacing: -0.08px; }
+.person .text > :nth-child(2) { font-family: var(--font-mono); font-weight: 500; font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.btn-ghost.s { color: var(--text-accent); }
+
+/* Taste avatar ready: Sixer orb with the picks floating around it */
+.avatar-stage { position: relative; height: 330px; }
+.avatar-stage .glow { position: absolute; left: 45px; top: 15px; width: 300px; height: 300px; border-radius: 50%; background: linear-gradient(132deg, rgba(169, 122, 242, 0.2) 0%, rgba(92, 207, 230, 0.1) 50%, rgba(242, 141, 200, 0) 100%); }
+.avatar-stage .orb { border: 0; animation: none; position: absolute; left: 120px; top: 90px; width: 150px; height: 150px; border-radius: 50%; background: var(--gradient); display: grid; place-items: center; color: var(--text-on-action); }
+.avatar-stage .orb svg { width: 75px; height: 75px; }
+.avatar-stage .pill { position: absolute; height: 32px; padding: 0 var(--sp-md); border-radius: var(--r-full); display: inline-flex; align-items: center; background: var(--bg-raised); font-weight: 600; font-size: 14px; line-height: 18px; white-space: nowrap; }
+.avatar-stage .pill.signature { background: var(--action-primary); color: var(--text-on-action); }
+.avatar-stage .pill.hot { background: var(--hot-fill); color: var(--text-on-action); }
+.avatar-stage .pill.social { background: var(--social-fill); color: var(--text-on-action); }
+
+/* Sixer: the taste guide (Figma: Sixer message) */
+.sixer { width: 30px; height: 30px; border-radius: 50%; background: var(--gradient); display: grid; place-items: center; flex: none; color: var(--text-on-action); }
+.sixer svg { width: 18px; height: 18px; }
+.sixer-msg { display: flex; align-items: flex-end; gap: 10px; }
+.sixer-msg .bubble-s { width: 260px; padding: 10px 14px; border-radius: 18px 18px 18px 4px; background: var(--bg-raised); font-size: 15px; line-height: 22px; }
+
+/* ---------- Map (Figma: Map, Map pin, Map home, Map legend) ---------- */
+.map { position: relative; overflow: hidden; background: var(--map-land); touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.map.dragging { cursor: grabbing; }
+.map-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.map-layer svg { display: block; }
+.map-marks { position: absolute; inset: 0; pointer-events: none; }
+.map-marks > * { position: absolute; left: 0; top: 0; will-change: transform; }
+.map-label { margin: -19px 0 0 -29px; font-family: var(--font-mono); font-weight: 500; font-size: 11px; line-height: 14px; letter-spacing: 0.88px; text-transform: uppercase; color: var(--map-label); white-space: nowrap; }
+.map-home { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: -11px 0 0 -16px; font-family: var(--font-mono); font-weight: 500; font-size: 11px; line-height: 14px; letter-spacing: 0.88px; text-transform: uppercase; color: var(--text-primary); }
+.map-home i { width: 22px; height: 22px; border-radius: 6px; background: var(--bg-inverse); color: var(--text-inverted); display: grid; place-items: center; }
+.map-home .ic { width: 14px; height: 14px; }
+.map-pin { pointer-events: auto; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--bg-surface); display: grid; place-items: center; filter: drop-shadow(0 4px 8px rgba(19, 16, 27, 0.1)); padding: 0; }
+.map-pin i { width: 12px; height: 12px; border-radius: 50%; background: var(--match-strong); }
+.map-pin.close i { background: var(--match-close); }
+.map-pin.low i { background: var(--match-low); }
+.map-pin.on { width: 30px; height: 30px; margin: -15px 0 0 -15px; background: var(--action-primary); z-index: 2; }
+.map-pin.on i { width: 16px; height: 16px; border: 2px solid var(--bg-surface); }
+.map-pin::before { content: ""; position: absolute; inset: -10px; } /* a bigger tap target than the dot */
+.map-zoom { display: flex; flex-direction: column; gap: var(--sp-sm); }
+.map-legend { display: inline-flex; align-items: center; gap: var(--sp-md); height: 30px; padding: 0 var(--sp-md); border-radius: var(--r-full); background: var(--bg-surface); filter: drop-shadow(0 4px 8px rgba(19, 16, 27, 0.1)); font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.map-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.map-legend i { width: 8px; height: 8px; border-radius: 50%; background: var(--match-strong); }
+.map-legend i.close { background: var(--match-close); }
+.map-legend i.low { background: var(--match-low); }

@@ -182,7 +182,7 @@ These upcoming events already fit their budget and travel limits (JSON, prices i
 ${JSON.stringify(pool.map((e) => compact(e, origins)))}
 
 Give every event a "match" score from 0 to 100 for how much this person would enjoy it. Be discerning: use the full range, and only give 85+ to strong fits.
-For each, write "reason": one short, specific sentence (under 20 words) starting the way a friend would ("You picked jazz, and Aiko is going.").
+For each, write "reason": one short, specific sentence (under 20 words) starting the way a friend would ("You picked jazz, and Maya is going.").
 Work in a detail from the event data where it helps: price, an easy trip, a friend going, or a review. Never invent reviews, people or facts.
 Also write "avatar": one sentence (under 25 words), in second person, describing their taste as you understand it.
 Respond with JSON only, no other text, in this shape:
@@ -239,7 +239,7 @@ ${JSON.stringify(pool.map((e) => compact(e, origins)))}
 
 Pick up to 5 events that best match${crew ? " the whole group. Prefer events every person would enjoy over ones that suit only one person" : " what they asked for"}. For each, write one short, specific sentence explaining why it's a good pick, and a "match" score from 0 to 100.
 Each event's "friends" field lists friends who are going, and "organizer" has the organizer's rating and a review.
-Where it helps, work in a detail from the reviews, the price, the trip, or who's going (e.g. "it's free, and your friend Priya is going").${crew && origins.length > 1 ? `
+Where it helps, work in a detail from the reviews, the price, the trip, or who's going (e.g. "it's free, and your friend Maya is going").${crew && origins.length > 1 ? `
 Friends start from different places. Prefer events that are an easy trip for everyone, not a short trip for one and a long one for another.` : ""}
 Only use reviews, organizer and attendee details that appear in the event data; never invent any.
 Only choose from the list. If fewer than 5 are a genuine fit, return fewer.${crew ? `
