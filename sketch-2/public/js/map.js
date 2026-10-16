@@ -1,12 +1,10 @@
-/* Sketch 2 — the map (Figma: Map, Map pin, Map home, Map legend), interactive: drag to pan, wheel or pinch to zoom,
-   and the zoom / locate buttons. The streets are the design's own base map; pins sit at real coordinates.
-   Map units are the Discover map's frame (390 × 694 at zoom 1); the base map art spans x -663…1017, y -402…1132. */
+/* Sketch 2 — the map (Figma: Map, Map pin, Map home, Map legend). A real street map (MapLibre with OpenStreetMap data from
+   OpenFreeMap), drawn in the design's map colours with only land, parks, water and streets: no shops, transit or place names.
+   The only things on it are ours: Sidequest pins, the Home marker and the design's neighbourhood labels. */
 (function () {
   const SQ = window.SQ;
   const { esc, icon } = SQ;
 
-  // Real coordinates -> map units, fitted so the Kensington and Queen West labels land where the design puts them
-  const proj = (lat, lng) => [188 + (lng + 79.4005) * 7540, 216 - (lat - 43.6547) * 10250];
   // Neighbourhood labels (and the areas onboarding can pick); origin is the trip-time start nearest each
   const HOODS = [
     ["Ossington", 43.6487, -79.4202, "union"], ["Kensington", 43.6547, -79.4005, "union"], ["Queen West", 43.6468, -79.4135, "union"],
@@ -19,30 +17,20 @@
   SQ.HOODS = HOODS;
   const hood = (name) => HOODS.find((h) => h[0] === name);
 
-  // The base map, as drawn in Figma (paths are in map units)
-  const BASE = `<svg class="map-base" viewBox="-663 -402 1680 1534" width="1680" height="1534" aria-hidden="true" fill="none">
-    <rect x="-663" y="-402" width="1680" height="1534" fill="var(--map-land)"/>
-    <g fill="var(--map-park)"><path transform="translate(-371.2 169.5)" d="M0 13.2C73 -23.4 182.6 13.2 175.3 159.3 146.1 239.6 36.5 239.6 7.3 159.3Z"/><path transform="translate(147.5 -69.6)" d="M0 3.8C51.1 -10.8 87.7 18.5 80.4 55 51.1 76.9 7.3 69.6 0 3.8Z"/><path transform="translate(578.5 210.6)" d="M0 8.6C43.8 -13.3 95 8.6 87.7 52.4 51.1 74.3 7.3 67 0 8.6Z"/></g>
-    <g stroke="var(--map-street)" stroke-linecap="round" stroke-width="5.11"><path d="M-517.3 91.3 943.8 65.7M-517.3 273.9 943.8 299.5M-60.7 -146.1-53.4 547.9M322.8 -219.2 330.2 584.4M-298.1 -73.1-283.5 547.8"/></g>
-    <g stroke="var(--map-street)" stroke-linecap="round" stroke-width="10.96"><path d="M-517.3 0 943.8 -29.2M-444.2 168C-78.9 219.2 213.3 233.8 688.1 299.5M-517.3 365.3 943.8 387.2M-371.2 445.6 870.7 460.2M30.6 -109.6 37.9 547.9M227.9 -146.1 249.8 584.4M395.9 -401.8 403.2 591.7M132.9 -182.6 147.5 591.7M-444.2 547.9C-78.9 526 395.9 533.3 907.3 496.8M-159.3 -109.6-152 547.9M-517.3 182.6-79 197.2M505.5 -182.6 520.1 547.9"/></g>
-    <path fill="var(--map-water)" d="M-663.4 613.6C-371.2 547.9-115.5 591.7 103.7 613.6 322.8 635.6 432.4 628.3 578.5 547.9 724.6 467.5 797.7 511.4 1016.8 533.3V1132.3H-663.4Z"/>
-    <path fill="var(--map-land)" d="M231.5 701.3C304.6 672.1 414.2 672.1 487.2 701.3 443.4 737.8 297.3 745.1 231.5 701.3Z"/>
-  </svg>`;
-
   // A pin: { lat, lng, tier: strong|close|low, selected, act, arg, label }. home: a neighbourhood name, or [lat, lng].
   // labels: neighbourhood names to label (true: all of them). Labels sit up and left of their spot, as the design draws them.
-  // view: { x, y, z } map point at the centre and zoom; kept in SQ.u.maps[id] so re-renders and back keep the view.
-  SQ.mapView = (id, { pins = [], home = null, labels = true, view = { x: 195, y: 347, z: 1 }, cls = "", style = "" } = {}) => {
+  // view: { lat, lng, zoom } at the centre; kept in SQ.u.maps[id] so re-renders and back keep the view.
+  // The marks are rendered hidden here; initMaps puts them on the map.
+  SQ.mapView = (id, { pins = [], home = null, labels = true, view = { lat: 43.6419, lng: -79.3996, zoom: 12.4 }, cls = "", style = "" } = {}) => {
     const maps = (SQ.u.maps = SQ.u.maps || {});
-    const v = maps[id] || (maps[id] = { ...view });
+    if (!maps[id]) maps[id] = { ...view };
     const homeLL = typeof home === "string" ? hood(home) && hood(home).slice(1, 3) : home;
-    const at = ([x, y], extra = "") => `data-mx="${x.toFixed(1)}" data-my="${y.toFixed(1)}" ${extra}`;
+    const at = (lat, lng) => `data-lat="${lat}" data-lng="${lng}"`;
     return `<div class="map ${cls}" data-map="${esc(id)}" style="${style}">
-      <div class="map-layer">${BASE}</div>
-      <div class="map-marks">
-        ${labels ? HOODS.filter((h) => labels === true || labels.includes(h[0])).map(([n, la, ln]) => `<span class="map-label" ${at(proj(la, ln))}>${esc(n)}</span>`).join("") : ""}
-        ${homeLL ? `<span class="map-home" ${at(proj(homeLL[0], homeLL[1]))}><i>${icon("home2")}</i>Home</span>` : ""}
-        ${pins.filter((p) => p.lat != null).map((p) => `<button class="map-pin ${p.tier || "strong"}${p.selected ? " on" : ""}" ${at(proj(p.lat, p.lng))} ${p.act ? `data-act="${esc(p.act)}" data-arg="${esc(p.arg)}"` : ""} aria-label="${esc(p.label || "Pin")}"><i></i></button>`).join("")}
+      <div class="map-marks" hidden>
+        ${labels ? HOODS.filter((h) => labels === true || labels.includes(h[0])).map(([n, la, ln]) => `<span class="map-label" ${at(la, ln)}>${esc(n)}</span>`).join("") : ""}
+        ${homeLL ? `<span class="map-home" ${at(homeLL[0], homeLL[1])}><i>${icon("home2")}</i>Home</span>` : ""}
+        ${pins.filter((p) => p.lat != null).map((p) => `<button class="map-pin ${p.tier || "strong"}${p.selected ? " on" : ""}" ${at(p.lat, p.lng)} ${p.act ? `data-act="${esc(p.act)}" data-arg="${esc(p.arg)}"` : ""} aria-label="${esc(p.label || "Pin")}"><i></i></button>`).join("")}
       </div>
     </div>`;
   };
@@ -53,118 +41,89 @@
     <button class="icon-btn s" data-zoom="home" aria-label="Back to home">${icon("loc")}</button>
   </div>`;
   SQ.mapLegend = () => `<div class="map-legend"><span><i class="strong"></i>Strong</span><span><i class="close"></i>Close</span><span><i class="low"></i>Worth a look</span></div>`;
-  SQ.projMap = proj;
-
-  const Z = [0.45, 3];
-  const clampView = (v) => {
-    v.z = Math.max(Z[0], Math.min(Z[1], v.z));
-    v.x = Math.max(-663, Math.min(1017, v.x));
-    v.y = Math.max(-402, Math.min(1132, v.y));
-    return v;
+  // Centre a map's saved view on a spot, with the spot dy pixels above the centre
+  SQ.mapCenter = (id, lat, lng, dy = 0) => {
+    const v = SQ.u.maps && SQ.u.maps[id];
+    if (!v) return;
+    const pxPerDeg = (512 * 2 ** v.zoom) / 360 / Math.cos((lat * Math.PI) / 180);
+    Object.assign(v, { lat: lat - dy / pxPerDeg, lng });
   };
-  // Place the art and every mark for the current view. Marks stay their own size; only positions scale.
-  function paint(el) {
-    const v = SQ.u.maps[el.dataset.map];
-    const w = el.clientWidth, h = el.clientHeight;
-    // The design draws its maps at the Discover map's zoom; smaller maps (onboarding, demand) scale with their width
-    const s = v.z * (w / 390);
-    const ox = w / 2 - v.x * s, oy = h / 2 - v.y * s;
-    el.querySelector(".map-layer").style.transform = `translate(${ox - 663 * s}px, ${oy - 402 * s}px) scale(${s})`;
-    for (const m of el.querySelectorAll("[data-mx]")) {
-      m.style.transform = `translate(${ox + m.dataset.mx * s}px, ${oy + m.dataset.my * s}px)`;
-    }
-  }
-  function zoomAt(el, factor, cx, cy) {
-    const v = SQ.u.maps[el.dataset.map];
-    const w = el.clientWidth, h = el.clientHeight, s = v.z * (w / 390);
-    // keep the map point under (cx, cy) fixed
-    const mx = v.x + (cx - w / 2) / s, my = v.y + (cy - h / 2) / s;
-    v.z *= factor;
-    clampView(v);
-    const s2 = v.z * (w / 390);
-    v.x = mx - (cx - w / 2) / s2;
-    v.y = my - (cy - h / 2) / s2;
-    clampView(v);
-    paint(el);
+
+  // Only land, parks, water and streets, in the design's colours (the map tokens in styles.css)
+  const STYLE = () => {
+    const css = getComputedStyle(document.documentElement);
+    const c = (n) => css.getPropertyValue(n).trim();
+    const width = (lo, hi) => ["interpolate", ["exponential", 1.6], ["zoom"], 11, lo, 17, hi];
+    const roads = (id, classes, w) => ({ id, type: "line", source: "osm", "source-layer": "transportation", filter: ["in", ["get", "class"], ["literal", classes]],
+      layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": c("--map-street"), "line-width": w } });
+    return {
+      version: 8,
+      sources: { osm: { type: "vector", url: "https://tiles.openfreemap.org/planet", attribution: "© OpenFreeMap © OpenStreetMap" } },
+      layers: [
+        { id: "land", type: "background", paint: { "background-color": c("--map-land") } },
+        { id: "park", type: "fill", source: "osm", "source-layer": "park", paint: { "fill-color": c("--map-park") } },
+        { id: "green", type: "fill", source: "osm", "source-layer": "landcover", filter: ["in", ["get", "class"], ["literal", ["grass", "wood"]]], paint: { "fill-color": c("--map-park") } },
+        { id: "water", type: "fill", source: "osm", "source-layer": "water", paint: { "fill-color": c("--map-water") } },
+        roads("streets", ["minor", "service", "tertiary"], width(0.5, 8)),
+        roads("main-streets", ["motorway", "trunk", "primary", "secondary"], width(1.5, 18)),
+      ],
+    };
+  };
+
+  const live = {}; // map id -> { el, map, marks: [Marker] }
+  function placeMarks(m, marks) {
+    for (const k of m.marks) k.remove();
+    // Every mark's top-left sits on its spot; the CSS margins centre pins and lift labels, as before
+    m.marks = marks.map((n) => new maplibregl.Marker({ element: n, anchor: "top-left" }).setLngLat([+n.dataset.lng, +n.dataset.lat]).addTo(m.map));
   }
 
-  // After every render: paint each map and wire up drag, wheel and pinch
+  // After every render: put each map in place. A map that was on the last render keeps its canvas (no flash, no reload).
   SQ.initMaps = (root) => {
-    for (const el of root.querySelectorAll(".map[data-map]")) {
-      paint(el);
-      const pts = new Map();
-      let moved = 0, start = null;
-      el.addEventListener("pointerdown", (e) => {
-        if (e.button) return;
-        pts.set(e.pointerId, [e.clientX, e.clientY]);
-        moved = 0;
-        start = pts.size === 2 ? [...pts.values()] : null;
-        el.setPointerCapture(e.pointerId);
-        el.classList.add("dragging");
-      });
-      el.addEventListener("pointermove", (e) => {
-        const prev = pts.get(e.pointerId);
-        if (!prev) return;
-        const v = SQ.u.maps[el.dataset.map];
-        const s = v.z * (el.clientWidth / 390);
-        if (pts.size === 1) {
-          const dx = e.clientX - prev[0], dy = e.clientY - prev[1];
-          moved += Math.abs(dx) + Math.abs(dy);
-          v.x -= dx / s;
-          v.y -= dy / s;
-          clampView(v);
-          paint(el);
-        }
-        pts.set(e.pointerId, [e.clientX, e.clientY]);
-        if (pts.size === 2 && start) {
-          const [a, b] = [...pts.values()];
-          const d0 = Math.hypot(start[0][0] - start[1][0], start[0][1] - start[1][1]);
-          const d1 = Math.hypot(a[0] - b[0], a[1] - b[1]);
-          const r = el.getBoundingClientRect();
-          zoomAt(el, d1 / d0, (a[0] + b[0]) / 2 - r.left, (a[1] + b[1]) / 2 - r.top);
-          start = [a, b];
-          moved = 99;
-        }
-      });
-      const end = (e) => {
-        pts.delete(e.pointerId);
-        start = null;
-        if (!pts.size) el.classList.remove("dragging");
-      };
-      el.addEventListener("pointerup", end);
-      el.addEventListener("pointercancel", end);
-      // A drag isn't a tap: don't let it open the pin it ended on
-      el.addEventListener("click", (e) => {
-        if (moved > 6) {
-          e.stopPropagation();
-          e.preventDefault();
-        }
-      }, true);
-      el.addEventListener("wheel", (e) => {
-        e.preventDefault();
-        const r = el.getBoundingClientRect();
-        zoomAt(el, Math.exp(-e.deltaY / 400), e.clientX - r.left, e.clientY - r.top);
-      }, { passive: false });
-      el.addEventListener("dblclick", (e) => {
-        const r = el.getBoundingClientRect();
-        zoomAt(el, 1.6, e.clientX - r.left, e.clientY - r.top);
-      });
+    if (!window.maplibregl) return; // offline: the map stays its land colour
+    for (const ph of root.querySelectorAll(".map[data-map]")) {
+      const id = ph.dataset.map;
+      const box = ph.querySelector(".map-marks");
+      const marks = [...box.children];
+      box.remove();
+      let m = live[id];
+      if (m && !m.el.isConnected) {
+        m.el.className = ph.className;
+        m.el.style.cssText = ph.style.cssText;
+        ph.replaceWith(m.el);
+        const v = { ...SQ.u.maps[id] }; // resize() fires moveend, which would save the old centre over it
+        m.map.resize();
+        m.map.jumpTo({ center: [v.lng, v.lat], zoom: v.zoom });
+      } else {
+        if (m) m.map.remove();
+        const v = SQ.u.maps[id];
+        const map = new maplibregl.Map({ container: ph, style: STYLE(), center: [v.lng, v.lat], zoom: v.zoom, minZoom: 9, maxZoom: 18,
+          dragRotate: false, pitchWithRotate: false, touchPitch: false, attributionControl: { compact: true } });
+        map.touchZoomRotate.disableRotation();
+        map.on("moveend", () => Object.assign(SQ.u.maps[id], { lng: map.getCenter().lng, lat: map.getCenter().lat, zoom: map.getZoom() }));
+        m = live[id] = { el: ph, map, marks: [] };
+      }
+      placeMarks(m, marks);
+    }
+    // Maps no longer on screen let go of their WebGL context
+    for (const id in live) if (!live[id].el.isConnected) {
+      live[id].map.remove();
+      delete live[id];
     }
     for (const z of root.querySelectorAll(".map-zoom")) {
-      const el = root.querySelector(`.map[data-map="${CSS.escape(z.dataset.for)}"]`);
-      if (!el) continue;
+      const m = live[z.dataset.for];
+      if (!m) continue;
       z.addEventListener("click", (e) => {
         const b = e.target.closest("[data-zoom]");
         if (!b) return;
         e.stopPropagation();
         const k = b.dataset.zoom;
-        if (k === "home") {
-          const h = el.querySelector(".map-home");
-          const v = SQ.u.maps[el.dataset.map];
-          if (h) Object.assign(v, { x: +h.dataset.mx, y: +h.dataset.my });
-          v.z = Math.max(v.z, 1);
-          paint(el);
-        } else zoomAt(el, k === "in" ? 1.5 : 1 / 1.5, el.clientWidth / 2, el.clientHeight / 2);
+        if (k === "in") m.map.zoomIn();
+        else if (k === "out") m.map.zoomOut();
+        else {
+          const h = m.el.querySelector(".map-home");
+          const at = h ? [+h.dataset.lng, +h.dataset.lat] : m.map.getCenter();
+          m.map.flyTo({ center: at, zoom: Math.max(m.map.getZoom(), 12.4) });
+        }
       });
     }
   };

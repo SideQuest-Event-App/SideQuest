@@ -670,17 +670,14 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .sixer-msg .bubble-s { width: 260px; padding: 10px 14px; border-radius: 18px 18px 18px 4px; background: var(--bg-raised); font-size: 15px; line-height: 22px; }
 
 /* ---------- Map (Figma: Map, Map pin, Map home, Map legend) ---------- */
-.map { position: relative; overflow: hidden; background: var(--map-land); touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
-.map.dragging { cursor: grabbing; }
-.map-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
-.map-layer svg { display: block; }
-.map-marks { position: absolute; inset: 0; pointer-events: none; }
-.map-marks > * { position: absolute; left: 0; top: 0; will-change: transform; }
-.map-label { margin: -19px 0 0 -29px; font-family: var(--font-mono); font-weight: 500; font-size: 11px; line-height: 14px; letter-spacing: 0.88px; text-transform: uppercase; color: var(--map-label); white-space: nowrap; }
-.map-home { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: -11px 0 0 -16px; font-family: var(--font-mono); font-weight: 500; font-size: 11px; line-height: 14px; letter-spacing: 0.88px; text-transform: uppercase; color: var(--text-primary); }
+.map { position: relative; overflow: hidden; background: var(--map-land); }
+.map .maplibregl-canvas { outline: none; }
+.map .maplibregl-ctrl-attrib { font-size: 10px; }
+.map-label { margin: -19px 0 0 -29px; font-family: var(--font-mono); font-weight: 500; font-size: 11px; line-height: 14px; letter-spacing: 0.88px; text-transform: uppercase; color: var(--map-label); white-space: nowrap; pointer-events: none; }
+.map-home { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: -11px 0 0 -16px; font-family: var(--font-mono); font-weight: 500; font-size: 11px; line-height: 14px; letter-spacing: 0.88px; text-transform: uppercase; color: var(--text-primary); pointer-events: none; }
 .map-home i { width: 22px; height: 22px; border-radius: 6px; background: var(--bg-inverse); color: var(--text-inverted); display: grid; place-items: center; }
 .map-home .ic { width: 14px; height: 14px; }
-.map-pin { pointer-events: auto; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--bg-surface); display: grid; place-items: center; filter: drop-shadow(0 4px 8px rgba(19, 16, 27, 0.1)); padding: 0; }
+.map-pin { width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--bg-surface); display: grid; place-items: center; filter: drop-shadow(0 4px 8px rgba(19, 16, 27, 0.1)); padding: 0; }
 .map-pin i { width: 12px; height: 12px; border-radius: 50%; background: var(--match-strong); }
 .map-pin.close i { background: var(--match-close); }
 .map-pin.low i { background: var(--match-low); }

@@ -129,9 +129,8 @@
   A.mapPin = (id) => {
     U().mapSel = U().mapSel === Number(id) ? null : Number(id);
     const e = SQ.ev(id);
-    const v = U().maps.discover;
     // bring the picked pin into view, above the sheet
-    if (U().mapSel && v && e.venue) [v.x, v.y] = SQ.projMap(e.venue.lat, e.venue.lng).map((n, i) => n + (i ? 120 / v.z : 0));
+    if (U().mapSel && e.venue) SQ.mapCenter("discover", e.venue.lat, e.venue.lng, 120);
     if (U().screen !== "discover-map") return "discover-map";
   };
   const shareText = async (text) => {

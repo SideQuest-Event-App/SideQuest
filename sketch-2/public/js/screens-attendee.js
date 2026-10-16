@@ -217,7 +217,7 @@
     return screen(`
       ${obHead(5, "Which areas do you frequent?")}
       <div class="ob-body" style="gap:14px;padding-top:16px">
-        ${SQ.mapView("areas", { home, view: { x: 114, y: 262, z: 1.2 }, labels: mine, style: "height:250px;border-radius:20px",
+        ${SQ.mapView("areas", { home, view: { lat: 43.6502, lng: -79.4103, zoom: 12.6 }, labels: mine, style: "height:250px;border-radius:20px",
           pins: SQ.HOODS.filter((h) => h[0] !== home && shown.includes(h[0])).map(([n, lat, lng]) => ({ lat, lng, tier: mine.includes(n) ? "strong" : "low", selected: mine.includes(n), act: "toggleArea", arg: n, label: n })) })}
         <form class="search" data-act="addArea">${icon("search")}<input data-bind="areaText" data-live value="${esc(U().areaText)}" placeholder="Add a neighbourhood" aria-label="Add a neighbourhood" enterkeyhint="done"></form>
         ${found.length ? `<div class="chips">${found.map(([n]) => chip(n, mine.includes(n), { "data-act": "toggleArea", "data-arg": n }, "plus")).join("")}</div>` : ""}
