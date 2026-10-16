@@ -149,7 +149,8 @@ window.SQ = window.SQ || {};
   const ph = (name, cls = "", style = "") => `<div class="ph ${cls}" style="background-image:url('${photoUrl(name)}');${style}" aria-hidden="true"></div>`;
   const eventPhoto = (e) => e.image || photoUrl(VIBE_PHOTO[(e.vibes || [])[0]] || "string-lights");
   function poster(e, cls = "", { style = "" } = {}) {
-    return `<div class="poster has-img ${cls}" style="background-image:url('${esc(eventPhoto(e))}');${style}" role="img" aria-label="${esc(`Image for ${e.title}`)}"></div>`;
+    // The listing's own image, over the vibe's photo in case it doesn't load
+    return `<div class="poster has-img ${cls}" style="background-image:url('${esc(eventPhoto(e))}'),url('${photoUrl(VIBE_PHOTO[(e.vibes || [])[0]] || "string-lights")}');${style}" role="img" aria-label="${esc(`Image for ${e.title}`)}"></div>`;
   }
 
   // ---------- Avatars ----------

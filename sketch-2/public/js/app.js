@@ -36,7 +36,10 @@
   SQ.u = {
     screen: "landing",
     history: [],
-    filter: "For You",
+    df: { tod: "Anytime", cats: [], price: "", dist: "", friends: false, after: "", amen: [] }, // Discover filters
+    weekTab: "All",
+    mix: null,
+    mapSel: null,
     logTab: "Upcoming",
     demandArea: "All",
     quest: null,
@@ -174,7 +177,7 @@
       if (SQ.d.host && (SQ.reportStale || !SQ.report)) loadReport();
       return;
     }
-    const wantsFeed = ["discover", "profile", "ob-avatar", "quest", "search"].includes(SQ.u.screen);
+    const wantsFeed = ["discover", "discover-map", "weekly", "mix", "filters", "profile", "ob-avatar", "quest", "search"].includes(SQ.u.screen);
     if (wantsFeed && u && u.vibes.length >= 2 && !SQ.u.feedError && (!u.feed || u.feed.key !== u.feedKey)) loadFeed();
     const p = SQ.d.party;
     if (SQ.u.screen === "party" && p && p.members.length && !SQ.u.blendError && (!p.blend || p.blend.key !== p.blendKey)) SQ.loadBlend();

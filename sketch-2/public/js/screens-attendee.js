@@ -15,14 +15,11 @@
     const u = me();
     const pending = u ? Object.entries(u.log).filter(([id, l]) => l.status === "going" && ev(id) && isPast(ev(id))).length : 0;
     const unread = u ? u.notifications.filter((n) => !n.read && n.requestId).length : 0;
-    return tabs([["discover", "Discover", "compass"], ["parties", "Parties", "users"], ["requests", "Requests", "megaphone"], ["questlog", "Quest Log", "calendar"], ["profile", "Profile", "user"]], active, { questlog: pending, requests: unread });
+    return tabs([["discover", "Discover", "home2"], ["parties", "Community", "crew"], ["add-event", "Add Event", "plus", { act: "addEvent" }], ["questlog", "Sidequests", "ticket"], ["profile", "Profile", "user"]], active, { questlog: pending, parties: unread });
   }
   SQ.attendeeTabs = attendeeTabs;
 
-  const matchBadge = (e) => {
-    const p = pick(e);
-    return p ? `<span class="badge match">${p.match}% match</span>` : "";
-  };
+
   const metaLine = (e) => {
     const t = trip(e, me() && me().origin);
     return [e.neighbourhood, priceLabel(e), t ? `${t.minutes} min away` : ""].filter(Boolean).map(esc).join(" · ");
@@ -85,34 +82,6 @@
     return list + form;
   }
 
-  function featureCard(e) {
-    const p = pick(e);
-    return `<button class="feature-card" data-act="openQuest" data-arg="${e.id}">
-      <div style="position:relative">${poster(e)}
-        <div class="fc-top">${matchBadge(e)}${statusBadge(e)}<span class="badge" style="background:rgba(0,0,0,.85);color:#fff">${esc(whenLabel(e))}</span></div></div>
-      <div class="fc-body">
-        <h2 class="title">${esc(e.title)}</h2>
-        <span class="small muted">${metaLine(e)}</span>
-        ${p ? `<p class="reason">${icon("sparkle", "sm")}${esc(p.reason)}</p>` : ""}
-        ${friendsLine(e)}
-      </div>
-    </button>`;
-  }
-  // host: true shows the plain listing (no personal match) and opens the host's tools
-  function questRow(e, extra = "", { host = false } = {}) {
-    const p = host ? null : pick(e);
-    return `<button class="quest-row" data-act="${host ? "openHostQuest" : "openQuest"}" data-arg="${e.id}">
-      ${poster(e, "thumb")}
-      <span class="stack-xs grow">
-        ${whenRow(e)}
-        <strong class="ellipsis">${esc(e.title)}</strong>
-        <span class="small muted ellipsis">${p ? esc(p.reason) : metaLine(e)}</span>
-        ${extra}
-      </span>
-      ${p ? `<span class="match-num">${p.match}%</span>` : ""}
-    </button>`;
-  }
-  SQ.questRow = questRow;
 
   const S = {};
 
@@ -301,97 +270,246 @@
       </div>`, { footer: footer(btn("See my Weekly Sidequests", { "data-act": "finishOnboarding" }, "primary", "arrow")) });
   } };
 
-  /* ===================== Discover ===================== */
-  const FILTERS = [["For You", ""], ["Tonight", ""], ["This weekend", ""], ["Free", ""], ["Map", "map"]];
+  /* ===================== Discover (Figma: 03 Discover) ===================== */
+  const TZ = "America/Toronto";
+  const hourOf = (e) => Number(new Date(e.startsAt).toLocaleString("en-US", { hour: "numeric", hourCycle: "h23", timeZone: TZ }));
+  // "Wed 8 PM", or "Today 6:30 PM"
+  const dayTime = (e) => {
+    const d = new Date(e.startsAt);
+    const t = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: TZ }).replace(":00", "");
+    return `${isToday(e) ? "Today" : d.toLocaleDateString("en-US", { weekday: "short", timeZone: TZ })} ${t}`;
+  };
+  // Straight-line distance from home (the home neighbourhood, else the trip-time origin)
+  const ORIGIN_LL = { union: [43.6453, -79.3806], finch: [43.7806, -79.4155], kennedy: [43.7323, -79.2637], kipling: [43.6372, -79.5361] };
+  const homeLL = (u) => {
+    const h = u.homeArea && SQ.HOODS.find((x) => x[0] === u.homeArea);
+    return h ? [h[1], h[2]] : ORIGIN_LL[u.origin] || ORIGIN_LL.union;
+  };
+  const kmFrom = (e, u = me()) => {
+    if (!e.venue || e.venue.lat == null) return null;
+    const [la, ln] = homeLL(u);
+    const r = Math.PI / 180;
+    const x = (e.venue.lng - ln) * r * Math.cos(((e.venue.lat + la) / 2) * r), y = (e.venue.lat - la) * r;
+    return 6371 * Math.hypot(x, y);
+  };
+  const distLabel = (e) => {
+    const k = kmFrom(e);
+    return k == null ? e.neighbourhood : k < 1 ? `${Math.max(50, Math.round(k * 20) * 50)} m` : `${k.toFixed(1)} km`;
+  };
+  const qMeta = (e) => [dayTime(e), e.price == null ? "" : priceLabel(e), distLabel(e)].filter(Boolean).join(" · ");
+  const matchOf = (e) => (pick(e) ? pick(e).match : 0);
+  const pillFor = (e) => (pick(e) ? SQ.matchPill(pick(e).match) : "");
+  SQ.qMeta = qMeta;
+  SQ.distLabel = distLabel;
 
-  // For You: the taste avatar's picks, best first. Other filters: everything within your budget and
-  // trip time (the feed's eligible list), with your picks first and the rest by date.
-  function feedEvents() {
-    const u = me();
-    const f = U().filter;
-    const eligible = new Set((u.feed && u.feed.eligible) || []);
-    let list = SQ.d.events.filter((e) => !e.over && !e.ended && !u.notForMe.includes(e.id) && (f === "For You" ? pick(e) : eligible.has(e.id)));
-    if (f === "Tonight") list = list.filter(isToday);
-    if (f === "This weekend") list = list.filter(isWeekend);
-    if (f === "Free") list = list.filter((e) => e.price === 0);
-    const m = (e) => (pick(e) ? pick(e).match : -1);
-    return list.sort((a, b) => m(b) - m(a) || a.startsAt.localeCompare(b.startsAt)).slice(0, f === "Map" ? 80 : 60);
+  // Filters (Figma: 11 Filters). Amenities aren't in listings, so they match words in the tags and description.
+  const CAT_TILES = ["Live Sets", "Food Pop-ups", "Art Nights", "Markets", "Comedy", "Dance Nights", "Film"];
+  const PRICES = ["Free", "Under $20"];
+  const DISTS = [["Walkable · 2 km", "Walkable", 2], ["Short ride · 6 km", "Short ride", 6]];
+  const AFTER = [["5 PM", 17], ["8 PM", 20], ["10 PM", 22]];
+  const AMEN = [["Step-free access", /accessib|wheelchair|step[- ]free/i, "access"], ["All ages", /all ages|all-ages|family|kids/i], ["Food", /food|eat|dinner|brunch|snack/i], ["Drinks", /drink|bar\b|beer|wine|cocktail/i], ["Small room", /intimate|small|cozy|limited/i]];
+  const TODS = [["Anytime", "clock"], ["Daytime", "sun"], ["Evening", "moon"]];
+  const DF = () => U().df;
+  const tileVibes = (label) => (TILES.find((t) => t[0] === label) || [, , []])[2];
+  function passes(e, f = DF()) {
+    const h = hourOf(e);
+    if (f.tod === "Daytime" && h >= 17) return false;
+    if (f.tod === "Evening" && h < 17) return false;
+    if (f.cats.length && !f.cats.some((c) => tileVibes(c).some((v) => (e.vibes || []).includes(v)))) return false;
+    if (f.price === "Free" && e.price !== 0) return false;
+    if (f.price === "Under $20" && !(e.price != null && e.price < 20)) return false;
+    const d = DISTS.find((x) => x[0] === f.dist);
+    if (d && !(kmFrom(e) <= d[2])) return false;
+    if (f.friends && !(e.friends || []).length) return false;
+    const a = AFTER.find((x) => x[0] === f.after);
+    if (a && h < a[1]) return false;
+    const text = `${(e.tags || []).join(" ")} ${e.description || ""} ${e.title}`;
+    return f.amen.every((n) => AMEN.find((x) => x[0] === n)[1].test(text));
   }
+  // The filters that are on, as [label shown on the chip, how to turn it off]
+  const activeFilters = (f = DF()) => [
+    ...f.cats.map((c) => [c, ["dfCat", c]]),
+    ...(f.price ? [[f.price, ["dfSet", "price:"]]] : []),
+    ...(f.dist ? [[DISTS.find((x) => x[0] === f.dist)[1], ["dfSet", "dist:"]]] : []),
+    ...(f.friends ? [["Friends going", ["dfFriends", ""]]] : []),
+    ...(f.after ? [[`After ${f.after}`, ["dfSet", "after:"]]] : []),
+    ...f.amen.map((n) => [n, ["dfAmen", n]]),
+  ];
 
-  // Old Toronto drawn from real coordinates: Line 1 and Line 2 subways, and a pin per quest
-  const MAP = { west: -79.53, east: -79.29, north: 43.712, south: 43.625 };
-  const proj = (lat, lng) => [((lng - MAP.west) / (MAP.east - MAP.west)) * 100, ((MAP.north - lat) / (MAP.north - MAP.south)) * 80];
-  const LINE1 = [[43.7088, -79.4407], [43.699, -79.4357], [43.684, -79.4155], [43.6749, -79.407], [43.6672, -79.4037], [43.6683, -79.3997], [43.66, -79.3905], [43.6507, -79.3868], [43.6453, -79.3806], [43.6525, -79.3793], [43.6709, -79.3857], [43.688, -79.3934], [43.7057, -79.3983], [43.73, -79.403]];
-  const LINE2 = [[43.6372, -79.5361], [43.6454, -79.524], [43.6501, -79.495], [43.6557, -79.4596], [43.6602, -79.4355], [43.666, -79.4113], [43.6683, -79.3997], [43.6709, -79.3857], [43.6767, -79.3583], [43.6842, -79.3227], [43.6948, -79.2886], [43.7323, -79.2637]];
-  const ORIGIN_LL = { union: [43.6453, -79.3806, "Union"], finch: [43.7806, -79.4155, "From Finch"], kennedy: [43.7323, -79.2637, "From Kennedy"], kipling: [43.6372, -79.5361, "From Kipling"] };
-  const pathOf = (pts) => pts.map(([la, ln], i) => `${i ? "L" : "M"}${proj(la, ln).map((v) => v.toFixed(1)).join(" ")}`).join(" ");
-  function cityMap(list) {
+  // This week's sidequests: the taste avatar's picks in the next 7 days, best match first
+  const inWeek = (e) => {
+    const t = Date.parse(e.startsAt) - SQ.now().getTime();
+    return t > -3 * 36e5 && t < 7 * 864e5;
+  };
+  const live = (e, u = me()) => !e.over && !e.ended && !u.notForMe.includes(e.id) && inWeek(e);
+  const weekly = () => SQ.d.events.filter((e) => live(e) && pick(e)).sort((a, b) => matchOf(b) - matchOf(a) || a.startsAt.localeCompare(b.startsAt));
+  // A Vibe Mix: everything this week in a tile's vibes that fits your budget and trip time, ranked by match
+  const MIX_PHOTO = { "Live Sets": "jazz-band", "Food Pop-ups": "string-lights", Markets: "beer-garden" };
+  function mixEvents(label) {
     const u = me();
-    let outside = 0;
-    const pins = list.map((e) => {
-      if (!e.venue) return "";
-      const [x, y] = proj(e.venue.lat, e.venue.lng);
-      if (x < 1 || x > 99 || y < 1 || y > 80) {
-        outside++;
-        return "";
-      }
-      const p = pick(e);
-      return `<button class="mpin${e.price === 0 ? " lime" : ""}" style="left:${x}%;top:${y}%" data-act="openQuest" data-arg="${e.id}" aria-label="${esc(e.title)}"><b>${p ? `${p.match}%` : priceLabel(e)}</b><i></i></button>`;
-    }).join("");
-    const o = u.origin && ORIGIN_LL[u.origin];
-    const you = o && proj(o[0], o[1]).map((v, i) => Math.max(3, Math.min(i ? 78 : 92, v)));
-    return `<div class="citymap">
-      <svg class="base" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-        <g stroke="var(--sq-border-subtle)" stroke-width=".35">${[12, 24, 36, 48, 60, 72, 84].map((x) => `<path d="M${x} 0V80"/>`).join("")}${[14, 28, 42, 56, 70].map((y) => `<path d="M0 ${y}H100"/>`).join("")}</g>
-        <path d="M0 84 C 20 80, 40 86, 60 82 S 90 76, 100 78 L100 100 L0 100Z" fill="var(--sq-accent-secondary-soft)"/>
-        <path d="${pathOf(LINE2)}" stroke="var(--sq-accent-secondary)" stroke-width="1.2" fill="none" opacity=".75"/>
-        <path d="${pathOf(LINE1)}" stroke="var(--sq-accent-primary)" stroke-width="1.2" fill="none" opacity=".85"/>
-      </svg>
-      <span class="label" style="position:absolute;left:12px;bottom:12px">Lake Ontario</span>
-      ${you ? `<span class="you" style="left:${you[0]}%;top:${you[1]}%" title="You"></span><span class="caption" style="position:absolute;left:${Math.min(you[0], 78)}%;top:calc(${you[1]}% + 12px);font-weight:700">${o[2]}</span>` : ""}
-      ${pins}
-    </div>
-    <p class="small muted">Pink pins show your match; lime pins are free. Lines are the Line 1 and Line 2 subways.${outside ? ` ${outside} more ${outside === 1 ? "is" : "are"} outside this map.` : ""}</p>`;
+    const ok = new Set((u.feed && u.feed.eligible) || []);
+    const vibes = tileVibes(label);
+    return SQ.d.events.filter((e) => live(e, u) && (ok.has(e.id) || pick(e)) && (e.vibes || []).some((v) => vibes.includes(v)))
+      .sort((a, b) => matchOf(b) - matchOf(a) || a.startsAt.localeCompare(b.startsAt));
   }
+  const mixes = () => {
+    const mine = SQ.pickedTiles(me());
+    return TILES.map((t) => [t[0], MIX_PHOTO[t[0]] || t[1], mixEvents(t[0]).length]).filter((m) => m[2])
+      .sort((a, b) => mine.includes(b[0]) - mine.includes(a[0]) || b[2] - a[2]);
+  };
 
-  S.discover = { role: "attendee", label: "Discover (For You)", render: () => {
+  // Figma: Quest card (250 x 340, photo, scrim, match, save, info)
+  function questCard(e) {
+    const saved = me().saved.includes(e.id);
+    return `<div class="qcard" role="button" tabindex="0" data-act="openQuest" data-arg="${e.id}" aria-label="${esc(e.title)}">
+      ${poster(e)}<span class="scrim"></span>
+      <div class="qcard-top">${pillFor(e).replace('class="match', 'class="match on-photo')}
+        <button class="icon-btn glass qsave" data-act="save" data-arg="${e.id}" aria-label="${saved ? "Saved" : "Save"}" aria-pressed="${saved}">${icon(saved ? "bookmarkFill" : "bookmark")}</button></div>
+      <div class="qcard-info">
+        ${isToday(e) ? SQ.tag(hourOf(e) >= 17 ? "Tonight" : "Today", "hot") : ""}
+        <span class="t-title-l ellipsis">${esc(e.title)}</span>
+        <span class="t-data">${esc(qMeta(e))}</span>
+      </div>
+    </div>`;
+  }
+  // Figma: Quest row (64 photo, title, data line, match). host: true shows the plain listing and opens the host's tools.
+  function questRow(e, extra = "", { host = false } = {}) {
+    return `<button class="quest-row" data-act="${host ? "openHostQuest" : "openQuest"}" data-arg="${e.id}">
+      ${poster(e)}
+      <span class="text"><span>${esc(e.title)}</span><span>${esc(qMeta(e))}</span>${extra}</span>
+      ${host ? "" : pillFor(e)}
+    </button>`;
+  }
+  SQ.questRow = questRow;
+  SQ.questCard = questCard;
+
+  const bell = () => {
+    const n = me().notifications.filter((x) => !x.read).length;
+    return `<button class="icon-btn" data-go="notifications" aria-label="Notifications${n ? `, ${n} unread` : ""}">${icon("bell")}${n ? `<span class="count-badge">${n}</span>` : ""}</button>`;
+  };
+  const viewToggle = (on, [a, b] = ["Recommendations", "Map"], style = "") => `<div class="seg" style="${style}">
+    <button class="${on === "list" ? "on" : ""}" data-go="discover" aria-pressed="${on === "list"}">${a}</button>
+    <button class="${on === "map" ? "on" : ""}" data-go="discover-map" aria-pressed="${on === "map"}">${b}</button></div>`;
+  // The chip row: the default quick filters, or once Filters are set, a count and each filter that's on
+  function chipRow() {
+    const f = DF();
+    const on = activeFilters(f);
+    if (on.length) return `${chip(`Filters · ${on.length}`, true, { "data-go": "filters" }, "sliders")}${on.map(([l, [act, arg]]) => chip(l, true, { "data-act": act, "data-arg": arg })).join("")}`;
+    return `<button class="chip outline" data-go="filters">${icon("sliders")}Filters</button>
+      ${TODS.map(([l, ic]) => chip(l, f.tod === l, { "data-act": "dfTod", "data-arg": l }, ic)).join("")}
+      ${chip("Under $20", f.price === "Under $20", { "data-act": "dfSet", "data-arg": `price:${f.price === "Under $20" ? "" : "Under $20"}` })}`;
+  }
+  const discoverHead = () => {
     const u = me();
-    const unread = u.notifications.filter((n) => !n.read).length;
-    const feed = u.feed;
-    const list = feedEvents();
-    const hidden = feed && feed.eligible ? SQ.d.events.filter((e) => !e.over && !e.ended).length - feed.eligible.length : 0;
-    const hour = SQ.now().getHours();
-    const hello = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-    const f = U().filter;
+    const day = SQ.now().toLocaleDateString("en-US", { weekday: "long", timeZone: TZ });
+    return `<div class="disc-head">
+      <div class="disc-title"><span class="overline">${day} · Toronto</span><span class="t-display-xl">Your week,</span><span class="t-display-xl c-accent">picked.</span></div>
+      <div class="row start" style="gap:10px">${bell()}<button class="av" data-go="profile" aria-label="Profile">${esc((u.name || "Y")[0].toUpperCase())}</button></div>
+    </div>`;
+  };
 
+  S.discover = { role: "attendee", label: "Discover · list", render: () => {
+    const u = me();
+    const all = weekly();
+    const list = all.filter((e) => passes(e));
     let body;
-    if (!feed && U().feedLoading) body = `<div class="skeleton" style="height:340px"></div><div class="skeleton" style="height:96px"></div><div class="skeleton" style="height:96px"></div>`;
-    else if (f === "Map") body = cityMap(list);
-    else if (!list.length) body = empty("compass", f === "For You" ? "Nothing fits your limits right now." : `No quests ${f === "Free" ? "are free" : `on ${f.toLowerCase()}`} in your feed yet.`, btn("Request one instead", { "data-go": "request-new" }, "secondary", "megaphone"));
-    else body = `${featureCard(list[0])}
-      ${list.length > 1 ? `<div class="row"><h3 class="section-title">More for you</h3><span class="small muted">${list.length - 1} quests</span></div>${list.slice(1).map((e) => questRow(e)).join("")}` : ""}`;
-
-    return screen(`
-      <div class="pad stack" style="padding-top:12px">
-        <div class="row">
-          <div class="stack-xs"><span class="small muted">${hello}, ${esc(u.name || "there")}</span><h1 class="display-l">For You</h1></div>
-          <div class="row start" style="gap:2px">
-            <button class="icon-btn" data-act="addEvent" aria-label="Add an event" title="Add an event">${icon("plus")}</button>
-            <button class="icon-btn" data-go="notifications" aria-label="Notifications${unread ? `, ${unread} unread` : ""}">${icon("bell")}${unread ? `<span class="dot">${unread}</span>` : ""}</button>
-            <button data-go="profile" aria-label="Profile">${avatar(u.name || "You", "lg")}</button>
-          </div>
-        </div>
-        <form class="search" data-act="search">
-          ${icon("search")}<input data-bind="search.q" value="${esc(U().search.q)}" placeholder="What are you in the mood for?" aria-label="Search quests" enterkeyhint="search">
-          <button class="icon-btn" type="submit" aria-label="Search">${icon("sparkle")}</button>
-        </form>
-        <div class="chips scroll-x">${FILTERS.map(([l, ic]) => chip(l, f === l, { "data-act": "setFilter", "data-arg": l }, ic)).join("")}</div>
-        ${U().feedLoading ? thinking(feed ? "Re-tuning your feed…" : `Your taste avatar is picking your first quests${SQ.d.mode === "claude-code" ? " (Claude Code can take a minute)" : ""}…`) : ""}
-        ${U().feedError ? `<div class="notice hot">${icon("x")}<span>${esc(U().feedError)}</span></div>` : ""}
-        ${feed && !U().feedLoading ? `<div class="row small"><span class="muted">${aiTag(feed.mode)}</span>${hidden ? `<button class="link muted" data-go="profile">${hidden} hidden by your budget or trip time</button>` : ""}</div>` : ""}
-        ${feed && feed.error ? `<div class="notice">${icon("sparkle")}<span>The AI didn't answer (${esc(feed.error.slice(0, 120))}), so these are keyword matches.</span></div>` : ""}
+    if (!u.feed && U().feedLoading) body = `<div class="pad stack"><div class="sixer-msg">${SQ.sixer()}<div class="bubble-s">${thinking("Picking this week's sidequests…")}</div></div><div class="skeleton" style="height:340px"></div></div>`;
+    else if (!list.length) body = `<div class="empty-state">
+        <span class="illo">${icon("search")}</span>
+        <p class="t-title-l">${all.length ? "No sidequests match these filters." : "No sidequests picked yet."}</p>
+        <p class="t-body-l c-secondary">Loosen a filter, or ask hosts to put this on. When enough people ask, you hear first.</p>
+        <div class="btn-row">${btn("Clear filters", { "data-act": "dfClear" }, "outline m")}${btn("Request it", { "data-go": "request-new" }, "primary m", "bulb")}</div>
+      </div>`;
+    else {
+      const m = mixes();
+      body = `<section class="disc-sec">
+          <div class="pad-x stack" style="gap:2px"><div class="section-header"><h2>Weekly Sidequests</h2><button data-go="weekly">See all</button></div><span class="t-caption c-secondary">Fresh every Monday</span></div>
+          <div class="hscroll">${list.slice(0, 12).map(questCard).join("")}</div>
+        </section>
+        ${m.length ? `<section class="disc-sec">
+          <div class="pad-x section-header"><h2>Vibe Mixes</h2></div>
+          <div class="hscroll">${m.map(([l, p, n]) => `<button class="mix" data-act="openMix" data-arg="${esc(l)}"><span class="mix-cover">${ph(p)}<span class="scrim"></span><span class="t-title-l">${esc(l)}</span></span><span class="t-caption c-secondary">${n} this week</span></button>`).join("")}</div>
+        </section>` : ""}`;
+    }
+    return screen(`${discoverHead()}
+      <div class="disc-body">
+        <div class="pad-x stack-sm">${viewToggle("list")}<span class="t-caption c-tertiary">${list.length} sidequest${list.length === 1 ? "" : "s"} this week</span></div>
+        <div class="chips scroll-x disc-chips pad-x">${chipRow()}</div>
+        ${U().feedError ? `<div class="pad-x"><div class="notice hot">${icon("x")}<span>${esc(U().feedError)}</span></div></div>` : ""}
         ${body}
       </div>`, { tabbar: attendeeTabs("discover") });
+  } };
+
+  // Figma: 09 Discover · map and 10 Map · pin selected
+  S["discover-map"] = { role: "attendee", label: "Discover · map", render: () => {
+    const u = me();
+    const list = weekly().filter((e) => passes(e) && e.venue && e.venue.lat != null);
+    const sel = list.find((e) => e.id === U().mapSel);
+    const f = DF();
+    const pins = list.map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, tier: SQ.matchTier(matchOf(e)), selected: sel === e, act: "mapPin", arg: e.id, label: e.title }));
+    const home = u.homeArea || homeLL(u);
+    const going = sel ? [...partyGoing(sel), ...(sel.friends || []).filter((x) => !partyGoing(sel).includes(x))] : [];
+    return screen(`<div class="disc-map">
+      ${SQ.mapView("discover", { pins, home, labels: ["Kensington", "Queen West", ...(u.areas || [])] })}
+      <div class="map-ctrls">
+        <div class="row" style="gap:10px">${sel ? `${viewToggle("map", ["List", "Map"], "width:180px")}<span class="grow"></span>` : viewToggle("map")}${bell()}</div>
+        <form class="search surface" data-act="search">${icon("search")}<input data-bind="search.q" value="${esc(U().search.q)}" placeholder="What are you up for?" aria-label="Search sidequests" enterkeyhint="search"></form>
+        <div class="chips scroll-x">${chip("Your vibes", !f.cats.length, { "data-act": "dfCats", "data-arg": "" })}${CAT_TILES.slice(0, 4).map((l) => chip(l, f.cats.length === 1 && f.cats[0] === l, { "data-act": "dfCats", "data-arg": l })).join("")}</div>
+      </div>
+      <div class="map-zoom-at">${SQ.mapZoom("discover")}</div>
+      ${sel ? `<div class="sheet">
+          <span class="grabber"></span>
+          <div class="row start" style="gap:14px">${poster(sel, "", { style: "width:96px;height:96px;border-radius:16px" })}
+            <div class="stack grow" style="gap:5px;min-width:0">${pillFor(sel)}<span class="t-title-l">${esc(sel.title)}</span><span class="t-data c-secondary">${esc(qMeta(sel))}</span>
+              ${going.length ? `<span class="row start t-caption c-secondary" style="gap:8px">${avatars(going, 3, "xs")}${esc(going.slice(0, 2).join(" and "))} ${going.length > 1 ? "are" : "is"} going</span>` : ""}</div></div>
+          <div class="row" style="gap:10px">${btn("View sidequest", { "data-act": "openQuest", "data-arg": sel.id }, "primary m", "arrow")}
+            ${iconBtn(u.saved.includes(sel.id) ? "bookmarkFill" : "bookmark", { "data-act": "save", "data-arg": sel.id, "aria-label": "Save" }, "outline")}${iconBtn("share", { "data-act": "share", "data-arg": sel.id, "aria-label": "Share" }, "outline")}</div>
+        </div>` : `<div class="map-legend-at">${SQ.mapLegend()}</div>
+        <div class="hscroll map-cards">${list.slice(0, 12).map((e) => `<button class="map-card" data-act="mapPin" data-arg="${e.id}">${poster(e)}<span class="stack grow" style="gap:4px;min-width:0"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-data c-secondary ellipsis">${esc(`${dayTime(e)} · ${e.neighbourhood}`)}</span>${pillFor(e)}</span></button>`).join("")}</div>`}
+    </div>`, { tabbar: attendeeTabs("discover"), cls: "bleed" });
+  } };
+
+  S.filters = { role: "attendee", label: "Filters", render: () => {
+    const f = DF();
+    const n = weekly().filter((e) => passes(e)).length;
+    const group = (title, chips) => `<div class="stack" style="gap:10px"><h2 class="t-title-m">${title}</h2><div class="chips">${chips}</div></div>`;
+    const set = (key, list) => list.map(([v, l = v]) => chip(l, f[key] === v, { "data-act": "dfSet", "data-arg": `${key}:${v}` })).join("");
+    return screen(`<div class="pad stack" style="gap:20px;padding-top:8px">
+      ${group("Category", chip("Any", !f.cats.length, { "data-act": "dfCats", "data-arg": "" }) + CAT_TILES.map((c) => chip(c, f.cats.includes(c), { "data-act": "dfCat", "data-arg": c })).join(""))}
+      <hr class="divider">${group("Price", set("price", [["", "Any price"], ...PRICES.map((p) => [p])]))}
+      <hr class="divider">${group("Distance from home", set("dist", [["", "Anywhere"], ...DISTS.map((d) => [d[0]])]))}
+      <hr class="divider">${group("Who’s going", chip("Anyone", !f.friends, { "data-act": "dfFriends", "data-arg": "" }) + chip("Friends going", f.friends, { "data-act": "dfFriends", "data-arg": "1" }, "crew"))}
+      <hr class="divider">${group("Starts after", set("after", [["", "Any time"], ...AFTER.map((a) => [a[0]])]))}
+      <hr class="divider">${group("Amenities", AMEN.map(([l, , ic]) => chip(l, f.amen.includes(l), { "data-act": "dfAmen", "data-arg": l }, ic || "")).join(""))}
+    </div>`, { title: "Filters", close: true, footer: `<div class="footer-bar row">${btn("Clear", { "data-act": "dfClear", style: "width:110px;flex:none" }, "outline")}${btn(`Show ${n} sidequest${n === 1 ? "" : "s"}`, { "data-back": "" })}</div>` });
+  } };
+
+  // Figma: Weekly Quests · full list
+  const WEEK_TABS = [["All", () => true], ["Tonight", (e) => isToday(e) && hourOf(e) >= 17], ["Weekend", isWeekend], ["Free", (e) => e.price === 0]];
+  const rows = (list, divided) => list.map((e) => questRow(e)).join(divided ? '<hr class="divider">' : "");
+  S.weekly = { role: "attendee", label: "Weekly Sidequests", render: () => {
+    const all = weekly();
+    const tab = U().weekTab || "All";
+    const list = all.filter(WEEK_TABS.find((t) => t[0] === tab)[1]);
+    const monday = new Date(SQ.now());
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    return screen(`<div class="pad stack" style="gap:14px;padding-top:4px">
+      <div class="title-block stack-sm"><span class="overline">Week of ${monday.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span><h1 class="t-display-l">Weekly Sidequests</h1>
+        <p class="t-body-l c-secondary">This week’s picks, refreshed every Monday. Ranked by how well they match you.</p></div>
+      <div class="chips scroll-x">${WEEK_TABS.map(([l]) => chip(l === "All" ? `All ${all.length}` : l, tab === l, { "data-act": "setWeekTab", "data-arg": l })).join("")}</div>
+      <div class="stack" style="gap:14px;padding-top:6px">${list.length ? rows(list, true) : empty("search", "Nothing in this week's picks for that.")}</div>
+    </div>`, { title: "", right: iconBtn("share", { "data-act": "shareWeek", "aria-label": "Share" }) });
+  } };
+
+  // Figma: Vibe Mix · art style A (greyscale)
+  S.mix = { role: "attendee", label: "Vibe Mix", render: () => {
+    const label = U().mix || "Live Sets";
+    const t = TILES.find((x) => x[0] === label) || TILES[0];
+    const list = mixEvents(label);
+    return screen(`<div class="mix-hero">${ph(MIX_PHOTO[label] || t[1])}<span class="scrim"></span>
+        <div class="mix-nav">${iconBtn("back", { "data-back": "", "aria-label": "Back" }, "glass s")}${iconBtn("share", { "data-act": "shareMix", "aria-label": "Share" }, "glass s")}</div>
+        ${SQ.tag("Vibe Mix · rotates daily", "solid")}<h1 class="t-display-xl c-white">${esc(label)}</h1><p class="t-body-m c-white" style="opacity:.85">${list.length} sidequest${list.length === 1 ? "" : "s"} this week, ranked by match</p></div>
+      <div class="pad stack" style="gap:14px;padding-top:18px">${list.length ? rows(list) : empty("search", "Nothing in this mix this week.")}</div>`, { cls: "bleed" });
   } };
 
   // Search results: Sketch 0's matching, inside the For You flow
@@ -772,16 +890,25 @@
       </div>`, { title: "Add an event", footer: `<div class="action-bar">${btn("Add to Sidequest", { "data-act": "submitSpot" }, "primary", "plus")}</div>` });
   } };
 
+  // Figma: 15 Notifications. Today, then Earlier; each row opens what it's about.
+  const ago = (iso) => {
+    const m = Math.max(1, Math.round((SQ.now() - new Date(iso)) / 6e4));
+    return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
+  };
+  const notifIcon = (n) => (n.requestId ? "bulb" : n.rate ? "star" : /^Update/.test(n.title) ? "clock" : n.eventId ? "spark" : "bell");
   S.notifications = { role: "attendee", label: "Notifications", render: () => {
     const list = me().notifications.slice().reverse();
-    return screen(`
-      <div class="pad stack-sm">
-        ${list.length ? list.map((n) => `
-          <button class="notif${n.read ? "" : " unread"}" data-act="openNotif" data-arg="${n.id}">
-            <span class="ic-box">${icon(n.requestId ? "megaphone" : n.rate ? "star" : n.eventId ? "sparkle" : "bell")}</span>
-            <span class="stack-xs grow"><strong class="small">${esc(n.title)}</strong><span class="small muted">${esc(n.body)}</span></span>
-          </button>`).join("") : empty("bell", "No notifications yet. Requests you post or upvote show up here when a host picks them up.")}
-      </div>`, { title: "Notifications" });
+    const today = SQ.now().toDateString();
+    const row = (n) => `<button class="list-row divided notif-row" data-act="openNotif" data-arg="${n.id}">
+        <span class="lead-ic">${icon(notifIcon(n))}</span>
+        <span class="text"><span>${esc(n.title)}</span><span>${esc(n.body)}</span><span class="t-data c-tertiary">${ago(n.time)}</span></span>
+        ${/booked|is on|it.s happening/i.test(n.title) ? SQ.tag("Booked", "hot") : icon("chevR")}
+      </button>`;
+    const group = (label, items) => (items.length ? `<span class="overline${label === "Earlier" ? " notif-gap" : ""}">${label}</span>${items.map(row).join("")}` : "");
+    return screen(`<div class="pad" style="padding-top:8px">
+      ${list.length ? group("Today", list.filter((n) => new Date(n.time).toDateString() === today)) + group("Earlier", list.filter((n) => new Date(n.time).toDateString() !== today))
+        : empty("bell", "No notifications yet. Requests you post or upvote show up here when a host picks them up.")}
+    </div>`, { title: "Notifications", right: iconBtn("settings", { "data-go": "profile", "aria-label": "Notification settings" }) });
   } };
 
   /* ===================== Quest Log, rating, event day ===================== */

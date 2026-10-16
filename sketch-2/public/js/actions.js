@@ -108,9 +108,42 @@
   };
 
   // ---------- discover ----------
-  A.setFilter = (f) => {
-    U().filter = f;
+  // Discover filters (UI state; the feed itself stays the taste avatar's picks)
+  const DF = () => U().df;
+  A.dfTod = (v) => { DF().tod = v; };
+  A.dfSet = (kv) => {
+    const [k, v] = kv.split(/:(.*)/s);
+    DF()[k] = DF()[k] === v ? "" : v;
   };
+  A.dfCat = (c) => toggle(DF().cats, c);
+  A.dfCats = (c) => { DF().cats = c ? [c] : []; };
+  A.dfFriends = (v) => { DF().friends = !!v; };
+  A.dfAmen = (n) => toggle(DF().amen, n);
+  A.dfClear = () => { U().df = { tod: "Anytime", cats: [], price: "", dist: "", friends: false, after: "", amen: [] }; };
+  A.setWeekTab = (t) => { U().weekTab = t; };
+  A.openMix = (l) => {
+    U().mix = l;
+    return "mix";
+  };
+  A.mapPin = (id) => {
+    U().mapSel = U().mapSel === Number(id) ? null : Number(id);
+    const e = SQ.ev(id);
+    const v = U().maps.discover;
+    // bring the picked pin into view, above the sheet
+    if (U().mapSel && v && e.venue) [v.x, v.y] = SQ.projMap(e.venue.lat, e.venue.lng).map((n, i) => n + (i ? 120 / v.z : 0));
+    if (U().screen !== "discover-map") return "discover-map";
+  };
+  const shareText = async (text) => {
+    try {
+      if (navigator.share) await navigator.share({ title: "Sidequest", text });
+      else {
+        await navigator.clipboard.writeText(text);
+        toast("Copied. Paste it in your group chat.");
+      }
+    } catch {}
+  };
+  A.shareWeek = () => shareText("My Weekly Sidequests on Sidequest, picked for my taste.");
+  A.shareMix = () => shareText(`The ${U().mix || "Live Sets"} Vibe Mix on Sidequest this week.`);
   A.search = async () => {
     const s = U().search;
     const q = s.q.trim();

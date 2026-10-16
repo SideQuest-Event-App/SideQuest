@@ -235,7 +235,6 @@ h1, h2, h3 { margin: 0; font-weight: inherit; }
 .tab.on { color: var(--text-primary); }
 .tab.on::after { content: ""; position: absolute; top: 66px; left: 23px; width: 24px; height: 3px; border-radius: 2px; background: var(--action-primary); }
 .tab .dot { position: absolute; top: 2px; left: 42px; }
-@media (max-width: 760px) { .tabs { height: calc(62px + env(safe-area-inset-bottom, 0px)); } }
 
 /* ---------- Buttons (Primary / Secondary / Social / Hot / Outline / Ghost; L 52, M 44, S 34) ---------- */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-sm); height: 52px; padding: 0 var(--sp-2xl); border-radius: var(--r-full); font-weight: 600; font-size: 14px; line-height: 18px; white-space: nowrap; width: 100%; flex: none; }
@@ -694,3 +693,58 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .map-legend i { width: 8px; height: 8px; border-radius: 50%; background: var(--match-strong); }
 .map-legend i.close { background: var(--match-close); }
 .map-legend i.low { background: var(--match-low); }
+
+/* ---------- Discover (Figma: 03 Discover) ---------- */
+.pad-x { padding: 0 var(--sp-xl); }
+.disc-head { display: flex; gap: var(--sp-md); align-items: flex-start; padding: var(--sp-sm) var(--sp-xl) 0; }
+.disc-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.disc-body { display: flex; flex-direction: column; padding: var(--sp-lg) 0 var(--sp-2xl); }
+.disc-body > * + * { margin-top: 30px; }
+.disc-body > .disc-chips { margin: 6px 0 0; padding: 0 var(--sp-xl); }
+.disc-sec { display: flex; flex-direction: column; gap: var(--sp-md); }
+.hscroll { display: flex; gap: var(--sp-md); overflow-x: auto; padding: 0 var(--sp-xl); scrollbar-width: none; scroll-snap-type: x proximity; scroll-padding: 0 var(--sp-xl); }
+.hscroll::-webkit-scrollbar { display: none; }
+.hscroll > * { scroll-snap-align: start; }
+/* Quest card: 250 x 340, greyscale photo, scrim, match + save on top, info at the bottom */
+.qcard { position: relative; flex: none; width: 250px; height: 340px; border-radius: var(--r-2xl); overflow: hidden; background: var(--bg-raised); cursor: pointer; }
+.qcard > .poster { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; }
+.qcard-top { position: absolute; top: 0; left: 0; right: 0; padding: var(--sp-md); display: flex; align-items: center; justify-content: space-between; }
+.qcard .qsave { width: 34px; height: 34px; }
+.qcard .qsave .ic { width: 18px; height: 18px; }
+.qcard-info { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 var(--sp-lg) var(--sp-lg); display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-xs); color: var(--white); }
+.qcard-info .t-title-l { max-width: 100%; }
+/* Vibe Mix tile: 150 cover, title on the photo, count under it */
+.mix { flex: none; width: 150px; display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.mix-cover { position: relative; width: 150px; height: 150px; border-radius: var(--r-2xl); overflow: hidden; display: flex; align-items: flex-end; padding: var(--sp-md); color: var(--white); }
+.mix-cover > .ph, .mix-hero > .ph { position: absolute; inset: 0; }
+.mix-cover .t-title-l { position: relative; }
+/* Empty state (Figma: 12 No matches) */
+.empty-state { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 28px 28px 0; text-align: center; }
+.empty-state .illo { width: 96px; height: 96px; border-radius: var(--r-full); background: var(--action-primary-tint); display: grid; place-items: center; color: var(--action-primary); }
+.empty-state .illo .ic { width: 40px; height: 40px; }
+.empty-state .btn-row { width: 100%; padding-top: var(--sp-sm); gap: 10px; }
+/* Discover map: full-bleed map with the controls, legend and cards floating over it */
+.disc-map { position: relative; height: 100%; min-height: 600px; overflow: hidden; }
+.disc-map > .map { position: absolute; left: 0; right: 0; top: 0; bottom: 54px; }
+.map-ctrls { position: absolute; top: 28px; left: 0; right: 0; padding: var(--sp-sm) var(--sp-xl) 0; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+.map-ctrls > * { pointer-events: auto; }
+.search.surface { background: var(--bg-surface); padding: 0 var(--sp-lg); filter: drop-shadow(0 4px 8px rgba(19, 16, 27, 0.1)); }
+.map-zoom-at { position: absolute; right: var(--sp-xl); top: 250px; }
+.map-legend-at { position: absolute; left: var(--sp-xl); bottom: 135px; }
+.map-cards { position: absolute; left: 0; right: 0; bottom: 18px; }
+.map-card { flex: none; width: 290px; display: flex; gap: var(--sp-md); align-items: center; padding: 10px; border-radius: 18px; background: var(--bg-surface); border: 1px solid var(--border-subtle); filter: drop-shadow(0 4px 8px rgba(19, 16, 27, 0.1)); text-align: left; }
+.map-card > .poster { width: 72px; height: 72px; border-radius: var(--r-lg); }
+.map-card .match, .sheet .match { align-self: flex-start; }
+/* Bottom sheet (Figma: Selected sheet; Elevation/2 · Sheet) */
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; background: var(--bg-surface); border-radius: var(--r-3xl) var(--r-3xl) 0 0; padding: 10px var(--sp-xl) var(--sp-lg); display: flex; flex-direction: column; gap: var(--sp-md); box-shadow: 0 -8px 32px rgba(19, 16, 27, 0.28); }
+.sheet .grabber { align-self: center; width: 40px; height: 5px; border-radius: 3px; background: var(--border-default); }
+.sheet .btn { flex: 1; width: auto; }
+/* Vibe Mix hero */
+.mix-hero { position: relative; height: 300px; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 6px; padding: 28px var(--sp-xl) 22px; overflow: hidden; }
+.mix-hero > :not(.ph):not(.scrim) { position: relative; }
+.mix-hero > .mix-nav { position: absolute; top: 36px; left: var(--sp-xl); right: var(--sp-xl); display: flex; justify-content: space-between; }
+.footer-bar.row > .btn { flex: 1; width: auto; min-width: 0; }
+.notif-row { align-items: flex-start; }
+.notif-row .text { gap: 3px; }
+.notif-row > .ic:last-child { margin-top: 1px; }
+.notif-gap { display: block; padding-top: var(--sp-xl); }
