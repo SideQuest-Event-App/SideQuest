@@ -1,4 +1,4 @@
-/* Sketch 1 — app shell: server calls, navigation, rendering, AI loading, and the desktop side panel. */
+/* Sketch 2 — app shell: server calls, navigation, rendering, AI loading, and the desktop side panel. */
 (function () {
   const SQ = window.SQ;
   const screenEl = document.getElementById("screen");
@@ -62,7 +62,6 @@
     spotDraft: null, // the attendee's event form, filled from their poster
     shot: null, // the event being added from a screenshot
     flag: null, // { eventId, field, note }: the "Flag incorrect info" form
-    theme: store.get("sq2.theme") || "system",
   };
 
   // A random id for this browser tab, so analytics can count visits (it isn't tied to who you are)
@@ -260,20 +259,13 @@
 
   let toastTimer;
   function toast(msg) {
-    toastEl.textContent = msg;
+    toastEl.innerHTML = `${SQ.icon("check", "md")}<span>${SQ.esc(msg)}</span>`;
     toastEl.classList.add("show");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastEl.classList.remove("show"), 3600);
   }
   SQ.toast = toast;
 
-  SQ.setTheme = (t) => {
-    SQ.u.theme = t;
-    store.set("sq2.theme", t);
-    if (t === "system") document.documentElement.removeAttribute("data-theme");
-    else document.documentElement.setAttribute("data-theme", t);
-  };
-  SQ.setTheme(SQ.u.theme);
 
   // ---------- Events ----------
   let busy = false;
@@ -396,10 +388,13 @@
     pill.lastElementChild.textContent = mode === "api" ? `AI: Claude API (${SQ.d.model})` : mode === "claude-code" ? "AI: Claude Code" : "No AI: keyword matching";
     const role = SQ.screens[SQ.u.screen].role;
     document.querySelectorAll("#side-role button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.role === role)));
-    document.querySelectorAll("#side-theme button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themePick === SQ.u.theme)));
     const groups = { attendee: "Attendee app", host: "Host app" };
     jump.innerHTML = Object.entries(groups).map(([r, label]) => `<optgroup label="${label}">${Object.entries(SQ.screens).filter(([, s]) => s.role === r).map(([id, s]) => `<option value="${id}"${id === SQ.u.screen ? " selected" : ""}>${SQ.esc(s.label || id)}</option>`).join("")}</optgroup>`).join("");
-    document.getElementById("clock").textContent = SQ.now().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M/, "");
+    // Without an email service, the login code is shown here so the sketch can be tried (see README)
+    const code = document.getElementById("side-code");
+    const demo = SQ.u.login && SQ.u.login.demoCode;
+    code.hidden = !demo;
+    if (demo) code.innerHTML = `No email service is set up, so here's the code that would have been emailed to ${SQ.esc(SQ.u.login.email)}:<b>${SQ.esc(demo)}</b>`;
   }
   document.getElementById("side-role").addEventListener("click", (e) => {
     const b = e.target.closest("[data-role]");
@@ -413,13 +408,7 @@
     if (real !== id) toast(SQ.screens[id].role === "host" ? "Register or sign in as a host first." : "Sign up first.");
     SQ.go(id);
   });
-  document.getElementById("side-theme").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-theme-pick]");
-    if (b) {
-      SQ.setTheme(b.dataset.themePick);
-      render(false);
-    }
-  });
+  document.getElementById("side-brand").innerHTML = SQ.logo();
   document.getElementById("side-reset").addEventListener("click", async () => {
     if (!confirm("Reset everything? This deletes all accounts, requests, ratings and logs, and restores the sample data.")) return;
     await SQ.act("reset");
