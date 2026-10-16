@@ -303,11 +303,27 @@ const needHost = (ctx) => {
 // --- attendee account and onboarding ---
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const sameEmail = (a, b) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+// Usernames are unique, ignoring case and the leading @ (the sample friends' handles count as taken too)
+const handleOf = (s) => clean(s, 30).replace(/^@+/, "").toLowerCase();
+const handleTaken = (h, except) => !!h && (Object.values(db.data.users).some((u) => u !== except && handleOf(u.username) === h) || Object.values(db.FRIENDS).some((f) => handleOf(f.handle) === h));
+// Three free usernames built from the one asked for (or the name)
+function handleIdeas(want, name, except) {
+  const base = (handleOf(want) || clean(name, 30).toLowerCase()).replace(/[^a-z0-9._]/g, "").replace(/^\.+|\.+$/g, "") || "sidequester";
+  const first = clean(name, 30).toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9]/g, "");
+  const tries = [`${base}.out`, `${base}.to`, first && !base.startsWith(first) ? `${first}.${base}` : "", `${base}${new Date().getFullYear() % 100}`];
+  for (let n = 2; tries.length < 40; n++) tries.push(`${base}${n}`);
+  return [...new Set(tries.filter(Boolean))].filter((h) => !handleTaken(h, except)).slice(0, 3).map((h) => "@" + h);
+}
+A.checkUsername = (ctx, { username, name }) => {
+  const h = handleOf(username);
+  return handleTaken(h, ctx.user) ? { taken: true, suggestions: handleIdeas(h, name, ctx.user) } : { taken: false };
+};
 A.signup = (ctx, { name, email, username, phone }) => {
   const e = clean(email, 80);
   if (!clean(name, 30)) throw new Error("Add your name to continue.");
   if (!EMAIL.test(e)) throw new Error("Enter an email you can get codes at.");
   if (Object.values(db.data.users).some((u) => u !== ctx.user && sameEmail(u.email, e))) throw new Error("That email already has an account. Log in instead.");
+  if (handleTaken(handleOf(username), ctx.user)) throw new Error("That username is taken. Pick another.");
   const user = ctx.user || newUser();
   user.name = clean(name, 30);
   user.email = e;

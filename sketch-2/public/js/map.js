@@ -5,14 +5,15 @@
   const SQ = window.SQ;
   const { esc, icon } = SQ;
 
-  // Neighbourhood labels (and the areas onboarding can pick); origin is the trip-time start nearest each
+  // Neighbourhood labels (and the areas onboarding can pick); origin is the trip-time start nearest each,
+  // and km is roughly how far the area reaches from its centre (drawn as a circle on the areas map)
   const HOODS = [
-    ["Ossington", 43.6487, -79.4202, "union"], ["Kensington", 43.6547, -79.4005, "union"], ["Queen West", 43.6468, -79.4135, "union"],
-    ["The Annex", 43.6703, -79.4072, "union"], ["Roncesvalles", 43.6488, -79.4486, "kipling"], ["Liberty Village", 43.6383, -79.4206, "union"],
-    ["Little Italy", 43.6551, -79.4141, "union"], ["Chinatown", 43.6531, -79.3977, "union"], ["Leslieville", 43.6629, -79.3329, "kennedy"],
-    ["Distillery", 43.6503, -79.3596, "union"], ["Junction", 43.6655, -79.4655, "kipling"], ["Yorkville", 43.6709, -79.3933, "union"],
-    ["Church St", 43.6656, -79.3807, "union"], ["Danforth", 43.6787, -79.3497, "kennedy"], ["Parkdale", 43.6397, -79.4363, "kipling"],
-    ["Dundas West", 43.6512, -79.4316, "union"], ["St Lawrence", 43.6487, -79.3716, "union"], ["Harbourfront", 43.6389, -79.3817, "union"],
+    ["Ossington", 43.6487, -79.4202, "union", 0.6], ["Kensington", 43.6547, -79.4005, "union", 0.4], ["Queen West", 43.6468, -79.4135, "union", 0.8],
+    ["The Annex", 43.6703, -79.4072, "union", 0.9], ["Roncesvalles", 43.6488, -79.4486, "kipling", 0.8], ["Liberty Village", 43.6383, -79.4206, "union", 0.5],
+    ["Little Italy", 43.6551, -79.4141, "union", 0.6], ["Chinatown", 43.6531, -79.3977, "union", 0.5], ["Leslieville", 43.6629, -79.3329, "kennedy", 1.0],
+    ["Distillery", 43.6503, -79.3596, "union", 0.3], ["Junction", 43.6655, -79.4655, "kipling", 0.8], ["Yorkville", 43.6709, -79.3933, "union", 0.5],
+    ["Church St", 43.6656, -79.3807, "union", 0.6], ["Danforth", 43.6787, -79.3497, "kennedy", 1.2], ["Parkdale", 43.6397, -79.4363, "kipling", 0.9],
+    ["Dundas West", 43.6512, -79.4316, "union", 0.7], ["St Lawrence", 43.6487, -79.3716, "union", 0.5], ["Harbourfront", 43.6389, -79.3817, "union", 0.9],
   ];
   SQ.HOODS = HOODS;
   const hood = (name) => HOODS.find((h) => h[0] === name);
@@ -21,12 +22,13 @@
   // labels: neighbourhood names to label (true: all of them). Labels sit up and left of their spot, as the design draws them.
   // view: { lat, lng, zoom } at the centre; kept in SQ.u.maps[id] so re-renders and back keep the view.
   // The marks are rendered hidden here; initMaps puts them on the map.
-  SQ.mapView = (id, { pins = [], home = null, labels = true, view = { lat: 43.6419, lng: -79.3996, zoom: 12.4 }, cls = "", style = "" } = {}) => {
+  // circles: [{ lat, lng, km, on }] drawn under the pins, to show how big an area is
+  SQ.mapView = (id, { pins = [], home = null, labels = true, circles = [], view = { lat: 43.6419, lng: -79.3996, zoom: 12.4 }, cls = "", style = "" } = {}) => {
     const maps = (SQ.u.maps = SQ.u.maps || {});
     if (!maps[id]) maps[id] = { ...view };
     const homeLL = typeof home === "string" ? hood(home) && hood(home).slice(1, 3) : home;
     const at = (lat, lng) => `data-lat="${lat}" data-lng="${lng}"`;
-    return `<div class="map ${cls}" data-map="${esc(id)}" style="${style}">
+    return `<div class="map ${cls}" data-map="${esc(id)}" style="${style}" data-circles="${esc(JSON.stringify(circles))}">
       <div class="map-marks" hidden>
         ${labels ? HOODS.filter((h) => labels === true || labels.includes(h[0])).map(([n, la, ln]) => `<span class="map-label" ${at(la, ln)}>${esc(n)}</span>`).join("") : ""}
         ${homeLL ? `<span class="map-home" ${at(homeLL[0], homeLL[1])}><i>${icon("home2")}</i>Home</span>` : ""}
@@ -70,6 +72,23 @@
     };
   };
 
+  // A circle of km around a spot, as a GeoJSON polygon
+  const ring = ({ lat, lng, km, on }) => {
+    const dLat = km / 110.574, dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
+    const pts = Array.from({ length: 49 }, (_, i) => [lng + dLng * Math.cos((i / 48) * 2 * Math.PI), lat + dLat * Math.sin((i / 48) * 2 * Math.PI)]);
+    return { type: "Feature", properties: { on }, geometry: { type: "Polygon", coordinates: [pts] } };
+  };
+  function drawCircles(map, circles) {
+    const data = { type: "FeatureCollection", features: circles.map(ring) };
+    const src = map.getSource("circles");
+    if (src) return src.setData(data);
+    const css = getComputedStyle(document.documentElement);
+    const color = ["case", ["get", "on"], css.getPropertyValue("--match-strong").trim(), css.getPropertyValue("--match-low").trim()];
+    map.addSource("circles", { type: "geojson", data });
+    map.addLayer({ id: "circle-fill", type: "fill", source: "circles", paint: { "fill-color": color, "fill-opacity": ["case", ["get", "on"], 0.18, 0.08] } });
+    map.addLayer({ id: "circle-line", type: "line", source: "circles", paint: { "line-color": color, "line-width": 1.5, "line-opacity": 0.7 } });
+  }
+
   const live = {}; // map id -> { el, map, marks: [Marker] }
   function placeMarks(m, marks) {
     for (const k of m.marks) k.remove();
@@ -103,6 +122,12 @@
         m = live[id] = { el: ph, map, marks: [] };
       }
       placeMarks(m, marks);
+      const circles = JSON.parse(ph.dataset.circles || "[]");
+      if (circles.length || m.map.getSource("circles")) {
+        const map = m.map;
+        if (map.isStyleLoaded()) drawCircles(map, circles);
+        else map.once("style.load", () => drawCircles(map, circles));
+      }
     }
     // Maps no longer on screen let go of their WebGL context
     for (const id in live) if (!live[id].el.isConnected) {
