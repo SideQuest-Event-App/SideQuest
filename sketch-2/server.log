@@ -1,0 +1,4 @@
+Sketch 2 running at http://localhost:3001
+Database: data/db.json (no Supabase keys in .env)
+Claude Code not found and no API key — using keyword matching (not AI)
+2116 upcoming events in the database (imported 2026-10-15T04:29:11.502Z)

@@ -18,7 +18,7 @@ There's nothing to install. Copy `.env.example` to `.env` to turn on the AI (`AN
 - **Log in:** enter your email. If an account (attendee or host) uses it, a 6-digit code is sent and you go to the code screen. The right code takes you into that account.
   - With Supabase, Supabase Auth emails the code. Its "Magic Link" email template needs `{{ .Token }}` so the code is in the email.
   - Without Supabase there's no email service, so the code is shown in the side panel.
-- **Create an account:** pick "I'm going out" (attendee onboarding, 7 steps) or "I host events" (host onboarding, 8 steps).
+- **Create an account:** pick "I'm going out" (attendee onboarding, 7 steps) or "I host events" (host onboarding, 8 steps). Usernames are unique; if one is taken, three free ones are suggested.
 
 ## What's in it
 

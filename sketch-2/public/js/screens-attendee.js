@@ -160,11 +160,10 @@
       ${obHead(1, "Make your account")}
       <form class="ob-body" style="gap:14px" data-act="signup">
         ${field("Name", "signup.name", f.name, "text", "Alex Morgan", { autocomplete: "name" })}
-        ${field("Username", "signup.username", f.username, "text", "@alex.out", { autocomplete: "username", help: "Friends find you by your username." })}
-        ${field("Email", "signup.email", f.email, "email", "alex@example.com", { icon: "mail", autocomplete: "email", inputmode: "email" })}
+        ${field("Username", "signup.username", f.username, "text", "alex.out", { autocomplete: "username", help: "Friends find you by your username.", error: f.taken && "That username is taken. Try one of these:" })}
+        ${f.taken && f.taken.length ? `<div class="chips">${f.taken.map((h) => `<button class="chip outline" data-act="pickUsername" data-arg="${esc(h)}">${esc(h)}</button>`).join("")}</div>` : ""}
+        ${field("Email", "signup.email", f.email, "email", "alex@example.com", { icon: "mail", autocomplete: "email", inputmode: "email", help: "Use an email you can open. Your login codes are sent there, and you can't log back in without it." })}
         ${field("Phone", "signup.phone", f.phone, "tel", "(416) 555-0144", { icon: "phone", autocomplete: "tel" })}
-        <div class="divider-or">or</div>
-        <div class="btn-row" style="gap:10px">${btn("Apple", { type: "button", "data-act": "toast", "data-arg": "Apple sign-in isn't connected in this sketch. Use your email above." }, "outline m", "apple")}${btn("Google", { type: "button", "data-act": "toast", "data-arg": "Google sign-in isn't connected in this sketch. Use your email above." }, "outline m", "google")}</div>
       </form>`, { footer: footer(btn("Continue", { "data-act": "signup" }), note("By continuing you agree to the Terms and Privacy Policy.")) });
   } };
 
@@ -210,18 +209,19 @@
   S["ob-areas"] = { role: "attendee", label: "Onboarding: areas you frequent", render: () => {
     const u = me() || {};
     const mine = u.areas || [];
-    const home = u.homeArea;
     const shown = [...new Set([...mine, ...SQ.HOODS.map((h) => h[0])])].slice(0, Math.max(6, mine.length + 3));
     const q = U().areaText.trim().toLowerCase();
     const found = q ? SQ.HOODS.filter((h) => h[0].toLowerCase().includes(q)).slice(0, 4) : [];
     return screen(`
       ${obHead(5, "Which areas do you frequent?")}
       <div class="ob-body" style="gap:14px;padding-top:16px">
-        ${SQ.mapView("areas", { home, view: { lat: 43.6502, lng: -79.4103, zoom: 12.6 }, labels: mine, style: "height:250px;border-radius:20px",
-          pins: SQ.HOODS.filter((h) => h[0] !== home && shown.includes(h[0])).map(([n, lat, lng]) => ({ lat, lng, tier: mine.includes(n) ? "strong" : "low", selected: mine.includes(n), act: "toggleArea", arg: n, label: n })) })}
+        ${SQ.mapView("areas", { view: { lat: 43.6502, lng: -79.4103, zoom: 12.6 }, labels: mine, style: "height:250px;border-radius:20px",
+          pins: SQ.HOODS.filter((h) => shown.includes(h[0])).map(([n, lat, lng]) => ({ lat, lng, tier: mine.includes(n) ? "strong" : "low", selected: mine.includes(n), act: "toggleArea", arg: n, label: n })),
+          circles: SQ.HOODS.filter((h) => shown.includes(h[0])).map(([n, lat, lng, , km]) => ({ lat, lng, km, on: mine.includes(n) })) })}
+        <p class="t-caption c-secondary" style="margin-top:-6px">Each circle shows roughly how far an area reaches.</p>
         <form class="search" data-act="addArea">${icon("search")}<input data-bind="areaText" data-live value="${esc(U().areaText)}" placeholder="Add a neighbourhood" aria-label="Add a neighbourhood" enterkeyhint="done"></form>
         ${found.length ? `<div class="chips">${found.map(([n]) => chip(n, mine.includes(n), { "data-act": "toggleArea", "data-arg": n }, "plus")).join("")}</div>` : ""}
-        <div class="chips">${shown.map((n) => n === home ? chip(`${n} · home`, true, { "data-act": "toggleArea", "data-arg": n }, "home2") : `<button class="chip ${mine.includes(n) ? "on" : "outline"}" data-act="toggleArea" data-arg="${esc(n)}" aria-pressed="${mine.includes(n)}">${esc(n)}</button>`).join("")}</div>
+        <div class="chips">${shown.map((n) => `<button class="chip ${mine.includes(n) ? "on" : "outline"}" data-act="toggleArea" data-arg="${esc(n)}" aria-pressed="${mine.includes(n)}">${esc(n)}</button>`).join("")}</div>
       </div>`, { footer: footer(btn("Continue", { "data-go": "ob-party" })) });
   } };
 

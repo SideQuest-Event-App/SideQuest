@@ -27,8 +27,17 @@
     return "discover";
   };
   A.signup = async () => {
-    await SQ.act("signup", U().signup);
+    const f = U().signup;
+    f.taken = null;
+    if (f.username.trim()) {
+      const r = await SQ.act("checkUsername", { username: f.username, name: f.name });
+      if (r.taken) return void (f.taken = r.suggestions);
+    }
+    await SQ.act("signup", f);
     return "ob-vibes";
+  };
+  A.pickUsername = (h) => {
+    Object.assign(U().signup, { username: h, taken: null });
   };
   // Log in: email -> 6-digit code -> whichever account (attendee or host) uses that email
   A.requestCode = async () => {
