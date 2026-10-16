@@ -8,8 +8,8 @@ const crypto = require("crypto");
 const zlib = require("zlib");
 
 // --- Load .env (so the API key never lives in the code). Must run before lib/ai.js loads. ---
-const envPath = path.join(__dirname, ".env");
-if (fs.existsSync(envPath)) {
+// Sketch 2's own .env wins; anything it leaves out (or no .env at all) comes from Sketch 1's, so one set of Supabase keys does both.
+for (const envPath of [path.join(__dirname, ".env"), path.join(__dirname, "..", "sketch-1", ".env")]) if (fs.existsSync(envPath)) {
   for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
     const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/);
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
@@ -1613,7 +1613,15 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 400, { error: err.message });
       }
       trackAction(type, { userId: result.userId || userId, hostId: result.hostId || hostId, sessionId, args, result });
-      db.save();
+      // A new account (or a new login email) is written before we answer, so "Continue" never means "saved later, maybe"
+      if (type === "signup" || (type === "hostSet" && args && args.email)) {
+        try {
+          await db.saveNow();
+        } catch (err) {
+          console.error("Save failed:", err.message);
+          return sendJSON(res, 500, { error: "Your account couldn't be saved. Try again in a moment." });
+        }
+      } else db.save();
       return sendJSON(res, 200, { result, state: view(result.userId || userId, result.hostId || hostId) });
     }
     if (req.method === "GET" && url.pathname === "/api/events") {
