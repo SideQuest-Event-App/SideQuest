@@ -61,7 +61,7 @@
     feedLoading: false,
     feedError: null,
     blendLoading: false,
-    hostReg: { name: "", email: "", bio: "", social: "", biz: "", pastLinks: "", address: "", capacity: "", ticketLink: "", team: [{ email: "", role: "Editor" }] },
+    hostReg: { name: "", email: "", website: "", role: "", social: "", ticketLink: "", docKind: "Business registration", docFile: "", invite: "", inviteRole: "Door staff", team: [], claim: null },
     hostDraft: null,
     drafting: false,
     msg: { eventId: null, text: "", audience: "attendees" },

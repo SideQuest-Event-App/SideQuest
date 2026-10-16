@@ -40,12 +40,15 @@ const TRANSIT = ["TTC", "Bike", "Walk", "Drive", "Rideshare"];
 const RATE_TAGS = ["The people", "The vibe", "The price", "Easy to get to", "My crew"];
 const RATE_DETAILS = ["Host", "Ambience", "Venue", "Accessibility", "Vibes"];
 const HOST_TYPES = [
-  ["Venue", "You run a bar, club, gallery, or space"],
-  ["Promoter or organizer", "You put on nights at other venues"],
-  ["Artist or collective", "You perform, DJ, or curate"],
-  ["Community group", "You organize for a community or cause"],
-  ["Brand", "You host activations and pop-ups"],
+  ["Promoter or collective", "Nights, series, pop-ups"],
+  ["Venue", "A room people come back to"],
+  ["Independent artist", "Shows, workshops, listening sessions"],
+  ["Community group", "Run clubs, meetups, free events"],
+  ["Business", "Shops, restaurants, studios"],
 ];
+const HOST_DOCS = ["Business registration", "Government photo ID", "Proof of venue or address"];
+const TEAM_ROLES = ["Owner", "Admin", "Door staff", "Chat moderator"];
+const AGE_POLICIES = ["All ages", "19+", "It depends"];
 const FLAG_FIELDS = ["Title", "Date or time", "Venue", "Price", "Organizer", "Description", "Not a real event", "Other"];
 const PAST_SUGGESTIONS = ["Nuit Blanche 2025", "Toronto Zine Fair", "Hot Docs screening", "Night market at Stackt", "Comedy Bar open mic", "Field Trip Festival", "Bloor St Culture Corridor walk", "Fan Expo Canada"];
 
@@ -585,11 +588,17 @@ A.checkIn = (ctx, { eventId, how }) => {
 A.hostSet = (ctx, args) => {
   let h = ctx.host;
   if (!h) {
-    h = { id: newId(), createdAt: new Date().toISOString(), type: "", name: "", email: "", bio: "", vibes: [], area: "", social: "", ticketing: "", ticketLink: "", team: [{ email: "", role: "Editor" }], verification: "none", registered: false };
+    h = { id: newId(), createdAt: new Date().toISOString(), type: "", name: "", email: "", bio: "", vibes: [], area: "", social: "", ticketing: "", ticketLink: "", team: [], verification: "none", registered: false };
     db.data.hosts[h.id] = h;
   }
   if (args.type && HOST_TYPES.some(([t]) => t === args.type)) h.type = args.type;
-  for (const k of ["email", "bio", "social", "ticketLink"]) if (args[k] !== undefined) h[k] = clean(args[k], k === "bio" ? 300 : 120);
+  for (const k of ["email", "bio", "social", "ticketLink", "website", "role"]) if (args[k] !== undefined) h[k] = clean(args[k], k === "bio" ? 300 : 120);
+  if (Array.isArray(args.vibes)) h.vibes = [...new Set(args.vibes.filter((v) => VIBES.includes(v)))];
+  if (Array.isArray(args.areas)) h.areas = [...new Set(args.areas.map((a) => clean(a, 30)).filter(Boolean))].slice(0, 8);
+  if (AGE_POLICIES.includes(args.agePolicy)) h.agePolicy = args.agePolicy;
+  if (typeof args.logo === "string" && /^data:image\/jpeg;base64,/.test(args.logo) && args.logo.length < 120000) h.logo = args.logo;
+  // The document itself stays on the host's device in this sketch; we keep which kind and the file name for the review
+  if (args.verifyDoc && HOST_DOCS.includes(args.verifyDoc.kind)) h.verifyDoc = { kind: args.verifyDoc.kind, file: clean(args.verifyDoc.file || "", 80) };
   if (args.name !== undefined) {
     const name = clean(args.name, 60);
     if (name && Object.values(db.data.hosts).some((x) => x !== h && x.name === name)) throw new Error("A host with that name already exists.");
@@ -598,7 +607,7 @@ A.hostSet = (ctx, args) => {
   if (args.toggleVibe && VIBES.includes(args.toggleVibe)) toggle(h.vibes, args.toggleVibe);
   if (args.area !== undefined && AREAS.includes(args.area)) h.area = args.area;
   if (args.ticketing !== undefined) h.ticketing = clean(args.ticketing, 40);
-  if (Array.isArray(args.team)) h.team = args.team.slice(0, 8).map((m) => ({ email: clean(m.email, 80), role: ["Owner", "Editor", "Door staff"].includes(m.role) ? m.role : "Editor" }));
+  if (Array.isArray(args.team)) h.team = args.team.slice(0, 8).map((m) => ({ email: clean(m.email, 80), role: TEAM_ROLES.includes(m.role) ? m.role : "Admin", status: m.status === "Joined" ? "Joined" : "Invited" }));
   if (args.submit) {
     if (!h.name) throw new Error("Add your host name first.");
     h.verification = "pending";
@@ -616,7 +625,7 @@ A.hostLoginAs = (ctx, { name }) => {
   if (!evs.length) throw new Error("Unknown host.");
   let h = Object.values(db.data.hosts).find((x) => x.name === name);
   if (!h) {
-    h = { id: newId(), createdAt: new Date().toISOString(), type: "Promoter or organizer", name, email: "", bio: evs[0].organizer.review, vibes: [...new Set(evs.flatMap((e) => e.vibes))], area: evs[0].area, social: "", ticketing: "Eventbrite", ticketLink: "", team: [], verification: "approved", registered: true };
+    h = { id: newId(), createdAt: new Date().toISOString(), type: "Promoter or collective", name, email: "", bio: evs[0].organizer.review, vibes: [...new Set(evs.flatMap((e) => e.vibes))], area: evs[0].area, social: "", ticketing: "Eventbrite", ticketLink: "", team: [], verification: "approved", registered: true };
     db.data.hosts[h.id] = h;
   }
   return { hostId: h.id };

@@ -87,11 +87,12 @@
   const WHEN_TILES = [["Mornings", "sun", "Before noon"], ["Afternoons", "sunset", "12 to 5 PM"], ["Evenings", "moon", "5 to 9 PM"], ["Late nights", "spark", "After 9 PM"]];
   const STEPS = 7;
   // Back, progress and "2/7", then the title block
-  const obHead = (n, title, sub, back = true) => `<div class="ob-head">
-      <div class="ob-nav">${back ? iconBtn("back", { "data-back": "", "aria-label": "Back" }, "s") : ""}${n ? `${progress(n, STEPS)}<span class="step">${n}/${STEPS}</span>` : ""}</div>
+  const obHead = (n, title, sub, back = true, steps = STEPS) => `<div class="ob-head">
+      <div class="ob-nav">${back ? iconBtn("back", { "data-back": "", "aria-label": "Back" }, "s") : ""}${n ? `${progress(n, steps)}<span class="step">${n}/${steps}</span>` : ""}</div>
       ${title ? `<div class="title-block"><h1 class="t-display-l">${esc(title)}</h1>${sub ? `<p class="t-body-l">${esc(sub)}</p>` : ""}</div>` : ""}
     </div>`;
   const footer = (main, note = "") => `<div class="footer-bar">${main}${note}</div>`;
+  Object.assign(SQ, { obHead, obFooter: footer });
   const note = (text, a = {}) => `<${a["data-go"] || a["data-act"] ? "button" : "p"} class="note" ${SQ.attr(a)}>${esc(text)}</${a["data-go"] || a["data-act"] ? "button" : "p"}>`;
 
   S.landing = { role: "attendee", label: "Landing", render: () => screen(`

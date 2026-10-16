@@ -598,12 +598,15 @@
     SQ.back();
   };
   // A small square photo, so it fits in the profile
-  A.profilePhoto = async (file) => {
+  async function square(file) {
     const bmp = await createImageBitmap(file);
     const side = Math.min(bmp.width, bmp.height);
     const c = Object.assign(document.createElement("canvas"), { width: 256, height: 256 });
     c.getContext("2d").drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, 256, 256);
-    await SQ.act("setProfile", { photo: c.toDataURL("image/jpeg", 0.8) });
+    return c.toDataURL("image/jpeg", 0.8);
+  }
+  A.profilePhoto = async (file) => {
+    await SQ.act("setProfile", { photo: await square(file) });
   };
   A.switchToHost = () => (SQ.d.host ? "host-dashboard" : "host-type");
   A.switchToAttendee = () => (me() ? (me().registered ? "discover" : "ob-vibes") : "landing");
@@ -618,7 +621,8 @@
   A.hostType = (t) => SQ.act("hostSet", { type: t });
   A.hostTypeNext = () => {
     const r = U().hostReg;
-    if (SQ.d.host && SQ.d.host.name && !r.name) Object.assign(r, { name: SQ.d.host.name, email: SQ.d.host.email });
+    const h = SQ.d.host;
+    if (h && h.name && !r.name) Object.assign(r, { name: h.name, email: h.email, website: h.website || "", role: h.role || "", social: h.social, ticketLink: h.ticketLink, team: (h.team || []).slice() });
     return "host-account";
   };
   A.hostLoginAs = async (name) => {
@@ -629,32 +633,93 @@
   };
   A.hostAccount = async () => {
     const r = U().hostReg;
-    if (!r.name.trim()) return toast("Add your host or venue name.");
-    await SQ.act("hostSet", { name: r.name, email: r.email });
+    if (!r.name.trim()) return toast("Add your host name.");
+    if (r.email.trim() && !/^\S+@\S+\.\S+$/.test(r.email.trim())) return toast("Check your work email.");
+    await SQ.act("hostSet", { name: r.name, email: r.email, website: r.website, role: r.role });
+    return "host-verify";
+  };
+  A.hostDoc = (k) => {
+    U().hostReg.docKind = k;
+  };
+  A.hostDocFile = (file) => {
+    if (file.size > 10 * 1024 * 1024) return toast("That file is over 10 MB.");
+    U().hostReg.docFile = file.name;
+  };
+  A.hostVerifyNext = async () => {
+    const r = U().hostReg;
+    if (!r.docFile) return toast("Upload the document first.");
+    await SQ.act("hostSet", { verifyDoc: { kind: r.docKind, file: r.docFile } });
     return "host-profile";
   };
-  A.hostVibe = (v) => SQ.act("hostSet", { toggleVibe: v });
-  A.hostArea = (a) => SQ.act("hostSet", { area: a });
+  // Your vibes: each tile stands for a few vibes, all on or all off
+  A.hostTile = (label) => {
+    const t = SQ.TILES.find((x) => x[0] === label);
+    const now = SQ.d.host.vibes;
+    const on = t[2].some((v) => now.includes(v));
+    return SQ.act("hostSet", { vibes: on ? now.filter((v) => !t[2].includes(v)) : [...now, ...t[2]] });
+  };
+  A.hostArea = (a) => {
+    const now = SQ.d.host.areas || [];
+    return SQ.act("hostSet", { areas: now.includes(a) ? now.filter((x) => x !== a) : [...now, a] });
+  };
+  A.hostAddArea = () => {
+    const q = (prompt("Which neighbourhood?") || "").trim().toLowerCase();
+    if (!q) return;
+    const hood = SQ.HOODS.find((x) => x[0].toLowerCase().includes(q));
+    if (!hood) return toast("We don’t know that neighbourhood yet.");
+    if (!(SQ.d.host.areas || []).includes(hood[0])) return A.hostArea(hood[0]);
+  };
+  A.hostAge = (a) => SQ.act("hostSet", { agePolicy: a });
+  A.hostLogo = async (file) => {
+    await SQ.act("hostSet", { logo: await square(file) });
+  };
   A.hostProfile = async () => {
-    const r = U().hostReg;
-    await SQ.act("hostSet", { bio: r.bio, social: r.social });
-    return "host-verify";
+    const h = SQ.d.host;
+    if (!h.vibes.length) return toast("Pick at least one vibe.");
+    await SQ.act("hostSet", { social: U().hostReg.social, ...(!h.area && { area: "Downtown" }) });
+    return "host-ticketing";
   };
   A.hostTicketing = (t) => SQ.act("hostSet", { ticketing: t });
   A.hostTicketingNext = async () => {
-    await SQ.act("hostSet", { ticketLink: U().hostReg.ticketLink });
+    await SQ.act("hostSet", { ticketLink: SQ.d.host.ticketing === "Free RSVP in Sidequest" ? "" : U().hostReg.ticketLink });
     return "host-team";
   };
-  A.teamRole = (arg) => {
-    const [i, role] = arg.split(":");
-    U().hostReg.team[Number(i)].role = role;
+  A.teamRole = (role) => {
+    U().hostReg.inviteRole = role;
   };
   A.teamAdd = () => {
-    U().hostReg.team.push({ email: "", role: "Door staff" });
+    const r = U().hostReg;
+    const email = r.invite.trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) return toast("Enter their email.");
+    if (r.team.some((m) => m.email === email)) return toast("They’re already invited.");
+    r.team.push({ email, role: r.inviteRole, status: "Invited" });
+    r.invite = "";
   };
-  A.hostSubmit = async () => {
-    await SQ.act("hostSet", { team: U().hostReg.team.filter((m) => m.email.trim()), submit: true });
+  A.teamRemove = (i) => {
+    U().hostReg.team.splice(Number(i), 1);
+  };
+  A.hostTeamNext = async () => {
+    await SQ.act("hostSet", { team: U().hostReg.team });
+    return "host-claim";
+  };
+  A.claimToggle = (id) => {
+    const c = U().hostReg.claim;
+    const i = c.indexOf(Number(id));
+    i < 0 ? c.push(Number(id)) : c.splice(i, 1);
+  };
+  A.claimListings = async () => {
+    const ids = U().hostReg.claim || [];
+    for (const eventId of ids) await SQ.act("claimListing", { eventId });
+    if (ids.length) toast(`${ids.length} listing${ids.length === 1 ? "" : "s"} moved to your account.`);
+    U().hostReg.claim = null;
     return "host-pending";
+  };
+  // ponytail: there's no review team in this sketch, so submitting approves straight away. Drop the hostApprove call once real review exists.
+  A.hostSubmit = async () => {
+    await SQ.act("hostSet", { team: U().hostReg.team, submit: true });
+    await SQ.act("hostApprove");
+    SQ.u.history = [];
+    return "host-ready";
   };
   A.hostApprove = async () => {
     await SQ.act("hostApprove");

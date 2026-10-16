@@ -1,7 +1,7 @@
 /* Sketch 1 — host screens: registration, dashboard, quests, Demand Insights, audience, inbox, event day, recap. */
 (function () {
   const SQ = window.SQ;
-  const { esc, icon, poster, avatar, avatars, btn, chip, field, textarea, progress, meter, empty, stars, tabs, screen, thinking, aiTag, ev, req, whenLabel, priceLabel } = SQ;
+  const { esc, icon, iconBtn, poster, avatar, avatars, btn, chip, field, textarea, progress, meter, empty, stars, tabs, screen, thinking, aiTag, ev, req, whenLabel, priceLabel } = SQ;
 
   const V = () => SQ.d.vocab;
   const U = () => SQ.u;
@@ -15,119 +15,181 @@
 
   const hostTabs = (active) => tabs([["host-dashboard", "Dashboard", "grid"], ["host-quests", "Quests", "ticket"], ["host-demand", "Requests", "flame"], ["host-audience", "Audience", "chart"], ["host-messages", "Inbox", "inbox"]], active);
   const loading = () => `<div class="skeleton" style="height:84px"></div><div class="skeleton" style="height:160px"></div>`;
-  const HOST_ICONS = { Venue: "home", "Promoter or organizer": "megaphone", "Artist or collective": "music", "Community group": "users", Brand: "sparkle" };
 
   const S = {};
 
-  /* ===================== Registration ===================== */
+  /* ===================== Registration (Figma: 25 to 33, Host onboarding) ===================== */
+  const HSTEPS = 8;
+  const head = (n, title, sub) => SQ.obHead(n, title, sub, true, HSTEPS);
+  const foot = (main, extra = "") => SQ.obFooter(main, extra);
+  const HOST_ICONS = { "Promoter or collective": "music", Venue: "door", "Independent artist": "user", "Community group": "crew", Business: "cash" };
+  // Figma: Option card. An icon tile, a title and a line, and a radio
+  const optCard = (on, ic, title, sub, a) => `<button class="acct opt${on ? " on" : ""}" ${SQ.attr(a)} aria-pressed="${on}">
+      <span class="opt-ic">${icon(ic)}</span><span class="text"><span class="t-title-m">${esc(title)}</span>${sub ? `<span class="t-caption c-secondary">${esc(sub)}</span>` : ""}</span><span class="radio${on ? " on" : ""}"></span></button>`;
+  const hostLogo = (h, cls = "l") => (h && h.logo ? `<span class="av ${cls} photo-av" style="background-image:url('${h.logo}')" role="img" aria-label="Logo"></span>` : avatar(hostName(), cls));
+  SQ.hostLogo = hostLogo;
+
   S["host-type"] = { role: "host", label: "Host: type", render: () => {
     const type = (H() && H().type) || "";
     return screen(`
-      <div class="pad stack">
-        ${progress(1, 6)}
-        <h2 class="display-l">What kind of host are you?</h2>
-        <div class="stack-sm">${V().HOST_TYPES.map(([t, d]) => `
-          <button class="option${type === t ? " on" : ""}" data-act="hostType" data-arg="${esc(t)}" aria-pressed="${type === t}">
-            <span class="row start" style="gap:12px"><span class="ic-box" style="width:38px;height:38px;border-radius:12px;background:var(--sq-bg-elevated);display:grid;place-items:center">${icon(HOST_ICONS[t])}</span>
-            <span class="stack-xs"><strong>${esc(t)}</strong><span class="small muted">${esc(d)}</span></span></span>
-            <span class="tick">${type === t ? icon("check") : ""}</span></button>`).join("")}</div>
-        <button class="link center" data-go="host-login">Demo: sign in as a host from the sample events</button>
-      </div>`, { title: "Host a quest", footer: `<div class="action-bar">${btn("Continue", { "data-act": "hostTypeNext", disabled: !type })}</div>` });
+      ${head(1, "What do you host?", "This shapes your demand map and how attendees see you.")}
+      <div class="ob-body" style="gap:10px">
+        ${V().HOST_TYPES.map(([t, d]) => optCard(type === t, HOST_ICONS[t], t, d, { "data-act": "hostType", "data-arg": t })).join("")}
+        <button class="note" data-go="host-login">Demo: sign in as a host from the sample events</button>
+      </div>`, { footer: foot(btn("Continue", { "data-act": "hostTypeNext", disabled: !type })) });
   } };
 
   S["host-login"] = { role: "host", label: "Host: demo sign in", render: () => screen(`
     <div class="pad stack-sm">
-      <p class="muted" style="margin-bottom:8px">Every organizer in the sample events. Pick one to see their dashboard, requests and recaps.</p>
-      ${SQ.d.organizers.map((o) => `<button class="list-row" data-act="hostLoginAs" data-arg="${esc(o)}">${avatar(o, "lg")}<span class="grow"><strong>${esc(o)}</strong></span>${icon("chev")}</button>`).join("")}
+      <p class="t-body-m c-secondary" style="margin-bottom:8px">Every organizer in the sample events. Pick one to see their dashboard, requests and recaps.</p>
+      ${SQ.d.organizers.map((o) => `<button class="list-row divided" data-act="hostLoginAs" data-arg="${esc(o)}">${avatar(o)}<span class="text"><span>${esc(o)}</span></span>${icon("chevR")}</button>`).join("")}
     </div>`, { title: "Sign in as a host" }) };
 
   S["host-account"] = { role: "host", label: "Host: account", render: () => {
     const r = U().hostReg;
     return screen(`
-      <div class="pad stack">
-        ${progress(2, 6)}
-        <h2 class="display-l">Account basics</h2>
-        ${field("Host or venue name", "hostReg.name", r.name, "text", "The Garrison")}
-        ${field("Work email", "hostReg.email", r.email, "email", "events@venue.com")}
-        ${field("Password", "hostReg.password", "", "password", "8+ characters")}
-        ${SQ.me() ? '<p class="small muted">This links to your attendee account, so you can switch between the two.</p>' : ""}
-      </div>`, { title: "Host account", footer: `<div class="action-bar">${btn("Continue", { "data-act": "hostAccount" })}</div>` });
+      ${head(2, "Your host account", "Separate from your personal account. Switch between them any time.")}
+      <form class="ob-body" style="gap:14px" data-act="hostAccount">
+        ${field("Host name", "hostReg.name", r.name, "text", "Loop Collective", { autocomplete: "organization" })}
+        ${field("Work email", "hostReg.email", r.email, "email", "you@yourcollective.ca", { icon: "mail", autocomplete: "email", inputmode: "email" })}
+        ${field("Website", "hostReg.website", r.website, "url", "yourcollective.ca", { icon: "globe", inputmode: "url" })}
+        ${field("Your role", "hostReg.role", r.role, "text", "Founder", { autocomplete: "organization-title" })}
+      </form>`, { footer: foot(btn("Continue", { "data-act": "hostAccount" })) });
+  } };
+
+  const DOCS = [["Business registration", "id", "Master Business Licence, Articles of Incorporation or CRA business number letter"],
+    ["Government photo ID", "link", "Driver’s licence, passport or Ontario Photo Card of the account owner"],
+    ["Proof of venue or address", "door", "Lease, utility bill or venue booking dated in the last 90 days"]];
+  S["host-verify"] = { role: "host", label: "Host: verification", render: () => {
+    const r = U().hostReg;
+    return screen(`
+      ${head(3, "Get verified", "Upload one document for each item you select. Verified hosts rank higher and can reply to Quest Requests.")}
+      <div class="ob-body" style="gap:10px">
+        ${DOCS.map(([k, ic, d]) => optCard(r.docKind === k, ic, k, d, { "data-act": "hostDoc", "data-arg": k })).join("")}
+        <label class="doc-drop">${icon(r.docFile ? "check" : "upload")}<span>${r.docFile ? esc(r.docFile) : "Upload PDF, JPG or PNG · up to 10 MB each"}</span>
+          <input type="file" accept="application/pdf,image/jpeg,image/png" data-upload="hostDocFile" class="sr-only"></label>
+        <p class="unverified-note">${SQ.tag("Unverified", "unverified", "shield")}<span>shows on your sidequests until approved</span></p>
+      </div>`, { footer: foot(btn("Continue", { "data-act": "hostVerifyNext" })) });
   } };
 
   S["host-profile"] = { role: "host", label: "Host: profile", render: () => {
-    const h = H() || { vibes: [] };
-    const r = U().hostReg;
+    const h = H() || { vibes: [], areas: [] };
+    const areas = h.areas || [];
+    const shown = [...new Set([...areas, ...SQ.HOODS.map((x) => x[0])])].slice(0, Math.max(3, areas.length + 1));
+    const age = h.agePolicy || "It depends";
     return screen(`
-      <div class="pad stack">
-        ${progress(3, 6)}
-        <h2 class="display-l">Your host profile</h2>
-        <div class="row start" style="gap:14px"><button class="upload" style="width:84px;height:84px;border-radius:24px" data-act="toast" data-arg="Logo upload is out of scope for this sketch.">${icon("upload")}Logo</button>
-          <span class="stack-xs"><strong>${esc(hostName())}</strong><span class="small muted">${esc(h.type || "")}</span></span></div>
-        ${textarea("Bio", "hostReg.bio", r.bio, "A 200-cap room for late-night electronic music.")}
-        <h3 class="section-title">Your vibes</h3>
-        <div class="chips">${V().VIBES.map((v) => chip(v, h.vibes.includes(v), { "data-act": "hostVibe", "data-arg": v }, SQ.VIBE_ICON[v])).join("")}</div>
-        <h3 class="section-title">Neighbourhood</h3>
-        <div class="chips">${V().AREAS.map((a) => chip(a, h.area === a, { "data-act": "hostArea", "data-arg": a }, "pin")).join("")}</div>
-        ${field("Instagram or website", "hostReg.social", r.social, "text", "@thegarrison")}
-      </div>`, { title: "Profile", footer: `<div class="action-bar">${btn("Continue", { "data-act": "hostProfile" })}</div>` });
+      ${head(4, "Set up your profile")}
+      <div class="ob-body" style="gap:24px;padding-top:16px">
+        <div class="row start" style="gap:14px">${hostLogo(h)}<label class="btn btn-secondary s" style="cursor:pointer">${icon("camera")}${h.logo ? "Change logo" : "Add logo"}<input type="file" accept="image/*" data-upload="hostLogo" class="sr-only"></label></div>
+        <div class="stack-sm" style="gap:10px"><span class="t-overline">Your vibes</span>
+          <div class="chips">${SQ.TILES.map((t) => chip(t[0], t[2].some((v) => h.vibes.includes(v)), { "data-act": "hostTile", "data-arg": t[0] })).join("")}</div></div>
+        <div class="stack-sm" style="gap:10px"><span class="t-overline">Areas you host in</span>
+          <div class="chips">${shown.map((n) => chip(n, areas.includes(n), { "data-act": "hostArea", "data-arg": n })).join("")}<button class="chip outline" data-act="hostAddArea">${icon("plus")}Add</button></div></div>
+        <div class="stack-sm" style="gap:10px"><span class="t-overline">Usual age policy</span>
+          <div class="seg base">${["All ages", "19+", "It depends"].map((a) => `<button class="${age === a ? "on" : ""}" data-act="hostAge" data-arg="${a}" aria-pressed="${age === a}">${a}</button>`).join("")}</div></div>
+        ${field("Instagram · optional", "hostReg.social", U().hostReg.social, "text", "@yourcollective", { icon: "link" })}
+      </div>`, { footer: foot(btn("Continue", { "data-act": "hostProfile" })) });
   } };
 
-  S["host-verify"] = { role: "host", label: "Host: verification", render: () => {
-    const h = H() || {};
-    const r = U().hostReg;
-    return screen(`
-      <div class="pad stack">
-        ${progress(4, 6)}
-        <h2 class="display-l">Get verified</h2>
-        <div class="notice">${icon("shield")}<span>Verified hosts keep Sidequest trustworthy for attendees. Takes 1 to 2 days.</span></div>
-        ${field("Business or organization number", "hostReg.biz", r.biz, "text", "Optional for artists and community groups")}
-        ${field("Links to past events", "hostReg.pastLinks", r.pastLinks, "text", "Instagram posts, ticket pages")}
-        ${h.type === "Venue" ? field("Venue address", "hostReg.address", r.address, "text", "1197 Dundas St W") + field("Capacity", "hostReg.capacity", r.capacity, "number", "200") : ""}
-        <button class="upload" style="height:90px" data-act="toast" data-arg="Document upload is out of scope for this sketch.">${icon("upload", "lg")}Upload proof (licence, lease, or press)</button>
-      </div>`, { title: "Verification", footer: `<div class="action-bar">${btn("Continue", { "data-go": "host-ticketing" })}</div>` });
-  } };
-
+  const SELLERS = [["DICE", "ticket"], ["Ticketmaster", "ticket"], ["Eventbrite", "ticket"], ["Our own site", "globe"], ["Free RSVP in Sidequest", "check"]];
   S["host-ticketing"] = { role: "host", label: "Host: ticketing", render: () => {
     const h = H() || {};
     return screen(`
-      <div class="pad stack">
-        ${progress(5, 6)}
-        <h2 class="display-l">How do you sell tickets?</h2>
-        <p class="muted">For now, Sidequest links out to your existing ticketing.</p>
-        <div class="stack-sm">${["Eventbrite", "DICE", "My own website", "Guest list only"].map((t) => `
-          <button class="option${h.ticketing === t ? " on" : ""}" data-act="hostTicketing" data-arg="${esc(t)}" aria-pressed="${h.ticketing === t}"><span class="row start">${icon("ticket")}${esc(t)}</span><span class="tick">${h.ticketing === t ? icon("check") : ""}</span></button>`).join("")}</div>
-        ${field("Default ticket link", "hostReg.ticketLink", U().hostReg.ticketLink, "url", "https://")}
-      </div>`, { title: "Ticketing", footer: `<div class="action-bar">${btn("Continue", { "data-act": "hostTicketingNext" })}</div>` });
+      ${head(5, "Where do you sell tickets?", "Attendees buy on your platform. Sidequest links out and brings them back.")}
+      <div class="ob-body" style="gap:10px">
+        ${SELLERS.map(([t, ic]) => optCard(h.ticketing === t, ic, t, "", { "data-act": "hostTicketing", "data-arg": t })).join("")}
+        ${h.ticketing === "Free RSVP in Sidequest" ? "" : `<div style="padding-top:4px">${field("Default ticket link", "hostReg.ticketLink", U().hostReg.ticketLink, "url", "dice.fm/yourcollective", { icon: "link", inputmode: "url" })}</div>`}
+      </div>`, { footer: foot(btn("Continue", { "data-act": "hostTicketingNext", disabled: !h.ticketing })) });
   } };
 
+  const ROLES = [["Admin", ""], ["Door staff", "qr"], ["Chat moderator", "bubble"]];
+  const nameOfEmail = (e) => e.split("@")[0].split(/[._-]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
   S["host-team"] = { role: "host", label: "Host: team", render: () => {
-    const team = U().hostReg.team;
+    const r = U().hostReg;
+    const owner = (SQ.me() && SQ.me().name) || hostName();
     return screen(`
-      <div class="pad stack">
-        ${progress(6, 6)}
-        <h2 class="display-l">Invite your team</h2>
-        ${team.map((m, i) => `
-          <div class="card stack-sm">
-            ${field("Email", `hostReg.team.${i}.email`, m.email, "email", "teammate@venue.com")}
-            <div class="chips">${["Owner", "Editor", "Door staff"].map((r) => chip(r, m.role === r, { "data-act": "teamRole", "data-arg": `${i}:${r}` })).join("")}</div>
-          </div>`).join("")}
-        ${btn("Add another", { "data-act": "teamAdd" }, "outline", "plus")}
-      </div>`, { title: "Team", footer: `<div class="action-bar" style="flex-direction:column;gap:6px">${btn("Submit for review", { "data-act": "hostSubmit" })}<button class="link center" data-act="hostSubmit">Skip and submit</button></div>` });
+      ${head(6, "Add your team", "Give door staff and chat moderators their own access.")}
+      <div class="ob-body" style="gap:14px">
+        <form class="invite" data-act="teamAdd">${field("Invite by email", "hostReg.invite", r.invite, "email", "teammate@yourcollective.ca", { inputmode: "email" })}${iconBtn("plus", { "data-act": "teamAdd", "aria-label": "Invite" }, "primary")}</form>
+        <div class="chips">${ROLES.map(([k, ic]) => chip(k, r.inviteRole === k, { "data-act": "teamRole", "data-arg": k }, ic)).join("")}</div>
+        <div style="padding-top:10px">
+          <div class="person">${SQ.me() && SQ.me().photo ? `<span class="av photo-av" style="background-image:url('${SQ.me().photo}')"></span>` : avatar(owner)}<span class="text"><span>${esc(owner)}</span><span class="t-caption c-secondary">Owner · you</span></span></div>
+          ${r.team.map((m, i) => `<div class="person">${avatar(nameOfEmail(m.email))}<span class="text"><span>${esc(nameOfEmail(m.email))}</span><span class="t-caption c-secondary">${esc(m.role)}</span></span>
+            <button class="tag-btn" data-act="teamRemove" data-arg="${i}" aria-label="Remove ${esc(m.email)}">${SQ.tag(m.status || "Invited", m.status === "Joined" ? "success" : "")}</button></div>`).join("")}
+        </div>
+      </div>`, { footer: foot(btn("Continue", { "data-act": "hostTeamNext" }), btn("Skip for now", { "data-go": "host-claim" }, "ghost m")) });
   } };
 
-  S["host-pending"] = { role: "host", label: "Host: review", render: () => {
-    const approved = H() && H().verification === "approved";
+  // Listings already on Sidequest that look like this host's: their name as organizer, or their venue
+  const lookAlike = (h) => {
+    const words = (s) => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3);
+    const mine = new Set(words(h.name));
+    return SQ.d.events.filter((e) => !e.publishedBy && [e.organizer && e.organizer.name, e.venue && e.venue.name].some((n) => words(n).some((w) => mine.has(w)))).slice(0, 6);
+  };
+  const shortWhen = (e) => {
+    const d = new Date(e.startsAt);
+    return `${d.toLocaleDateString("en-US", { weekday: "short", timeZone: "America/Toronto" })} ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Toronto" }).replace(":00", "")}`;
+  };
+  S["host-claim"] = { role: "host", label: "Host: claim listings", render: () => {
+    const list = lookAlike(H() || {});
+    const r = U().hostReg;
+    if (!r.claim) r.claim = list.map((e) => e.id);
+    const n = list.filter((e) => r.claim.includes(e.id)).length;
     return screen(`
-      <div class="pad stack">
-        <span class="ic-box" style="width:64px;height:64px;border-radius:22px;background:${approved ? "var(--sq-accent-primary)" : "var(--sq-bg-elevated)"};color:${approved ? "var(--sq-text-on-accent)" : "var(--sq-text-primary)"};display:grid;place-items:center">${icon(approved ? "check" : "shield", "lg")}</span>
-        <h2 class="display-l">${approved ? "You're approved" : "Thanks, we're reviewing your profile"}</h2>
-        <ol class="timeline">
-          <li class="done">Submitted</li>
-          <li class="${approved ? "done" : "current"}">In review (usually 1 to 2 days)</li>
-          <li class="${approved ? "done" : ""}">Approved</li>
+      ${head(7, "Claim your listings", "We found sidequests that look like yours. Claimed listings move to your account with their ratings.")}
+      <div class="ob-body" style="gap:4px;padding-top:16px">
+        ${list.length ? list.map((e) => `<button class="pick-row" data-act="claimToggle" data-arg="${e.id}" aria-pressed="${r.claim.includes(e.id)}">${poster(e, "thumb")}<span class="text"><span>${esc(e.title)}</span><span>${esc(shortWhen(e))} · ${esc((e.venue && e.venue.name) || e.neighbourhood || "")}</span></span><span class="checkbox${r.claim.includes(e.id) ? " on" : ""}">${r.claim.includes(e.id) ? icon("check") : ""}</span></button>`).join("")
+          : `<p class="t-body-m c-secondary">Nothing on Sidequest looks like yours yet. Listings you publish will show up here.</p>`}
+        ${list.length ? `<div class="notice" style="margin-top:14px">${icon("info")}<span>Not yours? Leave it unticked and we’ll ask the right host.</span></div>` : ""}
+      </div>`, { footer: foot(btn(n ? `Claim ${n} listing${n === 1 ? "" : "s"}` : "Continue", { "data-act": "claimListings" })) });
+  } };
+
+  const DOC_SHORT = { "Business registration": "Business number", "Government photo ID": "Photo ID", "Proof of venue or address": "Proof of address" };
+  S["host-pending"] = { role: "host", label: "Host: review", render: () => {
+    const h = H() || {};
+    const sum = (ic, title, sub, go) => `<div class="sum-row"><span class="opt-ic">${icon(ic)}</span><span class="text"><span class="t-body-l">${esc(title)}</span><span class="t-body-m c-secondary">${esc(sub)}</span></span><button class="t-body-m c-secondary" data-go="${go}">Edit</button></div>`;
+    const people = 1 + (h.team || []).length;
+    const step = (cls, mark, title, sub) => `<li class="${cls}"><span class="mark">${mark}</span><span class="text"><span class="t-title-m">${title}</span><span class="t-body-m c-secondary">${sub}</span></span></li>`;
+    return screen(`
+      ${head(8, "Ready for review")}
+      <div class="ob-body" style="gap:24px;padding-top:24px">
+        <div class="sum-card">
+          ${sum(HOST_ICONS[h.type] || "host", hostName(), h.type || "Host", "host-type")}
+          ${sum("id", "Verification", h.verifyDoc ? DOC_SHORT[h.verifyDoc.kind] : "Not added yet", "host-verify")}
+          ${sum("ticket", "Ticketing", h.ticketing || "Not set", "host-ticketing")}
+          ${sum("crew", "Team", `${people} ${people === 1 ? "person" : "people"}`, "host-team")}
+        </div>
+        <ol class="steps">
+          ${step("done", icon("check"), "Submitted", "Just now")}
+          ${step("current", "2", "In review", "Usually under a day")}
+          ${step("", "3", "Approved", "Your badge turns verified")}
         </ol>
-        <p class="muted small">You can set up draft quests while you wait. They go live once you're approved.</p>
-      </div>`, { title: "Review", back: false, footer: `<div class="action-bar">${approved ? btn("Go to dashboard", { "data-go": "host-dashboard" }) : btn("Demo: approve this host", { "data-act": "hostApprove" }, "violet", "shield")}</div>` });
+      </div>`, { footer: foot(btn("Submit for review", { "data-act": "hostSubmit" })) });
+  } };
+
+  // Singular of a vibe tile, for the sentence: "Live Sets" -> "live set"
+  const oneOf = (label) => label.toLowerCase().replace(/s$/, "").replace(/s( |$)/, "$1");
+  S["host-ready"] = { role: "host", label: "Host: demand map ready", render: () => {
+    const h = H() || { vibes: [], areas: [] };
+    const area = (h.areas || [])[0] || h.area || "Toronto";
+    const hood = SQ.HOODS.find((x) => x[0] === area);
+    const tile = SQ.TILES.find((t) => t[2].some((v) => h.vibes.includes(v)));
+    const vibes = tile ? tile[2] : h.vibes;
+    // Demand: request votes that fit, plus attendees whose taste fits
+    const fits = SQ.d.requests.filter((r) => r.status === "open");
+    const people = fits.reduce((n, r) => n + r.votes, 0) + Object.values(SQ.d.friends).filter((f) => f.vibes.some((v) => vibes.includes(v))).length;
+    const near = (e) => (hood ? Math.hypot(e.venue.lat - hood[1], e.venue.lng - hood[2]) : 0);
+    const pins = SQ.d.events.filter((e) => e.venue && e.venue.lat != null && !SQ.isPast(e)).sort((a, b) => near(a) - near(b))
+      .reduce((keep, e) => (keep.length < 10 && keep.every((x) => Math.hypot(x.venue.lat - e.venue.lat, x.venue.lng - e.venue.lng) > 0.004) ? [...keep, e] : keep), []) // spread out, so one busy venue doesn't hide the rest
+      .map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, tier: (e.vibes || []).some((v) => vibes.includes(v)) ? "strong" : "close", label: e.title }));
+    return screen(`
+      ${SQ.mapView("host-ready", { pins, home: hood ? area : null, labels: true, view: hood ? { x: SQ.projMap(hood[1], hood[2])[0] + 80, y: SQ.projMap(hood[1], hood[2])[1] + 70, z: 1 } : undefined, style: "height:360px" })}
+      <div class="ob-body" style="gap:14px;padding-top:24px">
+        <span class="t-overline">Your demand map is ready</span>
+        <span class="big-num">${people.toLocaleString("en-US")}</span>
+        <p class="t-display-m">people near ${esc(area)} want ${tile ? `${/^[aeiou]/.test(oneOf(tile[0])) ? "an" : "a"} ${esc(oneOf(tile[0]))}` : "a sidequest like yours"} this month.</p>
+        ${h.verification === "approved" ? `<div class="notice success">${icon("check")}<span>Approved. Your sidequests now show a verified badge.</span></div>` : `<div class="notice warning">${icon("clock")}<span>In review. Your sidequests show Unverified until approved.</span></div>`}
+      </div>`, { cls: "bleed", footer: foot(btn("Open demand insights", { "data-go": "host-demand" }, "primary", "arrow")) });
   } };
 
   /* ===================== Dashboard and quests ===================== */

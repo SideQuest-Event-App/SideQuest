@@ -958,3 +958,31 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .radio { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--text-secondary); flex: none; display: grid; place-items: center; }
 .radio.on { border: 0; background: var(--action-primary); }
 .radio.on::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--action-primary-tint); }
+
+/* ===================== Host onboarding (Figma: 25 to 33) ===================== */
+.acct.opt .opt-ic { width: 44px; height: 44px; }
+.opt-ic { width: 40px; height: 40px; border-radius: var(--r-lg); background: var(--bg-raised); color: var(--text-primary); display: grid; place-items: center; flex: none; }
+.opt-ic .ic { width: 22px; height: 22px; }
+.acct.on .opt-ic { background: var(--action-primary); color: var(--text-on-action); }
+.doc-drop { height: 96px; border-radius: var(--r-xl); border: 1px solid var(--border-default); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--text-secondary); font-size: 14px; line-height: 20px; cursor: pointer; text-align: center; padding: 0 var(--sp-lg); }
+.doc-drop .ic { width: 22px; height: 22px; color: var(--text-primary); }
+.doc-drop:focus-within { outline: 2px solid var(--action-primary); outline-offset: 2px; }
+.unverified-note { display: flex; align-items: center; gap: var(--sp-sm); font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.invite { display: flex; align-items: flex-end; gap: 10px; }
+.invite .field { flex: 1; min-width: 0; }
+.invite .icon-btn { margin-bottom: 4px; }
+.tag-btn { flex: none; }
+.sum-card { display: flex; flex-direction: column; gap: 20px; padding: var(--sp-lg); border-radius: var(--r-2xl); background: var(--bg-surface); border: 1px solid var(--border-subtle); }
+.sum-row { display: flex; align-items: center; gap: 14px; }
+.sum-row .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.steps li { display: flex; gap: 14px; align-items: flex-start; }
+.steps .mark { width: 28px; height: 28px; border-radius: 50%; background: var(--bg-raised); color: var(--text-secondary); display: grid; place-items: center; flex: none; font-family: var(--font-mono); font-weight: 500; font-size: 14px; }
+.steps .mark .ic { width: 16px; height: 16px; }
+.steps .done .mark { background: var(--match-strong); color: var(--text-on-action); }
+.steps .current .mark { background: var(--action-primary); color: var(--text-on-action); }
+.steps .text { display: flex; flex-direction: column; gap: 2px; }
+.big-num { font-weight: 200; font-size: 88px; line-height: 88px; letter-spacing: -4px; color: var(--text-accent); }
+.ob-body > .note { padding-top: var(--sp-sm); font-size: 12px; line-height: 16px; color: var(--text-tertiary); text-align: center; }
+.seg.base > button.on, .seg.base > button[aria-pressed="true"] { background: var(--bg-base); }
+.person .text > .t-caption { font-family: inherit; font-weight: 400; }
