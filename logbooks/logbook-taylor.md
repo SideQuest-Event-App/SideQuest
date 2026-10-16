@@ -74,11 +74,29 @@
 
 ## Week 5 – Oct 8
 - Reading → decision:
+    With the pretotyping readings, I took inspiration from the "Facade" and decided to make the promotional website to generate hype and gauge outside interest. I bought sidequest.rsvp for a year and used Claude Code to draft up a single-page site. Along with this, I also made the Facebook and Instagram accounts to accompany this, and hopefully gain more traction.
+
 - What I did:
     This week, I made sure to fully go through my team's prototypes and documents so I would be familiar with their versions and how they got there. There's still a lot going on and a lot to account for, but that's the cost of this project!
+
+    I started setting things up so that the database and hosting are more robust and globally accessible, which meant moving it to Supabase. Supabase now manages all events, user profiles, and analytics from app use.
+
+    With this, we also needed to set up the database with events beyond what was scraped earlier, which required API access. While the social media accounts and promotional website were modes of pretotyping, they were also required in order to get access to the Instagram Business and Ticketmaster APIs. I filled them up as much as possible to give us some credibility.
+
+    I also put our sketch-1 on demo.sidequest.rsvp, hosted on Render, in preparation for next week's in-class demo. This was also to make testing easier for teammates, since I know some of them were having trouble doing that locally.
+
+    While the app still feels really bloated, I feel like a lot of the tedious dirty work of actualizing the product is done, and all these streams to the outside world are complete, so now it's most about ironing out the kinks to make sure the app actually does what it's supposed to, and is effective at it.
+
 - Systemic reflection:
+    It feels risky and messy to be scraping the web for events, and I feel like we will also have to be careful with our API access so we don't exceed any rate limits. With AI doing a lot of the dirty work, I think it creates a lot more stakes where we would be held accountable for anything it does. There is so much that goes into an app like this, and our app has a pretty large scale, so there are a lot of points where I feel that we might be breaking rules we're unaware of, or potentially compromising the security of event hosts or potential users. With a lot of our decisions, we're also assuming the best possible use cases from our users, which might not hold true in a public app. I think we'll need to refine our scope a little bit and ensure that we're taking the right security measures.
+
 - An honest doubt:
+    While pretotyping is intended to gauge interest in our app, I still fear that this app is completly unneeded in the current-day ecosystem. We started doing a lot at once, and in bloating the app we arrived at a point where we're not offering much that's different from our competitors, especially since we are still relying on them for ticket sales. Maybe this was from moving too fast. It's good that we're aware of this now and beginning to dial into what our edge is, which might be more of a community-based angle.
+
+    In terms of the database, it's also unclear how we can get a sustainable stream of event inputs without needing to do a messy online scrape. We have Ticketmaster and Instagram API access, as well as an easy way for users to upload events, but it still feels far from the "one stop shop" we were hoping for.
+
 - AI use (disclose):
+    While I was able to set up all accounts and API access points, I used Claude to guide me through this whole process, since it was new to me. It did a great job at troubleshooting and clarifying what I needed to do within the various developer dashboards. I also got it to generate the draft website for sidequest.rsvp, based on some simple stylistic prompts.
 
 ## Week 6 – Oct 15
 - Reading → decision:
