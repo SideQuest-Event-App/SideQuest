@@ -26,15 +26,29 @@
     toast("Signed in as Alex, a sample attendee.");
     return "discover";
   };
+  // Sign-up checks, in order: the format of email and phone (red fields), then an email or phone that's
+  // already on an account (a pop-up pointing to log in), then a taken username (free ones to pick)
   A.signup = async () => {
     const f = U().signup;
-    f.taken = null;
-    if (f.username.trim()) {
-      const r = await SQ.act("checkUsername", { username: f.username, name: f.name });
-      if (r.taken) return void (f.taken = r.suggestions);
-    }
+    const phone = f.phone.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+    f.bad = { email: !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim()), phone: !!f.phone.trim() && phone.length !== 10 };
+    f.taken = f.linked = null;
+    if (!f.name.trim()) return toast("Add your name to continue.");
+    if (f.bad.email || f.bad.phone) return;
+    const r = await SQ.act("checkSignup", f);
+    if (r.linked) return void (f.linked = r.linked);
+    if (r.suggestions) return void (f.taken = r.suggestions);
     await SQ.act("signup", f);
     return "ob-vibes";
+  };
+  A.closeLinked = () => {
+    U().signup.linked = null;
+  };
+  A.loginLinked = () => {
+    const f = U().signup;
+    if (f.linked === "email") U().login.email = f.email.trim();
+    f.linked = null;
+    return "login";
   };
   A.pickUsername = (h) => {
     Object.assign(U().signup, { username: h, taken: null });

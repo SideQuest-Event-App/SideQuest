@@ -162,9 +162,14 @@
         ${field("Name", "signup.name", f.name, "text", "Alex Morgan", { autocomplete: "name" })}
         ${field("Username", "signup.username", f.username, "text", "alex.out", { autocomplete: "username", help: "Friends find you by your username.", error: f.taken && "That username is taken. Try one of these:" })}
         ${f.taken && f.taken.length ? `<div class="chips">${f.taken.map((h) => `<button class="chip outline" data-act="pickUsername" data-arg="${esc(h)}">${esc(h)}</button>`).join("")}</div>` : ""}
-        ${field("Email", "signup.email", f.email, "email", "alex@example.com", { icon: "mail", autocomplete: "email", inputmode: "email", help: "Use an email you can open. Your login codes are sent there, and you can't log back in without it." })}
-        ${field("Phone", "signup.phone", f.phone, "tel", "(416) 555-0144", { icon: "phone", autocomplete: "tel" })}
-      </form>`, { footer: footer(btn("Continue", { "data-act": "signup" }), note("By continuing you agree to the Terms and Privacy Policy.")) });
+        ${field("Email", "signup.email", f.email, "email", "alex@example.com", { icon: "mail", autocomplete: "email", inputmode: "email", help: "Use an email you can open. Your login codes are sent there, and you can't log back in without it.", error: f.bad && f.bad.email && "Invalid email format" })}
+        ${field("Phone", "signup.phone", f.phone, "tel", "(416) 555-0144", { icon: "phone", autocomplete: "tel", error: f.bad && f.bad.phone && "Invalid phone number" })}
+      </form>
+      ${f.linked ? `<div class="pop-scrim"><div class="pop" role="alertdialog" aria-labelledby="pop-t">
+        <h2 id="pop-t" class="t-title-l">${f.linked === "email" ? "Email" : "Phone"} already linked to an account</h2>
+        <p class="t-body-m c-secondary">Please log in using those credentials.</p>
+        <div class="stack-sm" style="gap:10px">${btn("Log in", { "data-act": "loginLinked" })}${btn("Not now", { "data-act": "closeLinked" }, "ghost")}</div>
+      </div></div>` : ""}`, { footer: footer(btn("Continue", { "data-act": "signup" }), note("By continuing you agree to the Terms and Privacy Policy.")) });
   } };
 
   S["ob-vibes"] = { role: "attendee", label: "Onboarding: vibes", render: () => {

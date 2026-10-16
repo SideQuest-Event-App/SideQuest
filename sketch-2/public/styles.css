@@ -1066,3 +1066,8 @@ textarea.compose { width: 100%; resize: none; padding: 10px 14px; border-radius:
 .line-tabs > button { text-align: center; }
 .compose-card .row > .btn { width: auto; flex: none; }
 .floor-img { width: 100%; border-radius: var(--r-lg); display: block; }
+
+/* Pop-up over the screen (sign-up: email or phone already on an account) */
+.pop-scrim { position: absolute; inset: 0; z-index: 20; background: var(--bg-overlay); display: grid; place-items: center; padding: var(--sp-xl); }
+.pop { width: 100%; display: flex; flex-direction: column; gap: var(--sp-md); padding: var(--sp-xl); border-radius: var(--r-3xl); background: var(--bg-surface); text-align: center; box-shadow: 0 8px 32px rgba(19, 16, 27, 0.28); }
+.pop .btn { width: 100%; }
