@@ -1126,8 +1126,12 @@
         ${card("door", "Entrances", `<div class="stack" style="gap:8px">
           <span class="row start" style="gap:8px">${SQ.matchPill(90)}<span class="t-body-m">${esc(e.dayInfo.entrance)}</span></span>
           <span class="row start" style="gap:8px">${SQ.matchPill(30)}<span class="t-body-m c-secondary">Coat check · ${esc(e.dayInfo.coat)}</span></span>
+          ${(e.dayInfo.entrances || []).slice(1).map((x) => `<span class="row start" style="gap:8px">${SQ.matchPill(30)}<span class="t-body-m c-secondary">${esc(x)}</span></span>`).join("")}
+          ${[["stepFree", "Step-free entrance"], ["reentry", "Re-entry"], ["quietRoom", "Quiet room"]].filter(([k]) => e.dayInfo[k] && e.dayInfo[k].on).map(([k, l]) => `<span class="t-body-m c-secondary">${esc(l)}${e.dayInfo[k].note ? ` · ${esc(e.dayInfo[k].note)}` : ""}</span>`).join("")}
+          ${(e.dayInfo.payments || []).length ? `<span class="t-body-m c-secondary">At the door: ${esc(e.dayInfo.payments.join(", ").toLowerCase())}</span>` : ""}
           <span class="t-caption c-secondary">Getting home: ${esc(e.dayInfo.home)}</span></div>`)}
-        ${card("map", "Floor plan", `<div class="floor" role="group" aria-label="Floor plan, tap a spot">
+        ${e.dayInfo.floorPlan ? card("map", "Floor plan", `<img class="floor-img" src="${e.dayInfo.floorPlan}" alt="Floor plan from the host">`) : ""}
+        ${e.dayInfo.floorPlan ? "" : card("map", "Floor plan", `<div class="floor" role="group" aria-label="Floor plan, tap a spot">
             ${ZONES.map(([k, label]) => `<button class="zone z-${k}${zone === k ? " on" : ""}" data-act="pickZone" data-arg="${k}" aria-pressed="${zone === k}">${label}
               ${party.map((n, i) => (where(i) === k ? avatar(n, "xs") : "")).join("")}</button>`).join("")}
           </div>

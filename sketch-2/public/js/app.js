@@ -64,7 +64,7 @@
     hostReg: { name: "", email: "", website: "", role: "", social: "", ticketLink: "", docKind: "Business registration", docFile: "", invite: "", inviteRole: "Door staff", team: [], claim: null },
     hostDraft: null,
     drafting: false,
-    msg: { eventId: null, text: "", audience: "attendees" },
+    msg: { eventId: null, text: "", audience: "attendees", when: "now", sendAt: "" },
     published: null,
     poster: null, // "Add from a poster": { for: "host" | "attendee", loading, error, result, pick }
     spotDraft: null, // the attendee's event form, filled from their poster
@@ -184,7 +184,7 @@
   }
 
   // ---------- Navigation ----------
-  const ROOTS = ["discover", "parties", "requests", "questlog", "profile", "host-dashboard", "host-quests", "host-demand", "host-audience", "host-messages"];
+  const ROOTS = ["discover", "parties", "requests", "questlog", "profile", "host-demand", "host-quests", "host-insights", "host-messages"];
   const OPEN = ["landing", "role", "login", "login-code", "signup", "host-type", "host-login"]; // screens that work signed out
   // Where you actually land: signed-out users can't open app screens
   function guard(id) {
@@ -221,7 +221,7 @@
     const prev = SQ.u.history.pop();
     direction = "enter-back";
     const from = SQ.u.screen;
-    SQ.u.screen = guard(prev || (SQ.screens[SQ.u.screen].role === "host" ? "host-dashboard" : "discover"));
+    SQ.u.screen = guard(prev || (SQ.screens[SQ.u.screen].role === "host" ? "host-demand" : "discover"));
     if (SQ.u.screen !== from) trackScreen(SQ.u.screen, from);
     render(true);
   };
@@ -444,7 +444,7 @@
   document.getElementById("side-role").addEventListener("click", (e) => {
     const b = e.target.closest("[data-role]");
     if (!b) return;
-    if (b.dataset.role === "host") SQ.go(SQ.d.host ? "host-dashboard" : "host-type");
+    if (b.dataset.role === "host") SQ.go(SQ.d.host ? "host-demand" : "host-type");
     else SQ.go(SQ.d.user ? (SQ.d.user.registered ? "discover" : "ob-vibes") : "landing");
   });
   jump.addEventListener("change", () => {
@@ -479,7 +479,15 @@
     } catch {}
     const u = SQ.d.user;
     const fallback = u ? (u.registered ? "discover" : "ob-vibes") : "landing";
-    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", "search", "host-request", "host-checkin", "host-recap", "host-published", "host-create-dayinfo", "spot", "add-event"].includes(last) ? last : fallback);
+    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", "search", "host-request", "host-checkin", "host-recap", "host-published", "host-create", "host-create-dayinfo", "host-draft-test", "spot", "add-event"].includes(last) ? last : fallback);
+    // A shared link to one sidequest (?quest=id) opens it
+    const linked = Number(new URLSearchParams(location.search).get("quest"));
+    if (linked && SQ.ev(linked)) {
+      SQ.u.quest = linked;
+      SQ.u.history = [SQ.u.screen];
+      SQ.u.screen = "quest";
+      history.replaceState(null, "", location.pathname);
+    }
     trackScreen(SQ.u.screen, null);
     render(true);
   })();

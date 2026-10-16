@@ -13,7 +13,8 @@
   };
 
   SQ.defaultReqDraft = () => ({ text: "", origin: (me() && me().origin) || "union", when: "Friday late", vibe: "", area: (me() && me().homeArea) || "", size: "2 to 4", budget: me() && me().budget != null ? String(me().budget) : "", source: "manual" });
-  SQ.emptyHostDraft = (over = {}) => ({ title: "", description: "", date: "", time: "20:00", endTime: "", price: "", vibes: [], venue: { name: SQ.d.host && SQ.d.host.type === "Venue" ? SQ.d.host.name : "", address: "" }, image: null, ticketLink: (SQ.d.host && SQ.d.host.ticketLink) || "", dayInfo: { entrance: "", transit: "", home: "", coat: "" }, fromRequest: null, aiMode: null, ...over });
+  const emptyDayInfo = () => ({ entrances: [""], transit: "", home: "", coatCheck: { on: false, note: "" }, reentry: { on: false, note: "" }, stepFree: { on: false, note: "" }, quietRoom: { on: false, note: "" }, payments: [], floorPlan: null });
+  SQ.emptyHostDraft = (over = {}) => ({ id: null, kind: "new", eventId: null, title: "", description: "", date: "", time: "20:00", endTime: "", price: "", age: (SQ.d.host && SQ.d.host.agePolicy === "19+") ? "19+" : "All ages", vibes: [], venue: { name: SQ.d.host && SQ.d.host.type === "Venue" ? SQ.d.host.name : "", address: "" }, image: null, ticketLink: (SQ.d.host && SQ.d.host.ticketLink) || "", dayInfo: emptyDayInfo(), fromRequest: null, aiMode: null, ...over });
   SQ.emptySpotDraft = () => ({ title: "", description: "", date: "", time: "20:00", endTime: "", price: "", vibes: [], venue: { name: "", address: "" }, organizer: "", ticketLink: "", image: null });
 
   // ---------- general ----------
@@ -50,7 +51,7 @@
       SQ.setIds({ user: r.userId, host: r.hostId });
       await SQ.refresh();
       Object.assign(l, { code: "", demoCode: null });
-      return r.role === "host" ? "host-dashboard" : me() && me().registered ? "discover" : "ob-vibes";
+      return r.role === "host" ? "host-demand" : me() && me().registered ? "discover" : "ob-vibes";
     } catch (err) {
       l.error = err.message;
     }
@@ -608,7 +609,7 @@
   A.profilePhoto = async (file) => {
     await SQ.act("setProfile", { photo: await square(file) });
   };
-  A.switchToHost = () => (SQ.d.host ? "host-dashboard" : "host-type");
+  A.switchToHost = () => (SQ.d.host ? "host-demand" : "host-type");
   A.switchToAttendee = () => (me() ? (me().registered ? "discover" : "ob-vibes") : "landing");
   A.signOut = () => {
     SQ.setIds({ user: null });
@@ -629,7 +630,7 @@
     await SQ.act("hostLoginAs", { name });
     toast(`Signed in as ${name}.`);
     SQ.u.history = [];
-    return "host-dashboard";
+    return "host-demand";
   };
   A.hostAccount = async () => {
     const r = U().hostReg;
@@ -784,30 +785,105 @@
     return "host-quests";
   };
 
-  // ---------- host: create and publish ----------
+  // ---------- host: create, drafts and publish ----------
+  const keyOf = (iso) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
+  const timeOf = (iso) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "America/Toronto" });
+  const real = (x) => (x && x !== "N/A" ? x : "");
+  // A draft from a published sidequest, for editing it or running it again
+  function draftFromEvent(e, over = {}) {
+    const di = e.dayInfo || {};
+    const sw = (o) => ({ on: !!(o && o.on), note: (o && o.note) || "" });
+    return SQ.emptyHostDraft({ title: e.title, description: real(e.description), date: keyOf(e.startsAt), time: timeOf(e.startsAt), endTime: e.endsAt ? timeOf(e.endsAt) : "", price: e.price == null ? "" : String(e.price), age: e.agePolicy === "19+" || (e.tags || []).includes("19+") ? "19+" : "All ages", vibes: [...(e.vibes || [])],
+      venue: { name: real(e.venue && e.venue.name), address: real(e.venue && e.venue.address) }, image: e.image || null, ticketLink: e.ticketLink || "",
+      dayInfo: { ...emptyDayInfo(), entrances: di.entrances && di.entrances.length ? [...di.entrances] : [real(di.entrance)], transit: di.transit || "", home: di.home || "", coatCheck: sw(di.coatCheck), reentry: sw(di.reentry), stepFree: sw(di.stepFree), quietRoom: sw(di.quietRoom), payments: [...(di.payments || [])], floorPlan: di.floorPlan || null }, ...over });
+  }
+  const saveDraft = async (d) => {
+    const r = await SQ.act("saveDraft", { draft: d });
+    d.id = r.draftId;
+    return r.draftId;
+  };
   A.newDraft = () => {
     U().hostDraft = SQ.emptyHostDraft();
     U().poster = null;
     return "host-create";
   };
-  A.duplicate = (id) => {
+  A.duplicate = async (id) => {
     const e = SQ.ev(id);
-    const start = new Date(e.startsAt);
-    const time = start.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "America/Toronto" });
-    U().hostDraft = SQ.emptyHostDraft({ title: `${e.title} (next one)`, description: e.description === "N/A" ? "" : e.description, time, price: e.price == null ? "" : String(e.price), vibes: [...(e.vibes || [])], ...(e.venue && { venue: { name: e.venue.name === "N/A" ? "" : e.venue.name, address: e.venue.address === "N/A" ? "" : e.venue.address } }), ticketLink: e.ticketLink || "", dayInfo: { entrance: e.dayInfo.entrance || "", transit: e.dayInfo.transit || "", home: e.dayInfo.home || "", coat: e.dayInfo.coat || "" } });
+    const d = draftFromEvent(e, { kind: "duplicate", date: "" });
+    // Same weekday and time, a week after the last one (or the next one from today)
+    const next = new Date(Math.max(Date.parse(e.startsAt), SQ.now().getTime()) + 7 * 86400000);
+    d.date = keyOf(next);
+    d.title = `${e.title} · ${next.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Toronto" })}`;
+    await saveDraft(d);
+    toast("Duplicated to your drafts. Check the day, then publish.");
+    U().hostTab = "Drafts";
+    return "host-quests";
+  };
+  A.openDraft = (id, el) => {
+    const d = ((SQ.d.host && SQ.d.host.drafts) || []).find((x) => x.id === id);
+    if (!d) return;
+    if (d.test && SQ.u.screen === "host-quests") {
+      U().hostDraftId = d.id;
+      return "host-draft-test";
+    }
+    U().hostDraft = { ...SQ.emptyHostDraft(), ...JSON.parse(JSON.stringify(d)), dayInfo: { ...emptyDayInfo(), ...(d.dayInfo || {}) } };
     U().poster = null;
-    toast("Copied. Pick a new day.");
     return "host-create";
+  };
+  A.deleteDraft = async (id) => {
+    if (!confirm("Delete this draft?")) return;
+    await SQ.act("deleteDraft", { id });
+    toast("Draft deleted.");
+    if (SQ.u.screen === "host-draft-test") return "host-quests";
+  };
+  A.editQuest = (id) => {
+    U().hostDraft = draftFromEvent(SQ.ev(id), { eventId: Number(id) });
+    U().poster = null;
+    return "host-create";
+  };
+  A.editDayInfo = (id) => {
+    A.editQuest(id);
+    return "host-create-dayinfo";
   };
   A.draftSet = (arg) => {
     const i = arg.indexOf(":");
     U().hostDraft[arg.slice(0, i)] = arg.slice(i + 1);
   };
-  A.draftVibe = (v) => toggle(U().hostDraft.vibes, v);
-  A.draftNext = () => {
+  // Vibe tags are the tiles attendees pick from; each stands for a few vibes
+  A.draftVibe = (label) => {
+    const d = U().hostDraft;
+    const t = SQ.TILES.find((x) => x[0] === label);
+    d.vibes = t[2].some((v) => d.vibes.includes(v)) ? d.vibes.filter((v) => !t[2].includes(v)) : [...d.vibes, ...t[2]];
+  };
+  A.draftPay = (p) => toggle(U().hostDraft.dayInfo.payments, p);
+  A.draftNext = async () => {
     const d = U().hostDraft;
     if (!d.title.trim() || !d.date) return toast("Add a title and pick a day to continue.");
+    if (!d.eventId) await saveDraft(d); // nothing is lost if they close the form now
     return "host-create-dayinfo";
+  };
+  A.addEntrance = () => {
+    U().hostDraft.dayInfo.entrances.push("");
+  };
+  A.dayToggle = (k) => {
+    const x = U().hostDraft.dayInfo[k];
+    x.on = !x.on;
+  };
+  A.dayNote = (k) => {
+    const x = U().hostDraft.dayInfo[k];
+    if (k === "quietRoom") return A.dayToggle(k);
+    const v = prompt("Add a detail attendees see", x.note || "");
+    if (v == null) return;
+    x.note = v.trim().slice(0, 80);
+    if (x.note) x.on = true;
+  };
+  // The floor plan: shrunk to 1000px so it fits on the listing
+  A.floorPlan = async (file) => {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1000 / Math.max(bmp.width, bmp.height));
+    const c = Object.assign(document.createElement("canvas"), { width: Math.round(bmp.width * k), height: Math.round(bmp.height * k) });
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    U().hostDraft.dayInfo.floorPlan = c.toDataURL("image/jpeg", 0.75);
   };
   A.aiDraft = async () => {
     const d = U().hostDraft;
@@ -823,15 +899,61 @@
     }
     U().drafting = false;
   };
+  const cleanDraft = (d) => ({ ...d, dayInfo: { ...d.dayInfo, entrances: d.dayInfo.entrances.filter((x) => x.trim()) } });
   A.publish = async () => {
-    const r = await SQ.act("publish", { draft: U().hostDraft });
+    const d = cleanDraft(U().hostDraft);
+    const r = await SQ.act("publish", { draft: d });
+    if (r.edited) {
+      toast("Saved. Attendees see the changes now.");
+      U().hostDraft = SQ.emptyHostDraft();
+      SQ.u.history = [];
+      U().hostQuest = r.eventId;
+      return "host-checkin";
+    }
     if (r.merged) toast("That event was already listed, so we merged your details into it. It's yours now.");
+    const e = { vibes: d.vibes };
     U().hostQuest = r.eventId;
-    U().published = r;
+    U().published = { ...r, fits: Object.values(SQ.d.friends).filter((f) => f.vibes.some((v) => e.vibes.includes(v))).length + (me() && me().vibes.some((v) => e.vibes.includes(v)) ? 1 : 0) + (r.requesters || 0) };
     U().hostDraft = SQ.emptyHostDraft();
     U().poster = null;
     SQ.u.history = [];
     return "host-published";
+  };
+  A.schedulePublish = async () => {
+    const r = await SQ.act("publish", { draft: cleanDraft(U().hostDraft), publishAt: SQ.nextMonday9() });
+    toast("Scheduled for Monday 9 AM. It's in your drafts until then.");
+    U().hostDraft = SQ.emptyHostDraft();
+    U().hostTab = "Drafts";
+    SQ.u.history = [];
+    return r.scheduled ? "host-quests" : undefined;
+  };
+  // Draft test: from a request, or from a saved draft
+  A.testFromRequest = async (id) => {
+    A.draftFromRequest(id);
+    const d = U().hostDraft;
+    await A.aiDraft();
+    const draftId = await saveDraft(d);
+    await SQ.act("testDraft", { id: draftId });
+    U().hostDraftId = draftId;
+    return "host-draft-test";
+  };
+  A.testDraft = async () => {
+    await SQ.act("testDraft", { id: U().hostDraftId });
+  };
+  A.simulateDraft = async () => {
+    await SQ.act("simulateDraft", { id: U().hostDraftId });
+    toast("Simulated 3 days of interest from people whose taste fits.");
+  };
+  A.applyTweak = async () => {
+    const d = ((SQ.d.host && SQ.d.host.drafts) || []).find((x) => x.id === U().hostDraftId);
+    const tw = d && SQ.tweakFor(d);
+    if (!tw) return;
+    if (tw.go) {
+      A.openDraft(d.id);
+      return tw.go;
+    }
+    await SQ.act("saveDraft", { draft: { ...d, ...tw.set } });
+    toast("Tweak applied to the draft.");
   };
   A.viewAsAttendee = (id) => {
     if (!me()) return toast("Sign up as an attendee (Profile > Request a quest) to see it in a feed.");
@@ -840,8 +962,22 @@
   };
 
   // ---------- host: Demand Insights ----------
-  A.setDemandArea = (a) => {
-    U().demandArea = a;
+  A.toggleDemandMap = () => {
+    U().demandMap = !U().demandMap;
+  };
+  A.requestOnMap = () => {
+    U().demandMap = true;
+    return "host-demand";
+  };
+  A.planFromMap = () => A.requestOnMap();
+  A.hostTab = (t) => {
+    U().hostTab = t;
+  };
+  A.insightTab = (t) => {
+    U().insightTab = t;
+  };
+  A.insightDays = (n) => {
+    U().insightDays = Number(n);
   };
   A.openRequest = (id) => {
     U().hostRequest = Number(id);
@@ -874,7 +1010,8 @@
   A.openHostQuest = (id) => {
     U().hostQuest = Number(id);
     const e = SQ.ev(id);
-    return e && (e.over || e.ended) ? "host-recap" : "host-checkin";
+    if (e && (e.over || e.ended)) return A.openRecap(id);
+    return "host-checkin";
   };
   A.openCheckin = (id) => {
     U().hostQuest = Number(id);
@@ -882,28 +1019,72 @@
   };
   A.openRecap = (id) => {
     U().hostQuest = Number(id);
-    return "host-recap";
+    U().insightTab = "Recap";
+    return "host-insights";
   };
   A.checkin = (name) => SQ.act("checkin", { eventId: U().hostQuest, name });
+  // Scan a ticket QR at the door: a guest's name checks them in; any other ticket code counts as one more in
+  A.scanGuest = async (file) => {
+    if (!("BarcodeDetector" in window)) return toast("This browser can't read QR codes. Check guests in by name below.");
+    const codes = await new window.BarcodeDetector({ formats: ["qr_code", "pdf417", "aztec", "code_128"] }).detect(await createImageBitmap(file)).catch(() => []);
+    if (!codes.length) return toast("Couldn't find a ticket code in that photo. Try again closer up.");
+    const text = codes[0].rawValue.trim();
+    const e = SQ.ev(U().hostQuest);
+    const guest = [...(e.friends || []), ...(e.attendees || [])].find((g) => text.toLowerCase().includes(g.toLowerCase()));
+    const name = guest || `Ticket ${text.slice(-6)}`;
+    if ((SQ.d.checkins[e.id] || []).includes(name)) return toast(`${name} is already in.`);
+    await SQ.act("checkin", { eventId: e.id, name });
+    toast(`${name} checked in.`);
+  };
+  A.quickUpdate = async (text) => {
+    const r = await SQ.act("hostMessage", { eventId: U().hostQuest, text, audience: "attendees" });
+    toast(`Posted "${text}"${r.reached ? ` to ${r.reached} ${r.reached === 1 ? "person" : "people"}` : ""}. It's pinned on their event day screen.`);
+  };
   A.endEvent = async (id) => {
+    if (!confirm("End the event? Attendees are asked if they went and how it was.")) return;
     await SQ.act("endEvent", { eventId: Number(id) });
     toast("Event ended. Attendees are asked if they went and how it was.");
     U().hostQuest = Number(id);
-    return "host-recap";
+    U().insightTab = "Recap";
+    return "host-insights";
+  };
+  A.inviteFollow = async (id) => {
+    const r = await SQ.act("inviteFollow", { eventId: Number(id) });
+    toast(r.asked ? `Asked ${r.asked} ${r.asked === 1 ? "guest" : "guests"} who rated it 4 or 5 stars to follow you.` : "No one who rated it 4 or 5 stars is left to ask.");
   };
   A.msgEvent = (id) => {
-    U().msg.eventId = Number(id);
+    Object.assign(U().msg, { eventId: Number(id), audience: "attendees" });
   };
   A.msgAudience = (k) => {
     U().msg.audience = k;
   };
+  A.msgQuick = (t) => {
+    U().msg.text = t;
+  };
+  A.msgWhen = (k) => {
+    U().msg.when = k;
+  };
   A.hostMessage = async () => {
     const m = U().msg;
-    if (!m.eventId) return toast("Pick which quest this is about.");
+    if (m.audience === "attendees" && !m.eventId) return toast("Pick which sidequest this is about.");
     if (!m.text.trim()) return toast("Write an update first.");
-    const r = await SQ.act("hostMessage", m);
+    if (m.when === "later" && !m.sendAt) return toast("Pick when to send it.");
+    const r = await SQ.act("hostMessage", { eventId: m.audience === "attendees" ? m.eventId : null, text: m.text, audience: m.audience, sendAt: m.when === "later" ? new Date(m.sendAt).toISOString() : null });
     m.text = "";
-    toast(`Update sent${r.reached ? ` to ${r.reached} ${r.reached === 1 ? "person" : "people"}` : ""}. It's pinned in Event Day Mode too.`);
+    m.sendAt = "";
+    toast(r.scheduled ? "Scheduled. It goes out at that time." : `Sent${r.reached ? ` to ${r.reached} ${r.reached === 1 ? "person" : "people"}` : ""}.${m.audience === "attendees" ? " It's pinned on their event day screen too." : ""}`);
+  };
+  A.copyLink = async (id) => {
+    const url = `${location.origin}/?quest=${id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Link copied.");
+    } catch {
+      prompt("Copy this link", url);
+    }
+  };
+  A.openUrl = (url) => {
+    if (/^https:\/\//.test(url)) window.open(url, "_blank", "noopener");
   };
 
   SQ.actions = A;

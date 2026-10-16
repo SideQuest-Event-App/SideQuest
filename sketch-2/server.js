@@ -265,6 +265,8 @@ function eventsPayload() {
 }
 
 function view(userId, hostId) {
+  deliverDue();
+  publishDue();
   const d = db.data;
   const user = d.users[userId] || null;
   const host = d.hosts[hostId] || null;
@@ -500,6 +502,7 @@ A.postRequest = (ctx, args) => {
     if (!u.votedRequests.includes(same.id) && !u.myRequests.includes(same.id)) {
       same.votes++;
       u.votedRequests.push(same.id);
+      logVote(same, u);
     }
     return { requestId: same.id, merged: true, votes: same.votes };
   }
@@ -523,6 +526,7 @@ A.postRequest = (ctx, args) => {
   };
   list.push(r);
   u.myRequests.push(r.id);
+  logVote(r, u);
   return { requestId: r.id, merged: false, votes: 1 };
 };
 A.upvote = (ctx, { requestId }) => {
@@ -532,7 +536,12 @@ A.upvote = (ctx, { requestId }) => {
   if (u.myRequests.includes(r.id)) return;
   const on = toggle(u.votedRequests, r.id);
   r.votes = Math.max(0, r.votes + (on ? 1 : -1));
+  if (on) logVote(r, u);
+  else db.data.logs.votes = (db.data.logs.votes || []).filter((v) => !(v.requestId === r.id && v.userId === u.id));
 };
+function logVote(r, u) {
+  (db.data.logs.votes = db.data.logs.votes || []).push({ time: now().toISOString(), requestId: r.id, userId: u.id });
+}
 A.readNotifications = (ctx) => {
   for (const n of needUser(ctx).notifications) n.read = true;
 };
@@ -670,6 +679,26 @@ function dateLabelOf(start) {
 }
 
 // An event from the create form (typed in, or filled from a poster). Throws with a message the app shows.
+// Event day info as the host fills it in (Figma: 35 Event day info); entrance and coat stay as plain lines for older screens
+const FLOOR_PLAN = /^data:image\/jpeg;base64,/;
+function dayInfoOf(x = {}, venue) {
+  const sw = (o) => ({ on: !!(o && o.on), note: clean(o && o.note, 80) });
+  const entrances = (Array.isArray(x.entrances) ? x.entrances : [x.entrance]).map((t) => clean(t, 80)).filter(Boolean).slice(0, 4);
+  const coat = sw(x.coatCheck);
+  return {
+    entrances,
+    entrance: entrances[0] || (venue ? venue.name : "Main door"),
+    transit: clean(x.transit, 120),
+    home: clean(x.home, 120) || "Subway runs until about 1:30 AM",
+    coatCheck: coat,
+    coat: coat.on ? coat.note || "Yes" : typeof x.coat === "string" && x.coat ? clean(x.coat, 120) : "Ask at the door",
+    reentry: sw(x.reentry),
+    stepFree: sw(x.stepFree),
+    quietRoom: sw(x.quietRoom),
+    payments: (Array.isArray(x.payments) ? x.payments : []).filter((p) => ["Card", "Tap", "Cash"].includes(p)),
+    floorPlan: typeof x.floorPlan === "string" && FLOOR_PLAN.test(x.floorPlan) && x.floorPlan.length < 400000 ? x.floorPlan : null,
+  };
+}
 async function eventFromDraft(d, { organizer, fallbackArea }) {
   const title = clean(d.title, 80);
   if (!title) throw new Error("Give it a title.");
@@ -686,6 +715,7 @@ async function eventFromDraft(d, { organizer, fallbackArea }) {
   const description = clean(d.description, 600);
   const picked = (d.vibes || []).filter((x) => VIBES.includes(x));
   const vibes = picked.length ? picked : vibesOf(`${title} ${description}`);
+  const tags = [...vibes.map((x) => x.toLowerCase()), ...(d.age === "19+" ? ["19+"] : [])];
   const where = venue ? place(venue.lat, venue.lng) : { neighbourhood: fallbackArea, area: fallbackArea };
   const start = new Date(startsAt);
   return {
@@ -701,7 +731,7 @@ async function eventFromDraft(d, { organizer, fallbackArea }) {
     price,
     priceNote: price == null ? NA : price ? `$${price}` : "Free",
     description: description || NA,
-    tags: vibes.map((x) => x.toLowerCase()),
+    tags,
     vibes,
     rating: null,
     reviews: [],
@@ -712,12 +742,8 @@ async function eventFromDraft(d, { organizer, fallbackArea }) {
     travel: venue ? travelTo(venue.lat, venue.lng) : travelFor(fallbackArea),
     ticketLink: posters.asLink(d.ticketLink),
     image: POSTER_URL.test(d.image || "") ? d.image : null,
-    dayInfo: {
-      entrance: clean((d.dayInfo || {}).entrance, 120) || (venue ? venue.name : "Main door"),
-      transit: clean((d.dayInfo || {}).transit, 120),
-      home: clean((d.dayInfo || {}).home, 120) || "Subway runs until about 1:30 AM",
-      coat: clean((d.dayInfo || {}).coat, 120) || "Ask at the door",
-    },
+    dayInfo: dayInfoOf(d.dayInfo, venue),
+    agePolicy: d.age === "19+" ? "19+" : "All ages",
     fromRequest: null,
     publishedAt: new Date().toISOString(),
   };
@@ -731,10 +757,69 @@ function claimFor(h, e) {
   edited();
 }
 
-A.publish = async (ctx, { draft }) => {
+// Drafts live on the host account: new ones, duplicates, and ones under a draft test
+const DRAFT_KINDS = ["new", "duplicate", "test"];
+A.saveDraft = (ctx, { draft }) => {
+  const h = needHost(ctx);
+  const d = draft && typeof draft === "object" ? draft : {};
+  if (JSON.stringify(d).length > 500000) throw new Error("That draft is too big. Try a smaller floor plan.");
+  h.drafts = h.drafts || [];
+  const id = h.drafts.some((x) => x.id === d.id) ? d.id : newId();
+  const keep = { ...d, id, kind: DRAFT_KINDS.includes(d.kind) ? d.kind : "new", title: clean(d.title, 80), savedAt: now().toISOString() };
+  h.drafts = [keep, ...h.drafts.filter((x) => x.id !== id)].slice(0, 30);
+  return { draftId: id };
+};
+A.deleteDraft = (ctx, { id }) => {
+  const h = needHost(ctx);
+  h.drafts = (h.drafts || []).filter((x) => x.id !== id);
+};
+// Draft test: the draft is shown to people whose taste fits for 3 days, and their saves and "I'd go" taps come back
+const matchingPeople = (vibes) => Object.values(db.data.users).filter((u) => u.vibes.some((v) => vibes.includes(v))).length + Object.values(db.FRIENDS).filter((f) => f.vibes.some((v) => vibes.includes(v))).length;
+A.testDraft = (ctx, { id }) => {
+  const h = needHost(ctx);
+  const d = (h.drafts || []).find((x) => x.id === id);
+  if (!d) throw new Error("That draft is gone.");
+  const r = d.fromRequest && findRequest(d.fromRequest);
+  d.kind = "test";
+  d.test = { startedAt: now().toISOString(), shownTo: matchingPeople(d.vibes || []) + (r ? r.votes : 0), saves: 0, wouldGo: 0, fromRequesters: 0, fromOthers: 0, simulated: false };
+};
+// ponytail: attendees can't see drafts yet, so a test only fills in when the host taps "Simulate 3 days of interest".
+// The numbers come from how well the draft fits its request (price, day, area); real taps replace this once drafts show in feeds.
+A.simulateDraft = (ctx, { id }) => {
+  const h = needHost(ctx);
+  const d = (h.drafts || []).find((x) => x.id === id);
+  if (!d || !d.test) throw new Error("Start a draft test first.");
+  const r = d.fromRequest && findRequest(d.fromRequest);
+  const price = budgetOf(d.price);
+  let fit = 1;
+  if (r && r.budget != null && price != null && price > r.budget) fit -= 0.35;
+  if (d.time && d.time >= "22:00") fit -= 0.15;
+  if (!(d.vibes || []).length) fit -= 0.2;
+  const shown = Math.max(d.test.shownTo, 40);
+  Object.assign(d.test, {
+    simulated: true,
+    saves: Math.round(shown * 0.15 * fit),
+    wouldGo: Math.round(shown * 0.074 * fit),
+    fromRequesters: r ? Math.round(61 * fit) : 0,
+    fromOthers: Math.round(22 * fit),
+    startedAt: new Date(now().getTime() - 3 * 86400000).toISOString(),
+  });
+};
+
+A.publish = async (ctx, { draft, publishAt }) => {
   const h = needHost(ctx);
   const d = draft || {};
+  // Schedule for later: kept as a draft and published on the first app load after that time
+  const at = Date.parse(publishAt || "");
+  if (publishAt) {
+    if (!(at > now().getTime())) throw new Error("Pick a time in the future.");
+    await eventFromDraft(d, { organizer: h.name, fallbackArea: AREAS.includes(h.area) ? h.area : "Downtown" }); // catch mistakes now, not at publish time
+    const { draftId } = A.saveDraft(ctx, { draft: { ...d, publishAt: new Date(at).toISOString() } });
+    return { draftId, scheduled: true };
+  }
+  if (d.eventId) return editEvent(h, d);
   const e = await eventFromDraft(d, { organizer: h.name, fallbackArea: AREAS.includes(h.area) ? h.area : "Downtown" });
+  if (d.id) h.drafts = (h.drafts || []).filter((x) => x.id !== d.id);
   if (!e.ticketLink) e.ticketLink = h.ticketLink;
   // Already listed (imported, or added by someone else): fill that listing's gaps and make it the host's
   const dup = d.fromRequest ? null : duplicateOf(e);
@@ -762,6 +847,33 @@ A.publish = async (ctx, { draft }) => {
   }
   return { eventId: e.id, requesters: r ? r.votes : 0, followers };
 };
+// Editing a published quest keeps its id, accepts and chat; only what the host changed moves
+async function editEvent(h, d) {
+  const e = findEvent(d.eventId);
+  if (!e || e.organizer.name !== h.name) throw new Error("Pick one of your quests.");
+  const fresh = await eventFromDraft({ ...d, image: d.image || e.image }, { organizer: h.name, fallbackArea: e.area });
+  for (const k of ["title", "date", "startsAt", "endsAt", "neighbourhood", "area", "venue", "price", "priceNote", "description", "tags", "vibes", "travel", "dayInfo", "agePolicy", "image"]) e[k] = fresh[k];
+  if (fresh.ticketLink) e.ticketLink = fresh.ticketLink;
+  edited();
+  return { eventId: e.id, edited: true, requesters: 0, followers: 0 };
+}
+let publishing = false;
+async function publishDue() {
+  if (publishing) return;
+  publishing = true;
+  try {
+    for (const h of Object.values(db.data.hosts)) {
+      for (const d of (h.drafts || []).filter((x) => x.publishAt && Date.parse(x.publishAt) <= now().getTime())) {
+        await A.publish({ host: h }, { draft: { ...d, publishAt: null } }).catch((err) => console.error("Scheduled publish failed:", err.message));
+        h.drafts = (h.drafts || []).filter((x) => x.id !== d.id);
+        db.save();
+      }
+    }
+  } finally {
+    publishing = false;
+  }
+}
+
 // "This is ours": a host claims a listing that's already on Sidequest instead of publishing a copy
 A.claimListing = (ctx, { eventId }) => {
   const h = needHost(ctx);
@@ -791,23 +903,51 @@ A.submitEvent = async (ctx, { draft }) => {
   return { eventId: e.id };
 };
 
-A.hostMessage = (ctx, { eventId, text, audience }) => {
+// An announcement goes out now, or at sendAt (delivered the next time anyone loads the app after that)
+A.hostMessage = (ctx, { eventId, text, audience, sendAt }) => {
   const h = needHost(ctx);
   const t = clean(text, 300);
   if (!t) throw new Error("Write an update first.");
-  const e = findEvent(eventId);
-  if (!e || e.organizer.name !== h.name) throw new Error("Pick one of your quests.");
-  db.data.hostMessages.push({ id: newId(), host: h.name, eventId: e.id, text: t, audience, time: now().toISOString() });
-  (db.data.eventChat[e.id] = db.data.eventChat[e.id] || []).push({ from: h.name, host: true, text: t, time: now().toISOString() });
-  let reached = 0;
+  const e = audience === "followers" && !eventId ? null : findEvent(eventId);
+  if (audience !== "followers" && (!e || e.organizer.name !== h.name)) throw new Error("Pick one of your quests.");
+  const at = Date.parse(sendAt || "");
+  if (sendAt && !(at > now().getTime())) throw new Error("Pick a time in the future.");
+  const m = { id: newId(), host: h.name, eventId: e ? e.id : null, text: t, audience: audience === "followers" ? "followers" : "attendees", time: now().toISOString(), ...(at ? { sendAt: new Date(at).toISOString() } : {}) };
+  db.data.hostMessages.push(m);
+  if (!at) deliver(m);
+  return { reached: m.reached || 0, scheduled: !!at };
+};
+function deliver(m) {
+  m.sentAt = now().toISOString();
+  if (m.eventId) (db.data.eventChat[m.eventId] = db.data.eventChat[m.eventId] || []).push({ from: m.host, host: true, text: m.text, time: m.sentAt });
+  m.reached = 0;
   for (const u of Object.values(db.data.users)) {
-    const hit = audience === "followers" ? u.following.includes(h.name) : !!u.log[e.id];
-    if (hit) {
-      notify(u, `Update from ${h.name}`, t, { eventId: e.id });
-      reached++;
+    if (m.audience === "followers" ? u.following.includes(m.host) : !!u.log[m.eventId]) {
+      notify(u, `Update from ${m.host}`, m.text, m.eventId ? { eventId: m.eventId } : {});
+      m.reached++;
     }
   }
-  return { reached };
+}
+// ponytail: scheduled messages go out on the next app load after their time; a timer or cron if hosts need them to the minute
+function deliverDue() {
+  let sent = 0;
+  for (const m of db.data.hostMessages) if (m.sendAt && !m.sentAt && Date.parse(m.sendAt) <= now().getTime()) (deliver(m), sent++);
+  if (sent) db.save();
+}
+// After a great night: ask everyone who rated it 4 or 5 stars to follow the host
+A.inviteFollow = (ctx, { eventId }) => {
+  const h = needHost(ctx);
+  const e = findEvent(eventId);
+  if (!e || e.organizer.name !== h.name) throw new Error("Pick one of your quests.");
+  let asked = 0;
+  for (const u of Object.values(db.data.users)) {
+    const l = u.log[e.id];
+    if (l && l.rating >= 4 && !u.following.includes(h.name)) {
+      notify(u, `Follow ${h.name}?`, `You rated ${e.title} ${l.rating} stars. Follow to hear about the next one first.`, { follow: h.name });
+      asked++;
+    }
+  }
+  return { asked };
 };
 A.checkin = (ctx, { eventId, name }) => {
   needHost(ctx);
@@ -1076,14 +1216,59 @@ function hostReport(host) {
   const repeat = users.filter((u) => Object.entries(u.log).filter(([id, l]) => ids.has(Number(id)) && l.status === "went").length > 1).length;
   const interested = sum("interested");
 
+  // This week's asks, who asked (first few names), and who's planning
+  const weekAgo = now().getTime() - 7 * 86400000;
+  const votes = (d.logs.votes || []).filter((v) => Date.parse(v.time) >= weekAgo);
+  const votesWeek = {};
+  for (const v of votes) votesWeek[v.requestId] = (votesWeek[v.requestId] || 0) + 1;
+  const askers = {};
+  for (const u of users) for (const id of [...u.myRequests, ...u.votedRequests]) if ((askers[id] = askers[id] || []).length < 4) askers[id].push(u.name || "Someone");
+  const claimed = d.requests.filter((r) => r.status === "claimed");
+
+  // Views to the door, over the last 7, 30 and 90 days
+  const funnel = {};
+  for (const days of [7, 30, 90]) {
+    const since = now().getTime() - days * 86400000;
+    const inWindow = (x) => ids.has(x.eventId) && Date.parse(x.time) >= since;
+    funnel[days] = {
+      views: (d.logs.views || []).filter(inWindow).length,
+      saves: sum("saves"), // ponytail: saves have no timestamp yet, so every window shows the current total
+      tickets: d.logs.going.filter(inWindow).length,
+      checkedIn: mine.filter((e) => Date.parse(e.startsAt) >= since).reduce((n, e) => n + (d.checkins[e.id] || []).length, 0),
+    };
+  }
+
+  // Per edition: category ratings, and what its guests asked for next (open requests they posted or upvoted)
+  for (const ev of events) {
+    const raters = users.filter((u) => u.log[ev.id] && u.log[ev.id].rating);
+    ev.details = Object.fromEntries(RATE_DETAILS.map((k) => {
+      const xs = raters.map((u) => (u.log[ev.id].details || {})[k]).filter(Boolean);
+      return [k, xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null];
+    }).filter(([, v]) => v != null));
+    const went = users.filter((u) => u.log[ev.id] && u.log[ev.id].status === "went");
+    ev.asksNext = d.requests.filter((r) => r.status === "open" && went.some((u) => u.myRequests.includes(r.id) || u.votedRequests.includes(r.id))).slice(0, 4).map((r) => r.text);
+  }
+  const allRatings = d.logs.attended.filter((a) => ids.has(a.eventId) && a.rating).map((a) => a.rating);
+
+  // Where the audience lives, and the regulars (3 or more of this host's quests)
+  const areaCounts = {};
+  const audienceUsers = users.filter((u) => Object.keys(u.log).some((id) => ids.has(Number(id))) || (host && u.following.includes(host.name)));
+  for (const u of audienceUsers) if (u.homeArea) areaCounts[u.homeArea] = (areaCounts[u.homeArea] || 0) + 1;
+  const topAreas = Object.entries(areaCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([area, n]) => ({ area, pct: Math.round((n / audienceUsers.length) * 100) }));
+  const regulars = users.filter((u) => Object.entries(u.log).filter(([id, l]) => ids.has(Number(id)) && l.status === "went").length >= 3).map((u) => u.name || "Someone");
+
   return {
+    week: { votes: votes.length, byRequest: votesWeek, planning: claimed.length, planningNew: claimed.filter((r) => Date.parse(r.claimedAt || 0) >= weekAgo).length },
+    askers,
+    funnel,
+    rating: { avg: allRatings.length ? Math.round((allRatings.reduce((a, b) => a + b, 0) / allRatings.length) * 10) / 10 : null, count: allRatings.length },
     totals: { interested, crews: sum("crews"), went: sum("went"), didntGo: sum("didntGo"), notForMe: sum("notForMe"), saves: sum("saves"), fulfilled: d.requests.filter((r) => r.status === "live" && host && r.claimedBy === host.name).length },
     events,
     matching,
     heat,
     unmet,
     searches: d.logs.searches.length,
-    audience: { followers, baseFollowers: mine.reduce((a, e) => a + (e.going || 0), 0), segments, people: interestedPeople.length, partyShare: interested ? Math.round((sum("crews") / interested) * 100) : null, repeat },
+    audience: { followers, baseFollowers: mine.reduce((a, e) => a + (e.going || 0), 0), segments, people: interestedPeople.length, partyShare: interested ? Math.round((sum("crews") / interested) * 100) : null, repeat, topAreas, regulars },
   };
 }
 
@@ -1457,6 +1642,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/track") {
       const { user: userId, host: hostId, sessionId, screen, from, eventId } = await readBody(req);
       if (SCREEN_ID.test(screen || "")) track("screen_view", { userId, hostId, sessionId, eventId, screen, from: SCREEN_ID.test(from || "") ? from : null });
+      const seen = screen === "quest" && findEvent(eventId);
+      if (seen && !(db.data.hosts[hostId] && seen.organizer.name === db.data.hosts[hostId].name)) { // a host looking at their own listing isn't a view
+        (db.data.logs.views = db.data.logs.views || []).push({ time: now().toISOString(), eventId: Number(eventId), userId: userId || null });
+        db.save();
+      }
       res.writeHead(204);
       return res.end();
     }

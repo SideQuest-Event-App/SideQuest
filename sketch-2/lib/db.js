@@ -46,6 +46,8 @@ function seed() {
       going: [], // "Accept quest" taps: intent, not attendance
       attended: [], // "Did you go?" answers and ratings: what the north star counts
       feedback: [], // "Not for me" taps
+      views: [], // quest detail opens, for the host's views-to-door funnel
+      votes: [], // request asks and upvotes, for "+N this week"
     },
   };
 }
