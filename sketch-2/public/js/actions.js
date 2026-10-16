@@ -573,6 +573,38 @@
 
   // ---------- profile and switching ----------
   A.setTheme = (t) => SQ.setTheme(t);
+  A.cycleTheme = () => {
+    const order = ["dark", "light", "system"];
+    SQ.setTheme(order[(order.indexOf(U().theme) + 1) % order.length]);
+  };
+  A.ageSetting = async () => {
+    const u = me();
+    if (u.adult === true) {
+      if (confirm("Switch to all-ages picks? 19+ sidequests will be hidden.")) await SQ.act("setProfile", { adult: false });
+    } else if (confirm("Are you 19 or older? The door still checks ID.")) await SQ.act("setProfile", { adult: true });
+  };
+  A.editProfile = () => {
+    const u = me();
+    U().profileDraft = { name: u.name || "", handle: u.handle || "" };
+    U().profileAdd = null;
+    return "profile-edit";
+  };
+  A.profileAdd = (k) => {
+    U().profileAdd = U().profileAdd === k ? null : k;
+  };
+  A.saveProfile = async () => {
+    const d = U().profileDraft;
+    await SQ.act("setProfile", { name: d.name, handle: d.handle });
+    SQ.back();
+  };
+  // A small square photo, so it fits in the profile
+  A.profilePhoto = async (file) => {
+    const bmp = await createImageBitmap(file);
+    const side = Math.min(bmp.width, bmp.height);
+    const c = Object.assign(document.createElement("canvas"), { width: 256, height: 256 });
+    c.getContext("2d").drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, 256, 256);
+    await SQ.act("setProfile", { photo: c.toDataURL("image/jpeg", 0.8) });
+  };
   A.switchToHost = () => (SQ.d.host ? "host-dashboard" : "host-type");
   A.switchToAttendee = () => (me() ? (me().registered ? "discover" : "ob-vibes") : "landing");
   A.signOut = () => {

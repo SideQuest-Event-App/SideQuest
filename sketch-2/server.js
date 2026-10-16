@@ -378,6 +378,8 @@ A.setProfile = (ctx, args) => {
   if (args.maxMinutes !== undefined) u.maxMinutes = Number(args.maxMinutes) || null;
   if (args.name !== undefined) u.name = clean(args.name, 30) || u.name;
   if (args.adult !== undefined) u.adult = !!args.adult;
+  if (args.handle !== undefined) u.handle = clean(args.handle, 30) ? `@${clean(args.handle, 30).replace(/^@+/, "").replace(/[^a-zA-Z0-9._]/g, "")}` : "";
+  if (typeof args.photo === "string" && /^data:image\/jpeg;base64,/.test(args.photo) && args.photo.length < 120000) u.photo = args.photo;
   if (args.registered) {
     if (u.vibes.length < 2) throw new Error("Pick at least 2 vibes first.");
     u.registered = true;

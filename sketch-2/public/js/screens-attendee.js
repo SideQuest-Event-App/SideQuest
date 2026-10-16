@@ -1243,48 +1243,93 @@
     </div>`;
   } };
 
-  /* ===================== Profile ===================== */
+  /* ===================== Profile (Figma: 24 Profile, Profile editing, Switch account) ===================== */
+  const meAvatar = (u, cls = "xl") => (u.photo ? `<span class="av ${cls} photo-av" style="background-image:url('${u.photo}')" role="img" aria-label="Your photo"></span>` : `<span class="av ${cls}">${esc((u.name || "You")[0].toUpperCase())}</span>`);
+  const handleOf = (u) => u.handle || `@${String(u.name || "you").toLowerCase().replace(/[^a-z0-9]+/g, ".")}`;
+  const settingRow = (ic, title, sub, a) => `<button class="list-row" ${Object.entries(a).map(([k, v]) => `${k}="${esc(v)}"`).join(" ")}><span class="lead-ic">${icon(ic)}</span><span class="text"><span>${esc(title)}</span><span>${esc(sub)}</span></span>${icon("chevR")}</button>`;
+  const DAYS_LABEL = { weekends: "Weekends", weeknights: "Weeknights", both: "Any day" };
+
   S.profile = { role: "attendee", label: "Profile", render: () => {
     const u = me();
-    const stories = Object.entries(u.log).filter(([, l]) => l.status === "went").map(([id, l]) => ({ e: ev(id), l })).filter((x) => x.e);
-    const feed = u.feed;
+    const went = Object.values(u.log).filter((l) => l.status === "went").length;
+    const checkins = Object.values(u.log).filter((l) => l.checkedIn).length;
+    const tiles = SQ.pickedTiles(u);
+    const since = new Date(u.createdAt || SQ.now()).toLocaleDateString("en-US", { month: "short", year: "numeric" }).replace(/^Sep /, "Sept ");
+    const whens = WHEN_TILES.filter((w) => (u.when || []).includes(w[0]));
     const theme = U().theme;
+    const host = SQ.hostId() && SQ.d.host;
     return screen(`
-      <div class="pad stack">
-        <div class="row start" style="gap:14px">
-          ${avatar(u.name || "You", "xl")}
-          <span class="stack-xs"><h2 class="title">${esc(u.name || "You")}</h2><span class="small muted">${esc(originShort(u.origin) || "Toronto")}${u.transit ? ` · ${esc(u.transit)}` : ""}</span></span>
+      <div class="pad-x stack" style="gap:20px;padding-top:8px;padding-bottom:24px">
+        <div class="identity">${meAvatar(u)}<h1 class="t-display-m">${esc(u.name || "You")}</h1>
+          <span class="t-data c-secondary">${esc([handleOf(u), u.homeArea, `since ${since}`].filter(Boolean).join(" · "))}</span>
+          <div class="row" style="gap:8px;width:100%;padding-top:8px">
+            <span class="stat-tile"><span class="t-title-l">${went}</span><span class="t-caption c-secondary">Sidequests</span></span>
+            <button class="stat-tile" data-go="parties"><span class="t-title-l">${SQ.d.party && SQ.d.party.members.length ? 1 : 0}</span><span class="t-caption c-secondary">Parties</span></button>
+            <button class="stat-tile" data-go="requests"><span class="t-title-l">${u.myRequests.length}</span><span class="t-caption c-secondary">Requests</span></button>
+          </div></div>
+        <div class="stack" style="gap:10px"><div class="section-head"><span class="t-title-l">What your taste avatar knows</span></div>
+          <div class="chips">${[...tiles, ...TILES.map((t) => t[0]).filter((t) => !tiles.includes(t))].slice(0, Math.max(4, tiles.length + 1)).map((t) => chip(t, tiles.includes(t), { "data-act": "toggleTile", "data-arg": t })).join("")}</div>
+          <p class="t-caption c-tertiary">${U().feedLoading ? "Updating what it knows… " : u.feed && u.feed.avatar ? `${esc(u.feed.avatar)} ` : ""}Based on ${went} sidequest${went === 1 ? "" : "s"}, ${checkins} check-in${checkins === 1 ? "" : "s"} and your ratings. Friends never see this.</p></div>
+        <div class="stack" style="gap:10px"><div class="section-head"><span class="t-title-l">When you go out</span></div>
+          <div class="chips">${whens.map(([w, ic]) => `<span class="chip">${icon(ic)}${esc(w)}</span>`).join("")}${u.days ? `<span class="chip">${esc(DAYS_LABEL[u.days] || u.days)}</span>` : ""}${!whens.length && !u.days ? '<span class="t-body-m c-secondary">Not set yet. Edit your profile to add it.</span>' : ""}</div></div>
+        <div class="stack" style="gap:0"><div class="section-head"><span class="t-title-l">Settings</span></div>
+          ${settingRow("bell", "Notifications", "Sidequest changes, invites, requests", { "data-go": "notifications" })}
+          ${settingRow("id", "Age", u.adult === true ? "19+ confirmed" : u.adult === false ? "Under 19 · all-ages picks" : "We'll ask the first time it matters", { "data-act": "ageSetting" })}
+          ${settingRow("swap", "Switch account", host ? `${SQ.d.host.name || "Your host account"} · host` : "Add a host account", { "data-go": "switch-account" })}
+          ${settingRow("train", "Getting around", [originShort(u.origin) ? `From ${originShort(u.origin)}` : "", u.budget != null ? (u.budget ? `up to $${u.budget}` : "free only") : "any budget", u.maxMinutes ? `${u.maxMinutes} min max` : ""].filter(Boolean).join(" · "), { "data-go": "prefs" })}
+          ${settingRow("wallet", "Ticket wallet", `${(u.tickets || []).length} ticket${(u.tickets || []).length === 1 ? "" : "s"}`, { "data-act": "openWallet" })}
+          ${settingRow("sun", "Appearance", { dark: "Dark", light: "Light", system: "Match my phone" }[theme] || "Dark", { "data-act": "cycleTheme" })}
+          ${settingRow("out", "Sign out", u.email || "This device", { "data-act": "signOut" })}
         </div>
-        <div class="stats">
-          <div class="stat hl"><strong>${stories.length}</strong><span>Stories</span></div>
-          <div class="stat"><strong>${u.following.length}</strong><span>Following</span></div>
-          <div class="stat"><strong>${u.myRequests.length}</strong><span>Requests</span></div>
-        </div>
-        <section class="card violet stack-sm">
-          <div class="row"><h3 class="section-title">Taste avatar</h3>${feed ? aiTag(feed.mode) : ""}</div>
-          ${U().feedLoading ? thinking("Updating what it knows…") : feed && feed.avatar ? `<p>${esc(feed.avatar)}</p>` : ""}
-          <p class="small muted">Tap to edit what it has learned. Rating quests 4+ stars teaches it too.</p>
-          <div class="chips">${V().VIBES.map((v) => chip(v, u.vibes.includes(v), { "data-act": "toggleVibe", "data-arg": v })).join("")}</div>
-        </section>
-        <div class="row"><h3 class="section-title">Collected stories</h3><span class="small muted">${stories.length}</span></div>
-        ${stories.length ? `<div class="grid2">${stories.map(({ e, l }) => `<button class="story" data-act="openQuest" data-arg="${e.id}">${poster(e, "", { word: false })}<strong class="small ellipsis">${esc(e.title)}</strong>${l.rating ? stars(l.rating) : '<span class="caption muted">Not rated</span>'}</button>`).join("")}</div>` : `<p class="small muted">Go to a quest, then tell us you went and rate it to collect it here.</p>`}
-        ${u.following.length ? `<h3 class="section-title">Following</h3><div>${u.following.map((h) => `<div class="list-row">${avatar(h)}<span class="grow">${esc(h)}</span>${chip("Following", true, { "data-act": "follow", "data-arg": h }, "check")}</div>`).join("")}</div>` : ""}
-        <section class="card stack-sm">
-          <h3 class="section-title">Settings</h3>
-          <span class="label">Starting point</span>
-          <div class="chips">${Object.entries(ORIGIN_SHORT).map(([k, l]) => chip(l, u.origin === k, { "data-act": "setOrigin", "data-arg": k })).join("")}</div>
-          <span class="label">Budget</span>
-          <div class="chips">${BUDGETS.map(([v, l]) => chip(l, String(u.budget == null ? "" : u.budget) === v, { "data-act": "setBudget", "data-arg": v })).join("")}</div>
-          <span class="label">Longest trip</span>
-          <div class="chips">${MINUTES.map(([v, l]) => chip(l, String(u.maxMinutes || "") === v, { "data-act": "setMaxMinutes", "data-arg": v })).join("")}</div>
-          <span class="label">Appearance</span>
-          <div class="chips">${[["dark", "Dark"], ["light", "Light"], ["system", "System"]].map(([v, l]) => chip(l, theme === v, { "data-act": "setTheme", "data-arg": v })).join("")}</div>
-          <span class="small muted">Matching: ${esc(SQ.aiLabel(SQ.d.mode))}${SQ.d.mode === "api" ? ` (${esc(SQ.d.model)})` : ""}</span>
-        </section>
-        ${btn("Add an event from a poster", { "data-act": "spotEvent" }, "outline", "camera")}
-        ${btn(SQ.hostId() && SQ.d.host ? "Switch to host profile" : "Become a host", { "data-act": "switchToHost" }, "outline", "grid")}
-        <button class="link muted center" data-act="signOut">${icon("logout", "sm")}Sign out</button>
-      </div>`, { title: "Profile", large: true, tabbar: attendeeTabs("profile") });
+        <p class="t-caption c-tertiary">Matching: ${esc(SQ.aiLabel(SQ.d.mode))}${SQ.d.mode === "api" ? ` (${esc(SQ.d.model)})` : ""}</p>
+      </div>`, { title: "Profile", back: U().history.length ? true : "discover", right: iconBtn("edit", { "data-act": "editProfile", "aria-label": "Edit profile" }), tabbar: attendeeTabs("profile") });
+  } };
+
+  // Trip-time settings from sketch 1: where trips start, budget, longest trip
+  S.prefs = { role: "attendee", label: "Getting around", render: () => {
+    const u = me();
+    const group = (label, items) => `<div class="stack" style="gap:10px"><span class="overline">${label}</span><div class="chips">${items}</div></div>`;
+    return screen(`<div class="pad-x stack" style="gap:20px;padding-top:8px;padding-bottom:24px">
+        ${group("Trips start from", Object.entries(ORIGIN_SHORT).map(([k, l]) => chip(l, u.origin === k, { "data-act": "setOrigin", "data-arg": k })).join(""))}
+        ${group("Budget", BUDGETS.map(([v, l]) => chip(l, String(u.budget == null ? "" : u.budget) === v, { "data-act": "setBudget", "data-arg": v })).join(""))}
+        ${group("Longest trip", MINUTES.map(([v, l]) => chip(l, String(u.maxMinutes || "") === v, { "data-act": "setMaxMinutes", "data-arg": v })).join(""))}
+        <p class="t-caption c-tertiary">Picks and Crew Blend stay inside these.</p>
+      </div>`, { title: "Getting around" });
+  } };
+
+  S["profile-edit"] = { role: "attendee", label: "Profile editing", render: () => {
+    const u = me();
+    const d = U().profileDraft;
+    const tiles = SQ.pickedTiles(u);
+    const areas = u.areas || [];
+    const add = U().profileAdd;
+    return screen(`
+      <div class="pad-x stack" style="gap:16px;padding-top:4px;padding-bottom:24px">
+        <div class="row start" style="gap:14px">${meAvatar(u, "l")}<label class="btn btn-secondary s" style="cursor:pointer">${icon("camera")}Change photo<input type="file" accept="image/*" data-upload="profilePhoto" class="sr-only"></label></div>
+        ${field("Name", "profileDraft.name", d.name, "text", "Your name", { autocomplete: "name" })}
+        ${field("Username", "profileDraft.handle", d.handle, "text", "@you", { autocapitalize: "off", spellcheck: "false" })}
+        <span class="overline">Your vibes · tap to remove</span>
+        <div class="chips">${tiles.map((t) => chip(t, true, { "data-act": "toggleTile", "data-arg": t }, "x")).join("")}<button class="chip outline" data-act="profileAdd" data-arg="vibes" aria-pressed="${add === "vibes"}">${icon(add === "vibes" ? "x" : "plus")}${add === "vibes" ? "Done adding" : "Add vibe"}</button></div>
+        ${add === "vibes" ? `<div class="chips">${TILES.map((t) => t[0]).filter((t) => !tiles.includes(t)).map((t) => chip(t, false, { "data-act": "toggleTile", "data-arg": t }, "plus")).join("")}</div>` : ""}
+        <span class="overline">Areas you frequent</span>
+        <div class="chips">${areas.map((a) => chip(a, true, { "data-act": "toggleArea", "data-arg": a }, "x")).join("")}<button class="chip outline" data-act="profileAdd" data-arg="areas" aria-pressed="${add === "areas"}">${icon(add === "areas" ? "x" : "plus")}${add === "areas" ? "Done adding" : "Add area"}</button></div>
+        ${add === "areas" ? `<div class="chips">${SQ.HOODS.map((h) => h[0]).filter((a) => !areas.includes(a)).map((a) => chip(a, false, { "data-act": "toggleArea", "data-arg": a }, "plus")).join("")}</div>` : ""}
+        <span class="overline">When you go out</span>
+        <div class="chips">${WHEN_TILES.map(([w, ic]) => chip(w, (u.when || []).includes(w), { "data-act": "toggleWhen", "data-arg": w }, ic)).join("")}</div>
+      </div>`, { title: "Edit profile", close: true, footer: `<div class="footer-bar">${btn("Done", { "data-act": "saveProfile" })}</div>` });
+  } };
+
+  S["switch-account"] = { role: "attendee", label: "Switch account", render: () => {
+    const u = me();
+    const h = SQ.hostId() && SQ.d.host;
+    const v = h && ({ approved: SQ.tag("Verified", "success", "shieldCheck"), pending: SQ.tag("Verification pending", "warning", "shield") }[h.verification] || SQ.tag("Unverified", "unverified", "shield"));
+    return screen(`
+      <div class="pad-x stack" style="gap:12px;padding-top:4px;padding-bottom:24px">
+        <p class="t-body-m c-secondary">One login, two sides. Switch any time, like Instagram.</p>
+        <button class="acct on" aria-pressed="true">${meAvatar(u, "")}<span class="text"><span class="t-title-m">${esc(u.name || "You")}</span><span class="t-caption c-secondary">${esc(handleOf(u))} · personal</span></span><span class="radio on"></span></button>
+        ${h ? `<button class="acct" data-act="switchToHost" aria-pressed="false">${avatar(h.name || "Host", "neutral")}<span class="text"><span class="t-title-m">${esc(h.name || "Your host account")}</span><span class="t-caption c-secondary">Host account</span>${v}</span><span class="radio"></span></button>` : ""}
+        ${btn(h ? "Add an account" : "Add a host account", { "data-act": h ? "toast" : "switchToHost", "data-arg": "One personal and one host account per login for now." }, "outline", "plus")}
+      </div>`, { title: "Switch account", close: true });
   } };
 
   SQ.screens = Object.assign(SQ.screens || {}, S);
