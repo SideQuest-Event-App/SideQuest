@@ -185,6 +185,31 @@
     U().quest = Number(id);
     return "tickets";
   };
+  // Get tickets: 19+ sidequests ask your age once; free ones just go in your Sidequests; the rest hand off to the host's ticket page
+  A.getTickets = async (id) => {
+    const e = SQ.ev(id), u = SQ.me();
+    U().quest = e.id;
+    if (SQ.is19(e) && u.adult !== true) return u.adult === false ? "all-ages" : "age-check";
+    if (e.price !== 0 && (e.ticketLink || e.sourceUrl)) return "tickets";
+    await SQ.act("accept", { eventId: e.id });
+    toast("You're in. It's in your Sidequests.");
+    return A.gotTicket();
+  };
+  A.adultYes = async () => {
+    await SQ.act("setProfile", { adult: true });
+    SQ.u.history = SQ.u.history.filter((s) => s !== "age-check");
+    return A.getTickets(U().quest);
+  };
+  A.adultNo = async () => {
+    await SQ.act("setProfile", { adult: false });
+    return "all-ages";
+  };
+  A.haveTicket = async (id) => {
+    await SQ.act("accept", { eventId: Number(id) });
+    SQ.startWallet(id);
+    return "ticket-import";
+  };
+  A.connectTickets = (name) => toast(`${name} can't connect yet. A screenshot of the ticket works just as well.`);
   A.gotTicket = () => {
     U().logTab = "Upcoming";
     return "questlog";

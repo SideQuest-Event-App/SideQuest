@@ -376,6 +376,7 @@ A.setProfile = (ctx, args) => {
   if (args.budget !== undefined) u.budget = budgetOf(args.budget);
   if (args.maxMinutes !== undefined) u.maxMinutes = Number(args.maxMinutes) || null;
   if (args.name !== undefined) u.name = clean(args.name, 30) || u.name;
+  if (args.adult !== undefined) u.adult = !!args.adult;
   if (args.registered) {
     if (u.vibes.length < 2) throw new Error("Pick at least 2 vibes first.");
     u.registered = true;
@@ -1306,7 +1307,7 @@ async function apiFromLink({ userId, url }) {
 
 // ---------- Tiny web server ----------
 // ---------- Analytics: what each action records (ids, choices and counts; never names, emails or text) ----------
-const SAFE_ARGS = ["real", "field", "eventId", "requestId", "stars", "tags", "attended", "audience", "size", "when", "source", "origin", "transit", "budget", "maxMinutes", "registered", "toggleVibe", "type", "area", "submit", "toggleWhen", "days"];
+const SAFE_ARGS = ["real", "field", "eventId", "requestId", "stars", "tags", "attended", "audience", "size", "when", "source", "origin", "transit", "budget", "maxMinutes", "registered", "toggleVibe", "type", "area", "submit", "toggleWhen", "days", "adult"];
 const SAFE_RESULT = ["added", "existing", "status", "flags", "eventId", "requestId", "merged", "votes", "learned", "told", "reached", "requesters", "followers"];
 const DEMO_ACTIONS = ["demoLogin", "hostLoginAs", "hostApprove", "skipToAfter", "reset"]; // sketch shortcuts, left out of real numbers
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj && obj[k] !== undefined).map((k) => [k, obj[k]]));

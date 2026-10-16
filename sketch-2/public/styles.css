@@ -748,3 +748,46 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .notif-row .text { gap: 3px; }
 .notif-row > .ic:last-child { margin-top: 1px; }
 .notif-gap { display: block; padding-top: var(--sp-xl); }
+
+/* ---------- Quest detail, tickets, 19+ check, wallet (Figma: 13, 14) ---------- */
+.icon-btn.raised { background: var(--bg-raised); }
+.qd-hero { position: relative; height: 330px; margin-bottom: -28px; flex: none; overflow: hidden; }
+.qd-hero .poster { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; }
+.qd-scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(19, 16, 27, 0.6) 0%, rgba(19, 16, 27, 0) 40%); }
+.qd-nav { position: absolute; left: 20px; right: 20px; top: 36px; display: flex; gap: 10px; align-items: center; }
+.qd-nav .grow { flex: 1; }
+.qd-sheet { position: relative; background: var(--bg-base); border-radius: 28px 28px 0 0; padding: 20px 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+.qd-tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.qd-title { display: flex; flex-direction: column; gap: 6px; }
+.qd-group { display: flex; flex-direction: column; gap: 10px; }
+.qd-faces-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.faces { display: inline-flex; align-items: center; flex: none; }
+.faces .av { box-shadow: 0 0 0 2px var(--bg-base); margin-right: -8px; }
+.faces .av:last-child { margin-right: 0; }
+.rate-card { flex: 1; min-width: 0; background: var(--bg-raised); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 2px; }
+.rate-card .ic { width: 16px; height: 16px; color: var(--status-warning); }
+.notice.primary { background: var(--action-primary); color: var(--text-on-action); }
+.notice.primary > .ic { color: var(--text-on-action); }
+.qd-buy { gap: 10px; }
+.qd-buy .btn { flex: 1; width: auto; min-width: 0; }
+.qd-price { display: flex; flex-direction: column; white-space: nowrap; }
+.age-check { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 12px; padding: 0 28px 60px; }
+.age-ic { width: 104px; height: 104px; border-radius: 50%; background: var(--status-warning-tint); color: var(--status-warning); display: grid; place-items: center; margin-bottom: 8px; }
+.age-ic .ic { width: 40px; height: 40px; }
+.tk-photo { width: 84px; height: 84px; border-radius: var(--r-xl); flex: none; }
+.tk-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--r-xl); padding: 16px; display: flex; flex-direction: column; }
+.tk-line { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; white-space: nowrap; }
+.tk-line.fee { color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
+.tk-line.total { padding: 12px 0 0; }
+.tk-why { padding: 10px 0; }
+.wallet-ticket { width: 100%; border-radius: 20px; border: 1px solid var(--border-subtle); background: var(--bg-surface); overflow: hidden; text-align: left; display: block; }
+.wallet-ticket .head { background: var(--gradient); color: var(--text-on-action); padding: 20px 20px 16px; display: flex; flex-direction: column; gap: 4px; }
+.wallet-ticket .body { padding: 20px; display: flex; gap: 18px; align-items: center; border-top: 1px solid var(--border-subtle); }
+.wallet-ticket .qr { width: 132px; height: 132px; border-radius: 12px; background: var(--white); display: grid; place-items: center; flex: none; overflow: hidden; color: var(--ink, #13101b); }
+.wallet-ticket .qr img { width: 112px; height: 112px; object-fit: contain; image-rendering: pixelated; }
+.wallet-ticket .qr .ic { width: 48px; height: 48px; }
+.wallet-ticket .facts { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wallet-ticket .facts .overline { color: var(--text-tertiary); }
+.wallet-ticket .facts .overline + * { margin-bottom: 8px; }
+.wallet-soon { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.wallet-soon .poster { width: 56px; height: 56px; border-radius: 12px; flex: none; }

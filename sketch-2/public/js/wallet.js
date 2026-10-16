@@ -165,7 +165,8 @@
     const w = W();
     const eventId = w.eventId;
     SQ.u.wallet = { step: "reading", eventId };
-    SQ.render();
+    if (SQ.u.screen !== "wallet-add") SQ.go("wallet-add");
+    else SQ.render();
     try {
       const name = file.name.toLowerCase();
       const read = name.endsWith(".pkpass") || file.type === "application/vnd.apple.pkpass" ? await readPass(file) : file.type === "application/pdf" || name.endsWith(".pdf") ? await readPdf(file) : await readImage(file);
@@ -206,7 +207,7 @@
   }
   // File inputs aren't clicks, so they get their own listener
   document.addEventListener("change", (e) => {
-    if (e.target.id === "wallet-file" && e.target.files[0]) importFile(e.target.files[0]);
+    if ((e.target.id === "wallet-file" || e.target.hasAttribute("data-wallet-file")) && e.target.files[0]) importFile(e.target.files[0]);
   });
 
   // Keep the screen awake while a ticket is open at the door
@@ -223,7 +224,7 @@
       SQ.startWallet(eventId);
       return "wallet-add";
     },
-    openTicket: (id) => {
+    openWalletTicket: (id) => {
       SQ.u.ticket = id;
       return "wallet-ticket";
     },
@@ -256,17 +257,42 @@
   const sourceLabel = { image: "From a screenshot", pdf: "From a PDF", pkpass: "From Apple Wallet" };
 
   const S = {};
+  const isTodayTicket = (t) => t.startsAt && t.startsAt.slice(0, 10) === localOf(SQ.now().toISOString()).slice(0, 10);
+  // "Today · 6:30 PM · Blue Room"
+  const ticketMeta = (t) => [isTodayTicket(t) ? `Today · ${ticketWhen(t).split(" · ")[1] || ""}` : ticketWhen(t), t.venue].filter(Boolean).join(" · ");
+  // Figma: New Ticket wallet. The ticket: gradient head, then the code on white with Entry and Ticket beside it.
+  const ticketCard = (t, tag = "div") => `<${tag} class="wallet-ticket" ${tag === "button" ? `data-act="openWalletTicket" data-arg="${esc(t.id)}"` : ""}>
+      <span class="head"><span class="t-title-l">${esc(t.title)}</span><span class="t-data">${esc(ticketMeta(t))}</span></span>
+      <span class="body">
+        <span class="qr">${t.code ? `<img src="${esc(t.code.image)}" alt="${esc(`${t.code.format} code`)}">` : icon("ticket")}</span>
+        <span class="facts">
+          <span class="overline">Entry</span><span class="t-body-l">${esc(t.venue || "Show at the door")}</span>
+          <span class="overline">Ticket</span><span class="t-data">${esc(t.seat || sourceLabel[t.source] || "General admission")}</span>
+        </span>
+      </span>
+    </${tag}>`;
+
   S.wallet = { role: "attendee", label: "Ticket wallet", render: () => {
     keepAwake(false);
-    const list = [...tickets()].sort((a, b) => (isPastTicket(a) - isPastTicket(b)) || (a.startsAt || "9").localeCompare(b.startsAt || "9"));
-    return screen(`
-      <div class="pad stack-sm">
-        ${list.length ? list.map((t) => `
-          <button class="card tight row start ticket-row${isPastTicket(t) ? " past" : ""}" data-act="openTicket" data-arg="${esc(t.id)}" style="gap:12px;text-align:left">
-            ${t.code ? `<span class="code-thumb"><img src="${esc(t.code.image)}" alt=""></span>` : `<span class="ic-box">${icon("ticket")}</span>`}
-            <span class="stack-xs grow"><span class="label" style="letter-spacing:.04em">${esc(ticketWhen(t))}</span><strong class="ellipsis">${esc(t.title)}</strong><span class="small muted ellipsis">${esc([t.venue, t.seat].filter(Boolean).join(" · ") || sourceLabel[t.source])}</span></span>
-          </button>`).join("") : empty("ticket", "No tickets yet. Add a screenshot, PDF or Apple Wallet pass and it lives here with all your others.")}
-      </div>`, { title: "Ticket wallet", back: "questlog", footer: `<div class="action-bar">${btn("Add a ticket", { "data-act": "addTicket" }, "primary", "plus")}</div>` });
+    const u = SQ.d.user;
+    const list = [...tickets()].sort((a, b) => (a.startsAt || "9").localeCompare(b.startsAt || "9"));
+    const up = list.filter((t) => !isPastTicket(t)), past = list.filter(isPastTicket).reverse();
+    // Quests you're going to without a ticket in the wallet yet
+    const soon = Object.entries(u.log).filter(([id, l]) => l.status === "going" && ev(id) && !SQ.isPast(ev(id)) && !SQ.ticketFor(id)).map(([id]) => ev(id))
+      .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    const body = !list.length && !soon.length ? empty("ticket", "No tickets yet. Add a screenshot, PDF or Apple Wallet pass and it lives here with all your others.")
+      : `<div class="pad-x stack" style="gap:16px;padding-bottom:24px">
+        ${up.length && isTodayTicket(up[0]) ? `<div class="row start" style="gap:8px">${SQ.tag(Number((up[0].startsAt.split("T")[1] || "00").slice(0, 2)) >= 17 ? "Tonight" : "Today", "hot")}<span class="t-caption c-secondary">Show this at the door</span></div>` : ""}
+        ${up.map((t) => ticketCard(t, "button")).join("")}
+        ${soon.length ? `<span class="overline" style="margin-top:8px">Coming up</span>
+          ${soon.map((e) => `<div class="wallet-soon">
+            <button class="row start" style="gap:12px;text-align:left" data-act="openQuest" data-arg="${e.id}">${poster(e)}<span class="stack" style="gap:2px;min-width:0"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-data c-secondary ellipsis">${esc([SQ.qMeta(e).split(" · ")[0].replace(/^(\w+) /, "$1 · "), e.source && `Got tickets on ${e.source}`].filter(Boolean).join(" · "))}</span></span></button>
+            ${btn("Import this ticket", { "data-act": "addTicket", "data-arg": e.id }, "secondary", "upload")}
+          </div>`).join("")}` : ""}
+        ${past.length ? `<span class="overline" style="margin-top:8px">Past</span>
+          ${past.map((t) => `<button class="list-row divided" data-act="openWalletTicket" data-arg="${esc(t.id)}"><span class="lead-ic">${icon("ticket")}</span><span class="text"><span>${esc(t.title)}</span><span>${esc(ticketMeta(t))}</span></span>${icon("chevR")}</button>`).join("")}` : ""}
+      </div>`;
+    return screen(body, { title: "Ticket wallet", back: true, right: SQ.iconBtn("plus", { "data-act": "addTicket", "aria-label": "Add a ticket" }) });
   } };
 
   S["wallet-add"] = { role: "attendee", label: "Ticket wallet: add", render: () => {
@@ -294,7 +320,7 @@
       <div class="pad stack">
         ${e ? `<p class="muted">Add your ticket for <strong>${esc(e.title)}</strong>.</p>` : ""}
         <label class="upload" style="height:180px;cursor:pointer">
-          ${icon("scan", "lg")}Choose a screenshot, photo, PDF or Wallet pass
+          ${icon("qr", "lg")}Choose a screenshot, photo, PDF or Wallet pass
           <input id="wallet-file" type="file" accept="image/*,application/pdf,.pdf,.pkpass,application/vnd.apple.pkpass" class="sr-only">
         </label>
         ${w.error ? `<div class="notice">${icon("x")}<span>${esc(w.error)}</span></div>` : ""}
@@ -309,16 +335,11 @@
     if (!t) return screen(empty("ticket", "That ticket isn't in your wallet."), { title: "Ticket" });
     const e = ev(t.eventId);
     return screen(`
-      <div class="pad stack">
-        <div class="ticket-card stack">
-          <div class="stack-xs"><span class="label" style="letter-spacing:.04em">${esc(ticketWhen(t))}</span><h2 class="display-l">${esc(t.title)}</h2>
-            ${t.venue ? `<span class="small muted">${esc(t.venue)}</span>` : ""}</div>
-          ${t.seat ? `<div class="meta-row"><span class="ic-box">${icon("ticket")}</span><span><strong>${esc(t.seat)}</strong></span></div>` : ""}
-          ${t.code ? codeBox(t.code, true) : `<div class="notice">${icon("ticket")}<span>This ticket has no scannable code. Show the original at the door.</span></div>`}
-          <p class="caption muted center">${t.code ? "Turn your brightness up at the door. The screen stays on while this is open." : ""} ${esc(sourceLabel[t.source] || "")}.</p>
-        </div>
-        ${e ? btn("Open the quest", { "data-act": "openQuest", "data-arg": e.id }, "secondary", "compass") : ""}
-        <button class="link muted center" data-act="removeTicket" data-arg="${esc(t.id)}">Remove from wallet</button>
+      <div class="pad-x stack" style="gap:16px;padding-bottom:24px">
+        ${ticketCard(t)}
+        <p class="t-caption c-tertiary center">${t.code ? "Turn your brightness up at the door. The screen stays on while this is open. " : "This ticket has no scannable code. Show the original at the door. "}${esc(sourceLabel[t.source] || "")}</p>
+        ${e ? btn("Open the sidequest", { "data-act": "openQuest", "data-arg": e.id }, "secondary", "arrow") : ""}
+        ${btn("Remove from wallet", { "data-act": "removeTicket", "data-arg": t.id }, "ghost m")}
       </div>`, { title: "Ticket" });
   } };
 
