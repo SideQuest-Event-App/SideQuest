@@ -12,7 +12,7 @@
     else arr.push(v);
   };
 
-  SQ.defaultReqDraft = () => ({ text: "", origin: (me() && me().origin) || "union", when: "Fridays", size: "2 to 4", budget: me() && me().budget != null ? String(me().budget) : "", source: "manual" });
+  SQ.defaultReqDraft = () => ({ text: "", origin: (me() && me().origin) || "union", when: "Friday late", vibe: "", area: (me() && me().homeArea) || "", size: "2 to 4", budget: me() && me().budget != null ? String(me().budget) : "", source: "manual" });
   SQ.emptyHostDraft = (over = {}) => ({ title: "", description: "", date: "", time: "20:00", endTime: "", price: "", vibes: [], venue: { name: SQ.d.host && SQ.d.host.type === "Venue" ? SQ.d.host.name : "", address: "" }, image: null, ticketLink: (SQ.d.host && SQ.d.host.ticketLink) || "", dayInfo: { entrance: "", transit: "", home: "", coat: "" }, fromRequest: null, aiMode: null, ...over });
   SQ.emptySpotDraft = () => ({ title: "", description: "", date: "", time: "20:00", endTime: "", price: "", vibes: [], venue: { name: "", address: "" }, organizer: "", ticketLink: "", image: null });
 
@@ -379,10 +379,29 @@
     return "party";
   };
   A.addToVote = (id) => SQ.act("sendToParty", { eventId: Number(id) });
-  A.vote = (id) => SQ.act("vote", { eventId: Number(id) });
+  A.vote = async (id) => {
+    if (!SQ.d.party.poll.includes(Number(id))) await SQ.act("sendToParty", { eventId: Number(id) });
+    return SQ.act("vote", { eventId: Number(id) });
+  };
+  A.partyCover = (cover) => SQ.act("partyCover", { cover });
+  A.planIn = async (id) => {
+    if (U().planOut === Number(id)) U().planOut = null;
+    if (!SQ.me().log[id]) await SQ.act("accept", { eventId: Number(id) });
+    toast("You're in. Your party can see it.");
+  };
+  A.planOut = (id) => {
+    U().planOut = Number(id);
+    toast("Got it. Your party will see you can't make it.");
+  };
+  A.changeMeet = () => {
+    const v = prompt("Where should everyone meet?", U().meetAt || "");
+    if (v && v.trim()) U().meetAt = v.trim();
+  };
+  A.noop = () => {};
   A.lockPoll = async () => {
     const r = await SQ.act("lockPoll");
     toast(`${SQ.d.party.name} is going to ${SQ.ev(r.eventId).title}.`);
+    return "group-plan";
   };
   A.partyChat = async () => {
     const text = U().partyMsg.trim();

@@ -32,7 +32,7 @@ const PORT = process.env.PORT || 3001; // Sketch 1 uses 3000, so both can run at
 const VIBES = ["Live music", "Jazz", "Indie gigs", "Comedy", "Dance", "Electronic", "Records & vinyl", "Film nights", "Zines & print", "Art & making", "Photography", "Writing & poetry", "Tech & coding", "Anime & cosplay", "Outdoors", "Run & ride", "Climbing", "Games & social", "Food & drink", "Markets", "Wellness"];
 const ORIGINS = { union: "Downtown (Union)", finch: "North York (Finch)", kennedy: "Scarborough (Kennedy)", kipling: "Etobicoke (Kipling)" };
 const AREAS = ["West End", "Downtown", "East End", "Midtown", "North York", "Scarborough", "Etobicoke"];
-const WHEN = ["Weeknights", "Fridays", "Saturdays", "Sundays", "Any time"];
+const WHEN = ["Weeknights", "Fridays", "Saturdays", "Sundays", "Any time", "Friday late", "Weekend days"];
 const WHEN_OUT = ["Mornings", "Afternoons", "Evenings", "Late nights"]; // onboarding: when you go out
 const DAYS = ["Weekdays", "Weekends", "Both"];
 const CREW_SIZES = ["Solo", "2 to 4", "5+"];
@@ -388,9 +388,9 @@ A.toggleMember = (ctx, { name }) => {
   const p = ctx.party;
   if (!toggle(p.members, name)) {
     delete p.votes[name];
-  } else if (p.members.length > 3) {
+  } else if (p.members.length > 5) {
     toggle(p.members, name);
-    throw new Error("A party can have up to 4 people, including you.");
+    throw new Error("A party can have up to 6 people, including you.");
   }
   u.contactsSynced = true;
 };
@@ -448,6 +448,12 @@ A.vote = (ctx, { eventId }) => {
   else p.votes[me] = id;
   p.locked = null;
 };
+// The party's cover photo (one of the design's photos), and who picked it
+A.partyCover = (ctx, { cover }) => {
+  const u = needUser(ctx);
+  ctx.party.cover = clean(cover, 30);
+  ctx.party.coverBy = u.name || "You";
+};
 A.lockPoll = (ctx) => {
   const u = needUser(ctx);
   const p = ctx.party;
@@ -498,6 +504,8 @@ A.postRequest = (ctx, args) => {
     text,
     origin: ORIGINS[args.origin] ? args.origin : u.origin || "",
     when: WHEN.includes(args.when) ? args.when : "Any time",
+    area: clean(args.area, 40),
+    vibe: clean(args.vibe, 40),
     size,
     budget: budgetOf(args.budget),
     source: args.source === "gap" ? "gap" : "manual", // "gap" = came from a search nothing fit

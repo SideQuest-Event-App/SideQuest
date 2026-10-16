@@ -15,7 +15,7 @@
     const u = me();
     const pending = u ? Object.entries(u.log).filter(([id, l]) => l.status === "going" && ev(id) && isPast(ev(id))).length : 0;
     const unread = u ? u.notifications.filter((n) => !n.read && n.requestId).length : 0;
-    return tabs([["discover", "Discover", "home2"], ["parties", "Community", "crew"], ["add-event", "Add Event", "plus", { act: "addEvent" }], ["questlog", "Sidequests", "ticket"], ["profile", "Profile", "user"]], active, { questlog: pending, parties: unread });
+    return tabs([["discover", "Discover", "home2"], ["parties", "Community", "crew"], ["requests", "Add Event", "plus"], ["questlog", "Sidequests", "ticket"], ["profile", "Profile", "user"]], active, { questlog: pending, requests: unread });
   }
   SQ.attendeeTabs = attendeeTabs;
 
@@ -553,7 +553,7 @@
   const whenLong = (e) => `${isToday(e) ? (hourOf(e) >= 17 ? "Tonight" : "Today") : new Date(e.startsAt).toLocaleDateString("en-US", { weekday: "long", timeZone: TZ })} · ${clock(e.startsAt)}${e.endsAt ? ` to ${clock(e.endsAt)}` : ""}`;
   const andList = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
   // Stacked 40px faces with a ring (Figma: Faces)
-  const faces = (names, max = 4) => `<span class="faces">${names.slice(0, max).map((n) => avatar(n)).join("")}</span>`;
+  const faces = (names, max = 4, meFirst = false) => `<span class="faces">${names.slice(0, max).map((n, i) => (meFirst && !i ? `<span class="av">${esc(n[0])}</span>` : avatar(n))).join("")}</span>`;
   const rateCard = (label, value, caption) => `<div class="rate-card"><span class="overline c-tertiary">${esc(label)}</span><span class="row start" style="gap:4px">${icon("starFill")}<span class="t-title-l">${esc(value)}</span></span><span class="t-caption c-secondary">${esc(caption)}</span></div>`;
   const sourceOf = (e) => e.source || "the host's site";
   const ticketsSold = (e) => e.price !== 0 && !!(e.ticketLink || e.sourceUrl);
@@ -683,7 +683,7 @@
         <div class="stack" style="gap:10px;padding-top:8px">
           <span class="overline">After you buy</span>
           <div class="list-row tk-why"><span class="lead-ic">${icon("wallet")}</span><span class="text"><span>Keep it in your wallet</span><span>Import the ticket so it sits next to the event day info.</span></span></div>
-          <div class="list-row tk-why"><span class="lead-ic">${icon("crew")}</span><span class="text"><span>Tell your party</span><span>${esc(party)} sees you're in, nothing else.</span></span></div>
+          <button class="list-row tk-why" data-act="sendToParty" data-arg="${e.id}"><span class="lead-ic">${icon("crew")}</span><span class="text"><span>Tell your party</span><span>${esc(party)} sees you're in, nothing else.</span></span>${icon("chevR")}</button>
         </div>
         ${verifyCard(e)}
       </div>`, { title: "Tickets", footer: `<div class="footer-bar">${btn("I have my ticket", { "data-act": "haveTicket", "data-arg": e.id })}${btn("Not yet", { "data-back": "" }, "ghost m")}</div>` });
@@ -750,171 +750,215 @@
       </div>`, { title: "Add an event", footer: `<div class="action-bar">${btn("Add as unverified event", { "data-act": "importEvent", disabled: !s.open || s.loading })}</div>` });
   } };
 
-  /* ===================== Parties and Crew Blend ===================== */
-  function blendVibes() {
-    const u = me();
-    const people = [u.vibes, ...SQ.partyNames().map((m) => (SQ.d.friends[m] || {}).vibes || [])];
-    const counts = {};
-    people.forEach((vs) => vs.forEach((v) => (counts[v] = (counts[v] || 0) + 1)));
-    return Object.entries(counts).map(([vibe, n]) => ({ vibe, pct: (n / people.length) * 100 })).sort((a, b) => b.pct - a.pct).slice(0, 4);
+  /* ===================== Community: Parties, Crew Blend, group plan (Figma: 16, 17 Party) ===================== */
+  const myName = () => me().name || "You";
+  const crew = () => [myName(), ...SQ.d.party.members];
+  // Shared themes: the design's tiles, by how many people in the party are into each
+  function sharedTiles() {
+    const people = [me().vibes, ...SQ.partyNames().map((m) => (SQ.d.friends[m] || {}).vibes || [])];
+    return TILES.map((t) => [t[0], people.filter((vs) => t[2].some((v) => vs.includes(v))).length])
+      .filter(([, n]) => n).sort((a, b) => b[1] - a[1]).map(([t]) => t);
   }
   function tally() {
     const p = SQ.d.party;
-    const me_ = me().name || "You";
     const t = {};
-    for (const [voter, id] of Object.entries(p.votes)) if (voter === me_ || p.members.includes(voter)) (t[id] = t[id] || []).push(voter);
+    for (const [voter, id] of Object.entries(p.votes)) if (voter === myName() || p.members.includes(voter)) (t[id] = t[id] || []).push(voter);
     return t;
   }
+  // What's up for a vote: anything sent to the party, then the blend's top picks
+  const voteOptions = () => {
+    const p = SQ.d.party;
+    const top = ((p.blend && p.blend.matches) || []).slice(0, 3).map((m) => m.id);
+    return [...new Set([...p.poll, ...top])].map(ev).filter((e) => e && !isPast(e));
+  };
+  const short = (e) => `${dayTime(e)} · ${e.neighbourhood}`;
+  const tierWord = (pct) => ({ strong: "Strong match", close: "Close match", low: "Worth a look" })[SQ.matchTier(pct)];
+  const xsFaces = (names) => (names.length ? `<span class="faces xs">${names.slice(0, 4).map((n) => avatar(n, "xs")).join("")}</span>` : "");
+  const COVERS = ["cheers", "string-lights", "lanterns", "jazz-band", "beer-garden", "bokeh-2"];
 
   S.parties = { role: "attendee", label: "Parties", render: () => {
     const p = SQ.d.party;
-    const u = me();
-    const top = blendVibes()[0];
-    const t = tally();
-    const voters = Object.values(t).flat().length;
+    const people = crew();
+    const opts = voteOptions().length;
+    const status = p.locked && ev(p.locked) ? SQ.tag(`Locked in · ${ev(p.locked).title}`, "social", "check")
+      : SQ.tag(opts ? `Vote open · ${opts} pick${opts === 1 ? "" : "s"} nominated` : "No picks yet", "social", "check");
     return screen(`
-      <div class="pad stack">
-        <button class="card violet stack-sm" data-go="party">
-          <div class="row"><span class="avs">${[u.name || "You", ...p.members].map((n) => avatar(n, "lg")).join("")}</span>${icon("chev")}</div>
-          <h2 class="title">${esc(p.name)}</h2>
-          <span class="small muted">You, ${esc(p.members.join(", ") || "no one yet")}</span>
-          <div class="row small"><span>${top ? `Crew Blend: <strong>${Math.round(top.pct)}% ${esc(top.vibe.toLowerCase())}</strong>` : "Add friends to blend"}</span>
-            <span class="badge ${p.locked ? "lime" : "violet"}">${p.locked ? "Locked in" : `${voters}/${p.members.length + 1} voted`}</span></div>
+      <div class="page-head"><span class="overline">Plan with friends</span><h1 class="t-display-xl">Parties</h1>
+        <p class="t-body-l c-secondary">Each party blends everyone's taste into shared themes and group picks.</p></div>
+      <div class="pad-x stack" style="gap:14px;padding-top:22px;padding-bottom:24px">
+        <button class="party-card" data-go="party">
+          <span class="row start" style="gap:8px">${faces(people, 5, true)}${people.length > 5 ? `<span class="av neutral more-n">+${people.length - 5}</span>` : ""}<span class="grow"></span>${icon("arrow")}</span>
+          <span class="t-title-l">${esc(p.name)}</span>
+          <span class="t-body-m c-secondary">${people.length} ${people.length === 1 ? "person" : "people"}${sharedTiles().length ? ` · into ${esc(sharedTiles().slice(0, 3).join(", "))}` : ""}</span>
+          ${status}
         </button>
-        ${btn("Create a party", { "data-act": "toast", "data-arg": "One party per person in this sketch. Edit who's in it from the party page." }, "outline", "plus")}
-        <div class="notice">${icon("sparkle")}<span><strong>Crew Blend</strong> merges everyone's tastes, budgets and trip times into picks the whole party will actually enjoy.</span></div>
-      </div>`, { title: "Parties", large: true, tabbar: attendeeTabs("parties") });
+        ${btn("New party", { "data-act": "toast", "data-arg": "One party per person for now. Change who's in it from the party's settings." }, "outline", "plus")}
+      </div>`, { tabbar: attendeeTabs("parties") });
   } };
 
   S.party = { role: "attendee", label: "Party: Crew Blend + vote", render: () => {
     const p = SQ.d.party;
     const u = me();
-    const myName = u.name || "You";
-    const blend = blendVibes();
-    const b = p.blend && p.blend.key === p.blendKey ? p.blend : p.blend; // show the last blend while a new one loads
+    const people = crew();
+    const big = people.length >= 6;
+    const b = p.blend;
     const t = tally();
-    const totalVotes = Object.values(t).flat().length || 1;
+    const opts = voteOptions();
+    const myVote = p.votes[myName()];
     const editing = U().editMembers;
-
+    const settings = iconBtn("sliders", { "data-act": "editMembers", "aria-label": "Who's in", "aria-pressed": String(!!editing) }, big ? "" : "glass");
+    const who = `<div class="stack" style="gap:12px">
+        <span class="overline">Who's in this time${big ? ` · ${people.length}` : ""}</span>
+        <div class="who-in">${people.map((n, i) => `<span class="who"><span class="av ${i ? SQ.avTone(n) : ""}">${esc(n[0])}</span><span class="t-caption">${i ? esc(n) : "You"}</span></span>`).join("")}</div>
+        ${editing ? `<div class="chips wrap">${Object.keys(SQ.d.friends).map((f) => chip(f, p.members.includes(f), { "data-act": "toggleMember", "data-arg": f }, p.members.includes(f) ? "check" : "plus")).join("")}</div>` : ""}
+      </div>`;
+    const themes = sharedTiles().slice(0, 4);
     let picks;
-    if (!p.members.length) picks = `<p class="small muted">Add friends to get blended picks.</p>`;
-    else if (U().blendLoading && !b) picks = thinking(`Blending ${p.members.length + 1} tastes…`);
-    else if (b) picks = `
-      ${U().blendLoading ? thinking("Re-blending for the new line-up…") : ""}
-      <div class="row small"><span class="muted">${b.limits.budget != null ? `Up to ${b.limits.budget ? `$${b.limits.budget}` : "free"}${b.limits.budgetSetBy ? ` (${esc(b.limits.budgetSetBy)}'s budget)` : ""}` : "Any budget"}${u.maxMinutes ? ` · ${u.maxMinutes} min max for everyone` : ""}</span>${aiTag(b.mode)}</div>
-      ${b.matches.length ? b.matches.map((m) => {
+    if (!p.members.length) picks = `<p class="t-body-m c-secondary">Add friends to get group picks.</p>`;
+    else if (!b) picks = thinking(`Blending ${people.length} tastes…`);
+    else picks = `${U().blendLoading ? thinking("Re-blending for the new line-up…") : ""}
+      ${b.matches.length ? b.matches.slice(0, 3).map((m, i) => {
         const e = ev(m.id);
         if (!e) return "";
-        const inVote = p.poll.includes(e.id);
-        return `<div class="card tight stack-sm">
-          <button class="row start" style="gap:12px;text-align:left" data-act="openQuest" data-arg="${e.id}">${poster(e, "mini")}
-            <span class="stack-xs grow"><strong class="ellipsis">${esc(e.title)}</strong><span class="small muted">${esc(whenLabel(e))} · ${priceLabel(e)}</span>${statusBadge(e)}</span><span class="match-num">${m.match}%</span></button>
-          <p class="reason">${icon("sparkle", "sm")}${esc(m.reason)}</p>
-          ${m.fits ? `<div class="stack-xs">${Object.entries(m.fits).map(([who, why]) => { const tr = trip(e, who === myName ? u.origin : (SQ.d.friends[who] || {}).origin); return `<span class="row start small" style="gap:8px">${avatar(who)}<span class="${why ? "" : "muted"}">${esc(why || "Not really their thing")}${tr ? ` <span class="muted">· ${tr.minutes} min</span>` : ""}</span></span>`; }).join("")}</div>` : ""}
-          ${chip(inVote ? "In the vote" : "Add to vote", inVote, { "data-act": "addToVote", "data-arg": e.id }, inVote ? "check" : "plus")}
-        </div>`;
-      }).join("") : empty("users", "Nothing suits everyone within these limits.")}
-      ${b.unmet && b.unmet.length ? `<div class="notice hot">${icon("megaphone")}<span>Nothing fit ${b.unmet.slice(0, 3).map((x) => `${esc(x.person)}'s <strong>${esc(x.interest)}</strong>`).join(", ")}. <button class="link" data-act="requestGap" data-arg="${esc(b.unmet[0].interest)}">Request it</button></span></div>` : ""}`;
-    else picks = thinking("Getting ready to blend…");
-
+        return `<button class="ranked${i ? "" : " first"}" data-act="openQuest" data-arg="${e.id}"><span class="rank t-display-m">${i + 1}</span>${poster(e)}
+          <span class="text"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-body-m c-secondary ellipsis">${tierWord(m.match)}${i ? "" : ` for all ${people.length}`}${e.price == null ? "" : ` · ${esc(priceLabel(e))}`}</span></span></button>
+          ${i === 0 && m.reason ? `<div class="reason-box t-body-m">${esc(m.reason)}</div>` : ""}`;
+      }).join("") : `<p class="t-body-m c-secondary">Nothing suits everyone within these limits.</p>`}
+      ${b.unmet && b.unmet.length ? `<div class="notice hot">${icon("bulb")}<span>Nothing fit ${esc(b.unmet[0].person)}'s ${esc(b.unmet[0].interest)}.</span><button class="action" data-act="requestGap" data-arg="${esc(b.unmet[0].interest)}">Request it</button></div>` : ""}`;
+    const voteRow = (e) => {
+      const mine = myVote === e.id;
+      return `<div class="vote-row">
+        <button class="text" data-act="openQuest" data-arg="${e.id}"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-data c-secondary">${esc(short(e))}</span></button>
+        ${xsFaces(t[e.id] || [])}
+        ${btn(mine ? "Voted" : "Vote", { "data-act": "vote", "data-arg": e.id, "aria-pressed": String(mine) }, mine ? "primary s" : "secondary s", mine ? "check" : "")}
+      </div>`;
+    };
+    const ranked = [...opts].sort((a, b2) => (t[b2.id] || []).length - (t[a.id] || []).length);
+    const podium = big && ranked.length >= 3 ? `<div class="podium">${[1, 0, 2].map((i) => {
+        const e = ranked[i];
+        return `<button class="step s${i + 1}" data-act="openQuest" data-arg="${e.id}">${xsFaces(t[e.id] || [])}${poster(e)}<span class="t-caption name">${esc(e.title)}</span><span class="block t-display-m">${i + 1}</span></button>`;
+      }).join("")}</div><p class="t-caption c-secondary">Big parties see a podium of the top three, so ties stay readable.</p>` : "";
+    const vote = `<div class="stack" style="gap:4px">
+        <div class="section-head"><span class="t-title-l">Where are we going?</span><span class="t-caption c-secondary">${big && ranked.length >= 3 ? `Top 3 of ${ranked.length}` : myVote ? "Your vote is in" : opts.length ? "Pick one" : ""}</span></div>
+        ${podium}
+        ${(big ? ranked : opts).map(voteRow).join("") || `<p class="t-body-m c-secondary">Send a sidequest to the party to start the vote.</p>`}
+      </div>
+      ${p.locked && ev(p.locked) ? btn(`See the plan for ${ev(p.locked).title}`, { "data-go": "group-plan" }, "social", "crew")
+        : Object.keys(t).length ? btn("Lock in the plan", { "data-act": "lockPoll" }, "primary", "check") : ""}`;
+    const chat = `<div class="stack" style="gap:10px">
+        <div class="section-head"><span class="t-title-l">Party chat</span></div>
+        <div class="bubbles">${p.chat.slice(-6).map((m) => m.from === "Sidequest" ? `<p class="bubble system">${esc(m.text)}</p>` : `<p class="bubble${m.from === myName() ? " mine" : ""}"><b>${esc(m.from)}</b>${esc(m.text)}</p>`).join("")}</div>
+        <form class="composer" data-act="partyChat"><input data-bind="partyMsg" value="${esc(U().partyMsg)}" placeholder="Message ${esc(p.name)}" aria-label="Message your party"><button class="icon-btn" type="submit" aria-label="Send">${icon("send")}</button></form>
+      </div>`;
+    const body = `<div class="pad-x stack" style="gap:20px;padding-top:20px;padding-bottom:24px">
+        ${who}
+        ${big ? vote : `<div class="stack" style="gap:10px"><div class="section-head"><span class="t-title-l">Shared themes</span></div>
+          <div class="chips wrap">${themes.map((x, i) => `<span class="chip${i ? "" : " on"}">${i ? "" : icon("trophy")}${esc(x)}</span>`).join("")}</div></div>
+        <div class="stack" style="gap:10px"><div class="section-head"><span class="t-title-l">Group picks</span>${b && !U().blendLoading ? `<button class="t-caption c-secondary" data-act="reblend">Crew Blend</button>` : '<span class="t-caption c-secondary">Crew Blend</span>'}</div>${picks}</div>
+        ${vote}`}
+        ${chat}
+      </div>`;
+    if (big) return screen(body, { title: p.name, right: settings });
+    const cover = p.cover || "cheers";
     return screen(`
-      <div class="pad stack">
-        <div class="row">
-          <span class="row start" style="gap:10px"><span class="avs">${[myName, ...p.members].map((n) => avatar(n, "lg")).join("")}</span></span>
-          <button class="btn btn-secondary sm" data-act="editMembers">${icon(editing ? "check" : "edit")}${editing ? "Done" : "Edit"}</button>
+      <div class="group-header">
+        ${ph(cover)}<span class="scrim-top"></span><span class="scrim-bottom"></span>
+        <div class="gh-nav">${iconBtn("back", { "data-back": "", "aria-label": "Back" }, "glass")}<span class="grow"></span>
+          <button class="glass-pill" data-act="partyCover" data-arg="${COVERS[(COVERS.indexOf(cover) + 1) % COVERS.length]}">${icon("camera")}Cover</button>${settings}</div>
+        <div class="gh-info">
+          <span class="overline c-white" style="opacity:.85">Party · ${people.length} ${people.length === 1 ? "person" : "people"}${p.coverBy ? ` · cover picked by ${esc(p.coverBy === myName() ? "you" : p.coverBy)}` : ""}</span>
+          <h1 class="t-display-m c-white">${esc(p.name)}</h1>
+          ${faces(people, 6, true)}
         </div>
-        ${editing ? `<div class="chips">${Object.keys(SQ.d.friends).map((f) => chip(f, p.members.includes(f), { "data-act": "toggleMember", "data-arg": f }, p.members.includes(f) ? "check" : "plus")).join("")}</div>` : ""}
-        <section class="card violet stack-sm">
-          <div class="row"><h3 class="section-title">Crew Blend</h3><span class="caption muted">${p.members.length + 1} people</span></div>
-          <p class="small muted">Everyone's tastes, merged into one.</p>
-          ${blend.map((x) => `<div class="stack-xs"><div class="row small"><span>${icon(SQ.VIBE_ICON[x.vibe], "sm")} ${esc(x.vibe)}</span><strong>${Math.round(x.pct)}%</strong></div>${meter(x.pct)}</div>`).join("")}
-        </section>
-        <div class="row"><h3 class="section-title">Blended picks</h3>${b && !U().blendLoading ? `<button class="link" data-act="reblend">${icon("sparkle", "sm")}Re-blend</button>` : ""}</div>
-        ${picks}
-        <section class="card stack-sm">
-          <h3 class="section-title">Where are we going?</h3>
-          ${p.poll.length ? p.poll.map((id) => {
-            const e = ev(id);
-            if (!e) return "";
-            const v = t[id] || [];
-            const mine = p.votes[myName] === id;
-            return `<button class="option poll-opt${mine ? " on" : ""}" data-act="vote" data-arg="${id}" aria-pressed="${mine}">
-              <span class="fill" style="width:${(v.length / totalVotes) * 100}%"></span>
-              <span class="stack-xs grow"><strong class="ellipsis">${esc(e.title)}</strong><span class="caption muted">${esc(whenLabel(e))}</span></span>
-              <span class="row start" style="gap:6px">${avatars(v, 4)}<span class="tick">${mine ? icon("check") : ""}</span></span>
-            </button>`;
-          }).join("") : `<p class="small muted">Add a pick to start the vote.</p>`}
-          ${p.locked ? `<div class="notice">${icon("check")}<span>Locked in: <strong>${esc((ev(p.locked) || {}).title)}</strong>. It's in everyone's Quest Log.</span></div>${btn("Open event day", { "data-act": "openEventDay", "data-arg": p.locked }, "secondary", "door")}` : p.poll.length ? btn("Lock it in", { "data-act": "lockPoll" }) : ""}
-        </section>
-        <section class="card stack-sm">
-          <h3 class="section-title">Party chat</h3>
-          <div class="bubbles">${p.chat.slice(-6).map((m) => m.from === "Sidequest" ? `<p class="bubble system">${esc(m.text)}</p>` : `<p class="bubble${m.from === myName ? " mine" : ""}"><b>${esc(m.from)}</b>${esc(m.text)}</p>`).join("")}</div>
-          <form class="composer" data-act="partyChat"><input data-bind="partyMsg" value="${esc(U().partyMsg)}" placeholder="Message ${esc(p.name)}" aria-label="Message your party"><button class="icon-btn" type="submit" aria-label="Send">${icon("send")}</button></form>
-        </section>
-      </div>`, { title: p.name });
+      </div>${body}`, { cls: "bleed" });
   } };
 
-  /* ===================== Quest Requests ===================== */
-  function requestStatus(r) {
-    if (r.status === "live") return `<span class="badge lime">${icon("check")}Live now</span>`;
-    if (r.status === "claimed") return `<span class="badge violet">Claimed by ${esc(r.claimedBy)}</span>`;
-    if (r.votes >= 10) return `<span class="badge hot">${icon("flame")}Heating up</span>`;
-    return `<span class="badge">Open</span>`;
-  }
-  SQ.requestStatus = requestStatus;
-  const requestMeta = (r) => [ORIGIN_SHORT[r.origin], r.when, r.size, r.budget != null ? (r.budget ? `up to $${r.budget}` : "free") : ""].filter(Boolean).map(esc).join(" · ");
-  SQ.requestMeta = requestMeta;
+  // Figma: Group plan. Locked in: who's in, where to meet, and your answer.
+  S["group-plan"] = { role: "attendee", label: "Group plan", render: () => {
+    const p = SQ.d.party;
+    const e = ev(p.locked);
+    if (!e) return screen(empty("crew", "Lock in a plan from your party first."), { title: "Group plan" });
+    const u = me();
+    const mine = u.log[e.id];
+    const out = U().planOut === e.id;
+    const isIn = (n, i) => (i === 0 ? !!mine && !out : p.votes[n] === e.id || (e.friends || []).includes(n));
+    const people = crew();
+    const inCount = people.filter(isIn).length;
+    const meet = U().meetAt || (e.venue && e.venue.address ? e.venue.address.split(",")[0] : e.venue ? e.venue.name : e.neighbourhood);
+    const meetTime = clock(new Date(Date.parse(e.startsAt) - 10 * 6e4).toISOString());
+    return screen(`
+      <div class="group-header plan">
+        ${poster(e)}<span class="scrim-top"></span><span class="scrim-bottom"></span>
+        <div class="gh-nav">${iconBtn("back", { "data-back": "", "aria-label": "Back" }, "ghost c-white")}</div>
+        <div class="gh-info">
+          <span class="overline c-white" style="opacity:.85">Group plan · ${esc(p.name)}</span>
+          <h1 class="t-display-m c-white">${esc(e.title)}</h1>
+          <span class="t-data c-white">${esc([new Date(e.startsAt).toLocaleDateString("en-US", { weekday: "long", timeZone: TZ }), clock(e.startsAt), e.venue && e.venue.address ? e.venue.address.split(",")[0] : e.neighbourhood, e.price == null ? "" : priceLabel(e)].filter(Boolean).join(" · "))}</span>
+        </div>
+      </div>
+      <div class="pad-x stack" style="gap:16px;padding-top:20px;padding-bottom:24px">
+        <div class="notice">${icon("info")}<span>${inCount === people.length ? "Everyone's in. The plan is locked." : `The plan locks when everyone replies. ${inCount} of ${people.length} are in.`}</span></div>
+        <div class="stack" style="gap:0">${people.map((n, i) => `<div class="list-row"><span class="av ${i ? SQ.avTone(n) : ""}">${esc(n[0])}</span><span class="text"><span>${i ? esc(n) : "You"}</span></span>${isIn(n, i) ? SQ.tag("In", "success") : SQ.tag(i === 0 && out ? "Out" : "Pending", i === 0 && out ? "danger" : "")}</div>`).join("")}</div>
+        <div class="list-row"><span class="lead-ic">${icon("pin")}</span><span class="text"><span>Meet at ${esc(meet)}</span><span class="t-caption">${esc(meetTime)} · 10 min before it starts</span></span><button class="t-label-s c-accent" data-act="changeMeet">Change</button></div>
+      </div>`, { cls: "bleed", footer: `<div class="footer-bar row">${btn("Can't make it", { "data-act": "planOut", "data-arg": e.id }, "outline")}${btn(mine && !out ? "You're in" : "I'm in", { "data-act": "planIn", "data-arg": e.id }, "primary", "check")}</div>` });
+  } };
 
+  /* ===================== Sidequest Requests (Figma: Quest Requests, Request a quest) ===================== */
+  const requestStatus = (r) => (r.status === "live" ? "live now" : r.status === "claimed" ? `${esc(r.claimedBy)} planning` : r.votes >= 10 ? "heating up" : "");
+  SQ.requestStatus = (r) => (r.status === "live" ? SQ.tag("Booked", "success", "check") : r.status === "claimed" ? SQ.tag(`Claimed by ${r.claimedBy}`, "signature") : r.votes >= 10 ? SQ.tag("Heating up", "hot") : SQ.tag("Open"));
+  const requestMeta = (r) => [r.area || ORIGIN_SHORT[r.origin], r.when, requestStatus(r)].filter(Boolean).map(esc).join(" · ");
+  SQ.requestMeta = (r) => [r.area || ORIGIN_SHORT[r.origin], r.when, r.size, r.budget != null ? (r.budget ? `up to $${r.budget}` : "free") : ""].filter(Boolean).map(esc).join(" · ");
   function requestCard(r) {
     const u = me();
     const mine = u.myRequests.includes(r.id);
     const voted = mine || u.votedRequests.includes(r.id);
-    return `<div class="card tight row top">
-      <button class="vote${voted ? " on" : ""}" data-act="upvote" data-arg="${r.id}" aria-pressed="${voted}" aria-label="Upvote, ${r.votes} votes" ${mine ? "disabled" : ""}>${icon("up")}<span>${r.votes}</span></button>
-      <span class="stack-xs grow">
-        <strong>${esc(r.text)}</strong>
-        <span class="small muted">${requestMeta(r)}</span>
-        <span class="row start" style="gap:6px;margin-top:4px;flex-wrap:wrap">${requestStatus(r)}${mine ? '<span class="badge">Yours</span>' : ""}${r.source === "gap" ? '<span class="badge">From a search</span>' : ""}</span>
-        ${r.status === "live" && r.eventId ? `<button class="link" style="margin-top:4px" data-act="openQuest" data-arg="${r.eventId}">See the quest ${icon("chev", "sm")}</button>` : ""}
-      </span>
+    const action = r.status === "live" ? `<button data-act="openQuest" data-arg="${r.eventId}" class="tag-btn">${SQ.tag("Booked", "success", "check")}</button>`
+      : voted ? btn(mine ? "Yours" : "You're in", { "data-act": "upvote", "data-arg": r.id, "aria-pressed": "true", disabled: mine }, "primary s", "check")
+      : btn("Me too", { "data-act": "upvote", "data-arg": r.id, "aria-pressed": "false" }, "secondary s", "plus");
+    return `<div class="req-card">
+      <span class="req-count"><span class="t-display-m">${r.votes}</span><span class="t-caption c-secondary">asked</span></span>
+      <span class="stack" style="gap:4px;flex:1;min-width:0"><span class="t-title-m">${esc(r.text)}</span><span class="t-body-m c-secondary">${requestMeta(r)}</span><span style="margin-top:6px">${action}</span></span>
     </div>`;
   }
 
   S.requests = { role: "attendee", label: "Quest Requests", render: () => {
-    const u = me();
-    const news = u.notifications.filter((n) => !n.read && n.requestId);
-    const list = SQ.d.requests;
-    const mine = list.filter((r) => u.myRequests.includes(r.id));
-    const rest = list.filter((r) => !u.myRequests.includes(r.id));
+    const list = [...SQ.d.requests].sort((a, b) => b.votes - a.votes);
     return screen(`
-      <div class="pad stack">
-        <p class="muted">Tell hosts what you want. Upvote what you'd go to. If a host puts it on, you hear first.</p>
-        ${news.map((n) => `<button class="notice hot" style="width:100%;text-align:left" data-act="openNotif" data-arg="${n.id}">${icon("flame")}<span><strong>${esc(n.title)}.</strong> ${esc(n.body)}</span></button>`).join("")}
-        ${btn("Request a quest", { "data-act": "newRequest" }, "primary", "megaphone")}
-        ${btn("Spotted an event? Add it from a poster", { "data-act": "spotEvent" }, "outline", "camera")}
-        ${mine.length ? `<h3 class="section-title">Your requests</h3>${mine.map(requestCard).join("")}` : ""}
-        <div class="row"><h3 class="section-title">Trending in Toronto</h3><span class="small muted">${rest.length}</span></div>
-        ${rest.map(requestCard).join("")}
-      </div>`, { title: "Requests", large: true, tabbar: attendeeTabs("requests") });
+      <div class="page-head"><span class="overline">Tell hosts what you want</span><h1 class="t-display-xl">Sidequest Requests</h1>
+        <p class="t-body-l c-secondary">Back the sidequests you'd go to. Every account counts once, so hosts can trust the number.</p></div>
+      <div class="pad-x stack" style="gap:14px;padding-top:22px;padding-bottom:24px">
+        ${btn("Request a sidequest", { "data-act": "newRequest" }, "primary", "plus")}
+        ${btn("Found an event? Add it to Sidequest", { "data-act": "addEvent" }, "ghost m", "link")}
+        <div class="section-head" style="margin-top:6px"><span class="t-title-l">Trending near you</span><span class="t-caption c-secondary">last 30 days</span></div>
+        ${list.map(requestCard).join("")}
+      </div>`, { tabbar: attendeeTabs("requests") });
   } };
 
+  const REQ_WHEN = ["Weeknights", "Friday late", "Weekend days"];
   S["request-new"] = { role: "attendee", label: "Request a quest", render: () => {
     const d = U().reqDraft;
+    const u = me();
+    const tiles = [...new Set([...SQ.pickedTiles(u), ...TILES.map((t) => t[0])])].slice(0, 4);
+    const wheres = [...new Set([u.homeArea, ...(u.areas || []), "Kensington"].filter(Boolean))].slice(0, 2).concat("Anywhere");
+    const budget = d.budget === "" ? 60 : Number(d.budget);
+    const words = (s) => (s.toLowerCase().match(/[a-z]{5,}/g) || []).filter((w) => !["night", "nights", "party", "event", "class"].includes(w));
+    const mineWords = words(d.text);
+    const asked = mineWords.length ? SQ.d.requests.filter((r) => r.status !== "live" && words(r.text).some((w) => mineWords.includes(w))).sort((a, b) => b.votes - a.votes)[0] : null;
+    const group = (label, list, key) => `<span class="overline">${label}</span><div class="chips wrap">${list.map((x) => chip(x, d[key] === x, { "data-act": "reqSet", "data-arg": `${key}:${x}` })).join("")}</div>`;
     return screen(`
-      <div class="pad stack">
-        <label class="stack-sm"><span class="display-l">I'd go to a…</span>
-          <input class="big-input" data-bind="reqDraft.text" value="${esc(d.text)}" placeholder="Filipino indie night" aria-label="What kind of quest"></label>
+      <div class="pad-x stack" style="gap:16px;padding-top:4px;padding-bottom:24px">
+        ${field("What would you go to?", "reqDraft.text", d.text, "text", "Late-night ramen pop-up", { "data-change": "render" })}
         ${d.source === "gap" ? `<div class="notice">${icon("search")}<span>From your search: nothing listed fit this yet.</span></div>` : ""}
-        <h3 class="section-title">Near</h3>
-        <div class="chips">${Object.entries(ORIGIN_SHORT).map(([k, l]) => chip(l, d.origin === k, { "data-act": "reqSet", "data-arg": "origin:" + k }, "pin")).join("")}</div>
-        <h3 class="section-title">When</h3>
-        <div class="chips">${V().WHEN.map((w) => chip(w, d.when === w, { "data-act": "reqSet", "data-arg": "when:" + w })).join("")}</div>
-        <h3 class="section-title">Who's coming</h3>
-        <div class="chips">${V().CREW_SIZES.map((z) => chip(z, d.size === z, { "data-act": "reqSet", "data-arg": "size:" + z }, "users")).join("")}</div>
-        <h3 class="section-title">Budget</h3>
-        <div class="chips">${BUDGETS.map(([v, l]) => chip(l, String(d.budget) === v, { "data-act": "reqSet", "data-arg": "budget:" + v })).join("")}</div>
-        <p class="small muted">If someone already asked for the same thing, your request adds to theirs so hosts see one strong signal.</p>
-      </div>`, { title: "Request a quest", footer: `<div class="action-bar">${btn("Post request", { "data-act": "postRequest" }, "primary", "send")}</div>` });
+        ${group("Vibe", tiles, "vibe")}
+        ${group("When", REQ_WHEN, "when")}
+        ${group("Where", wheres, "area")}
+        <div class="stack" style="gap:10px">
+          <div class="section-head"><span class="overline">Budget</span><span class="t-data">${budget >= 60 ? "Any" : budget ? `Under $${budget}` : "Free"}</span></div>
+          <input type="range" class="range" style="--fill:${(budget / 60) * 100}%" min="0" max="60" step="5" value="${budget}" data-bind="reqDraft.budget" data-change="noop" aria-label="Budget">
+          <div class="section-head"><span class="t-data c-secondary">$0</span><span class="t-data c-secondary">$60</span></div>
+        </div>
+        ${asked ? `<span class="overline">Already asked · back one instead</span>${requestCard(asked)}` : ""}
+      </div>`, { title: "Request a sidequest", close: true, footer: `<div class="footer-bar">${btn("Post request", { "data-act": "postRequest" })}</div>` });
   } };
 
   // Add an event someone spotted: a poster on a pole, a screenshot of a story. The AI fills the form in.
