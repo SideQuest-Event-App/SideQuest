@@ -38,6 +38,7 @@ const DAYS = ["Weekdays", "Weekends", "Both"];
 const CREW_SIZES = ["Solo", "2 to 4", "5+"];
 const TRANSIT = ["TTC", "Bike", "Walk", "Drive", "Rideshare"];
 const RATE_TAGS = ["The people", "The vibe", "The price", "Easy to get to", "My crew"];
+const RATE_DETAILS = ["Host", "Ambience", "Venue", "Accessibility", "Vibes"];
 const HOST_TYPES = [
   ["Venue", "You run a bar, club, gallery, or space"],
   ["Promoter or organizer", "You put on nights at other venues"],
@@ -543,7 +544,7 @@ A.attended = (ctx, { eventId, attended }) => {
   l.status = attended ? "went" : "missed";
   if (!attended) db.data.logs.attended.push({ time: new Date().toISOString(), eventId: Number(eventId), attended: false, userId: u.id });
 };
-A.rate = (ctx, { eventId, stars, tags }) => {
+A.rate = (ctx, { eventId, stars, tags, details, with: withWho, photos }) => {
   const u = needUser(ctx);
   const e = findEvent(eventId);
   const l = u.log[Number(eventId)];
@@ -551,17 +552,31 @@ A.rate = (ctx, { eventId, stars, tags }) => {
   const n = Math.round(Number(stars));
   if (!(n >= 1 && n <= 5)) throw new Error("Tap a star rating first.");
   Object.assign(l, { status: "went", rating: n, tags: (Array.isArray(tags) ? tags : []).filter((t) => RATE_TAGS.includes(t)), ratedAt: now().toISOString() });
+  // The optional details, who you were with, and up to 3 small photos (JPEG data URLs)
+  const det = details && typeof details === "object" ? details : {};
+  l.details = Object.fromEntries(RATE_DETAILS.filter((k) => det[k] >= 1 && det[k] <= 5).map((k) => [k, Math.round(det[k])]));
+  l.with = (Array.isArray(withWho) ? withWho : []).map((x) => clean(x, 30)).filter(Boolean).slice(0, 12);
+  l.photos = (Array.isArray(photos) ? photos : []).filter((x) => typeof x === "string" && /^data:image\/jpeg;base64,/.test(x) && x.length < 300000).slice(0, 3);
   db.data.logs.attended.push({ time: new Date().toISOString(), eventId: e.id, attended: true, rating: n, tags: l.tags, userId: u.id });
   // A great night teaches the taste avatar
   const learned = n >= 4 ? (e.vibes || []).filter((v) => !u.vibes.includes(v)) : [];
   u.vibes.push(...learned);
   return { learned };
 };
-A.eventChat = (ctx, { eventId, text }) => {
+A.eventChat = (ctx, { eventId, text, channel }) => {
   const u = needUser(ctx);
   const t = clean(text, 300);
   if (!t || !findEvent(eventId)) return;
-  (db.data.eventChat[eventId] = db.data.eventChat[eventId] || []).push({ from: u.name || "You", text: t, time: now().toISOString() });
+  (db.data.eventChat[eventId] = db.data.eventChat[eventId] || []).push({ from: u.name || "You", text: t, channel: clean(channel, 30) || "general", time: now().toISOString() });
+};
+// Checked in at the door (the venue's QR, or being there)
+A.checkIn = (ctx, { eventId, how }) => {
+  const u = needUser(ctx);
+  const e = findEvent(eventId);
+  if (!e) throw new Error("Unknown quest.");
+  if (!u.log[e.id]) A.accept(ctx, { eventId: e.id });
+  u.log[e.id].checkedIn = u.log[e.id].checkedIn || now().toISOString();
+  u.log[e.id].checkInBy = how === "qr" ? "qr" : "location";
 };
 
 // --- host registration ---

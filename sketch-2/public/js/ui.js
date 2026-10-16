@@ -293,6 +293,6 @@ window.SQ = window.SQ || {};
   // 19+ listings say so in the title, tags or description
   const is19 = (e) => /19\+|\b(19|21)\s*\+|19 and over|ages? 19/i.test(`${e.title} ${(e.tags || []).join(" ")} ${e.description || ""}`);
   const avTone = (name) => AV_TONE[name] ?? AV_TONES[hash(name) % AV_TONES.length];
-  Object.assign(SQ, { avTone, is19, logo, matchTier, matchPill, iconBtn, tag, ph, photoUrl, eventPhoto, VIBE_PHOTO, SIXER_MARK, sixer, sixerMsg });
+  Object.assign(SQ, { dayKey, avTone, is19, logo, matchTier, matchPill, iconBtn, tag, ph, photoUrl, eventPhoto, VIBE_PHOTO, SIXER_MARK, sixer, sixerMsg });
   Object.assign(SQ, { esc, attr, icon, VIBE_ICON, poster, avatar, avatars, bar, btn, chip, field, textarea, progress, meter, empty, stars, tabs, screen, thinking, aiLabel, aiTag, me, ev, req, now, whenLabel, isToday, isWeekend, priceLabel, trip, tripLabel, originShort, pick, partyNames, partyGoing, isPast, eventStatus, statusBadge, whenRow, hash });
 })();

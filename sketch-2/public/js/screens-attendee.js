@@ -1007,100 +1007,240 @@
     </div>`, { title: "Notifications", right: iconBtn("settings", { "data-go": "profile", "aria-label": "Notification settings" }) });
   } };
 
-  /* ===================== Quest Log, rating, event day ===================== */
+  /* ===================== Sidequests (Quest Log), event day, check-in, rating, memories, Wrapped (Figma: 20 to 27) ===================== */
+  const LOG_TABS = [["Upcoming", "Upcoming"], ["Saved", "Bookmarked"], ["Completed", "Past"]];
+  const logEntries = () => Object.entries(me().log).map(([id, l]) => ({ e: ev(id), l })).filter((x) => x.e);
+  const longDate = (e) => new Date(e.startsAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: TZ });
+  const withWho = (e, l) => [...new Set([...(l.with || []), ...partyGoing(e)])];
+  const planTag = (e) => {
+    const p = SQ.d.party;
+    if (p.locked !== e.id) return "";
+    const people = crew();
+    const n = people.filter((x, i) => (i ? p.votes[x] === e.id || (e.friends || []).includes(x) : !!me().log[e.id])).length;
+    return SQ.tag(`Group plan · ${n} of ${people.length} in`, "social");
+  };
+  // A sidequest you're going to, as a card row (Figma: 20 Quest Log rows)
+  const logRow = (e, act = "openQuest") => `<button class="log-row" data-act="${act}" data-arg="${e.id}">${poster(e)}
+      <span class="text"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-data c-secondary ellipsis">${esc([dayTime(e), e.venue ? e.venue.name : e.neighbourhood].join(" · "))}</span>
+        ${SQ.ticketFor(e.id) ? SQ.tag("Got tickets", "success") : planTag(e)}</span>${icon("chevR")}</button>`;
+  const stars5 = (n, cls = "") => `<span class="stars5 ${cls}" aria-label="${n} of 5 stars">${[1, 2, 3, 4, 5].map((i) => icon(i <= n ? "starFill" : "star", i <= n ? "on" : "")).join("")}</span>`;
+  const yearCount = () => logEntries().filter(({ e, l }) => l.status === "went" && new Date(e.startsAt).getFullYear() === SQ.now().getFullYear()).length;
+  const wrappedCard = (title) => `<button class="wrapped-card" data-go="wrapped"><span class="overline">Sidequest Wrapped${title.preview ? " · preview" : ""}</span><span class="t-title-l">${esc(title.text)}</span></button>`;
+
+  function calendar(entries) {
+    const base = SQ.now();
+    const off = U().calMonth || 0;
+    const first = new Date(base.getFullYear(), base.getMonth() + off, 1, 12);
+    const key = (d) => SQ.dayKey(d);
+    const todayKey = SQ.dayKey(base);
+    const sel = U().calDay || todayKey;
+    const days = new Set(entries.map((e) => SQ.dayKey(new Date(e.startsAt))));
+    const start = new Date(first);
+    start.setDate(1 - first.getDay());
+    const cells = Array.from({ length: 42 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i, 12));
+    const rows = cells[35].getMonth() !== first.getMonth() ? cells.slice(0, 35) : cells;
+    const onDay = entries.filter((e) => SQ.dayKey(new Date(e.startsAt)) === sel).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    const selDate = new Date(`${sel}T12:00:00`);
+    return `<div class="cal">
+        <div class="cal-head"><span class="t-title-l">${first.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
+          <span class="row start" style="gap:4px">${iconBtn("back", { "data-act": "calMonth", "data-arg": -1, "aria-label": "Previous month" }, "ghost s")}${iconBtn("chevR", { "data-act": "calMonth", "data-arg": 1, "aria-label": "Next month" }, "ghost s")}</span></div>
+        <div class="cal-grid">${"SMTWTFS".split("").map((d) => `<span class="overline dow">${d}</span>`).join("")}
+          ${rows.map((d) => { const k = key(d); return `<button class="day${d.getMonth() !== first.getMonth() ? " out" : ""}${k === todayKey ? " today" : ""}${k === sel ? " sel" : ""}" data-act="calDay" data-arg="${k}"><span>${d.getDate()}</span>${days.has(k) ? "<i></i>" : ""}</button>`; }).join("")}</div>
+      </div>
+      <span class="overline">${esc(`${selDate.toLocaleDateString("en-US", { weekday: "long" })} ${selDate.getDate()}`)}</span>
+      ${onDay.map((e) => logRow(e)).join("") || '<p class="t-body-m c-secondary">Nothing planned that day.</p>'}`;
+  }
+
   S.questlog = { role: "attendee", label: "Quest Log", render: () => {
     const u = me();
     const tab = U().logTab;
-    const entries = Object.entries(u.log).map(([id, l]) => ({ e: ev(id), l })).filter((x) => x.e);
-    let list = "";
+    const cal = U().logCal && tab === "Upcoming";
+    const entries = logEntries();
+    let body = "";
     if (tab === "Upcoming") {
-      const up = entries.filter((x) => x.l.status === "going").sort((a, b) => a.e.startsAt.localeCompare(b.e.startsAt));
-      list = up.length ? up.map(({ e }) => isPast(e)
-        ? `<div class="card hot stack-sm">
-            <div class="row start" style="gap:12px">${poster(e, "mini")}<span class="stack-xs grow"><strong>${esc(e.title)}</strong><span class="small muted">${esc(e.date)}</span></span></div>
-            <p class="section-title">Did you go?</p>
-            <p class="small muted">Only nights you actually went count. It also trains your taste avatar.</p>
-            <div class="btn-row">${btn("Yes, I went", { "data-act": "didGo", "data-arg": e.id })}${btn("No", { "data-act": "didntGo", "data-arg": e.id }, "secondary")}</div>
-          </div>`
-        : `<div class="card tight stack-sm">
-            <button class="row start" style="gap:12px;text-align:left" data-act="openQuest" data-arg="${e.id}">${poster(e, "thumb")}
-              <span class="stack-xs grow">${whenRow(e)}<strong>${esc(e.title)}</strong><span class="small muted">${esc(e.neighbourhood)}${partyGoing(e).length ? ` · with ${esc(partyGoing(e).join(", "))}` : ""}</span></span></button>
-            <div class="btn-row">${btn("Event day", { "data-act": "openEventDay", "data-arg": e.id }, "primary sm", "door")}${btn("Details", { "data-act": "openQuest", "data-arg": e.id }, "secondary sm")}</div>
-            <button class="link muted" data-act="skipToAfter" data-arg="${e.id}">Demo: skip to after the event</button>
-          </div>`).join("") : empty("calendar", "No quests accepted yet.", btn("Find a quest", { "data-go": "discover" }, "secondary", "compass"));
+      const up = entries.filter((x) => x.l.status === "going" && !isPast(x.e)).map((x) => x.e).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+      if (cal) body = calendar([...up, ...u.saved.map(ev).filter((e) => e && !isPast(e))]);
+      else if (!up.length) body = `<div class="empty-state"><span class="illo">${icon("ticket")}</span><p class="t-body-l c-secondary">No sidequests coming up yet.</p>${btn("Find a sidequest", { "data-go": "discover" }, "secondary m", "search")}</div>`;
+      else {
+        const [next, ...rest] = up;
+        body = `${questCard(next).replace('class="qcard"', 'class="qcard log-hero"')}
+          ${btn("Open event day", { "data-act": "openEventDay", "data-arg": next.id }, "primary m", "ticket")}
+          ${rest.length ? `<span class="overline">This week</span>${rest.map((e) => logRow(e)).join("")}` : ""}`;
+      }
+      if (!cal) body += wrappedCard({ preview: true, text: `${yearCount()} sidequest${yearCount() === 1 ? "" : "s"} so far this year` });
     }
     if (tab === "Saved") {
-      const saved = u.saved.map(ev).filter(Boolean);
-      list = saved.length ? saved.map((e) => questRow(e)).join("") : empty("bookmark", "Nothing saved yet. Tap the bookmark on a quest.");
+      const saved = u.saved.map(ev).filter((e) => e && !u.log[e.id]);
+      body = `<p class="t-body-m c-secondary">Everything you bookmarked, with no plan or ticket yet.</p>
+        ${saved.length ? saved.map((e) => `<div class="row start saved-row" style="gap:14px">${questRow(e).replace(pillFor(e), "")}${iconBtn("bookmarkFill", { "data-act": "save", "data-arg": e.id, "aria-label": "Remove bookmark", "aria-pressed": "true" }, "ghost accent")}</div>`).join("")
+          : '<p class="t-body-m c-secondary">Nothing bookmarked yet. Tap the bookmark on a sidequest.</p>'}`;
     }
     if (tab === "Completed") {
+      const ask = entries.filter((x) => x.l.status === "going" && isPast(x.e));
       const done = entries.filter((x) => x.l.status !== "going").sort((a, b) => b.e.startsAt.localeCompare(a.e.startsAt));
-      list = done.length ? done.map(({ e, l }) => `
-        <div class="card tight row">
-          <button class="row start grow" style="gap:12px;text-align:left" data-act="openQuest" data-arg="${e.id}">${poster(e, "mini")}<span class="stack-xs grow"><strong class="ellipsis">${esc(e.title)}</strong><span class="small muted">${esc(e.date)}</span></span></button>
-          ${l.status === "missed" ? '<span class="badge">Didn\'t go</span>' : l.rating ? stars(l.rating) : `<button class="btn btn-primary sm" data-act="openRate" data-arg="${e.id}">Rate</button>`}
-        </div>`).join("") : empty("star", "No completed quests yet. After a quest, tell us if you went.");
+      body = `<p class="t-body-m c-secondary">Your sidequest memory book. Unrated sidequests are flagged.</p>
+        ${ask.map(({ e }) => `<div class="past-card flag">
+          <div class="row start" style="gap:14px">${poster(e)}<span class="text"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-data c-secondary">${esc(longDate(e))}</span></span></div>
+          <span class="t-title-m">Did you go?</span><span class="t-caption c-secondary">Only nights you actually went count. It also trains your taste avatar.</span>
+          <div class="btn-row">${btn("Yes, I went", { "data-act": "didGo", "data-arg": e.id }, "primary m")}${btn("No", { "data-act": "didntGo", "data-arg": e.id }, "secondary m")}</div></div>`).join("")}
+        ${done.map(({ e, l }) => `<button class="past-card${l.status === "went" && !l.rating ? " flag" : ""}" data-act="${l.status === "went" && !l.rating ? "openRate" : "openMemory"}" data-arg="${e.id}">
+          <span class="row start" style="gap:14px">${poster(e)}<span class="text"><span class="t-title-m ellipsis">${esc(e.title)}</span>
+            <span class="t-data c-secondary ellipsis">${esc([longDate(e).replace(/^(\w+),/, "$1"), withWho(e, l).length ? `with ${withWho(e, l).join(", ")}` : ""].filter(Boolean).join(" · "))}</span>
+            ${l.status === "missed" ? SQ.tag("Didn't go") : l.rating ? stars5(l.rating) : SQ.tag("Rate this sidequest", "warning", "star")}</span></span></button>`).join("")}
+        ${!ask.length && !done.length ? '<p class="t-body-m c-secondary">Nothing here yet. After a sidequest, tell us if you went.</p>' : ""}
+        ${done.some((x) => x.l.status === "went") ? wrappedCard({ text: "Your year in sidequests is ready to preview" }) : ""}`;
     }
     return screen(`
-      <div class="pad stack">
-        <div class="chips">${["Upcoming", "Saved", "Completed"].map((t) => chip(t, tab === t, { "data-act": "setLogTab", "data-arg": t })).join("")}</div>
-        ${list}
-      </div>`, { title: "Quest Log", large: true, right: `<button class="icon-btn" data-act="openWallet" aria-label="Ticket wallet">${icon("wallet")}</button>`, tabbar: attendeeTabs("questlog") });
+      <div class="page-head" style="gap:14px">
+        <div class="row start" style="gap:8px"><h1 class="t-display-xl grow">Sidequests</h1>
+          ${iconBtn("wallet", { "data-act": "openWallet", "aria-label": "Ticket wallet" })}
+          ${iconBtn(cal ? "list" : "cal", { "data-act": "toggleLogCal", "aria-label": cal ? "Show as a list" : "Show a calendar" })}</div>
+        <div class="seg surface">${LOG_TABS.map(([k, label]) => `<button class="${tab === k ? "on" : ""}" data-act="setLogTab" data-arg="${k}" aria-pressed="${tab === k}">${label}</button>`).join("")}</div>
+      </div>
+      <div class="pad-x stack" style="gap:14px;padding-top:18px;padding-bottom:24px">${body}</div>`, { tabbar: attendeeTabs("questlog") });
   } };
 
-  S.rate = { role: "attendee", label: "Rate a quest", render: () => {
-    const e = ev(U().quest) || SQ.d.events[0];
-    const r = U().rating;
-    return screen(`
-      <div class="pad stack center">
-        ${poster(e, "", { style: "height:150px;width:100%" })}
-        <h2 class="display-l">How was ${esc(e.title)}?</h2>
-        <div class="stars" role="group" aria-label="Rating">${[1, 2, 3, 4, 5].map((n) => `<button class="star${n <= r.stars ? " on" : ""}" data-act="setStars" data-arg="${n}" aria-label="${n} star${n > 1 ? "s" : ""}" aria-pressed="${n <= r.stars}">${icon("star", n <= r.stars ? "fill" : "")}</button>`).join("")}</div>
-        <h3 class="section-title">What made it?</h3>
-        <div class="chips" style="justify-content:center">${V().RATE_TAGS.map((t) => chip(t, r.tags.includes(t), { "data-act": "toggleRateTag", "data-arg": t })).join("")}</div>
-        <button class="upload" style="height:96px" data-act="toast" data-arg="Photo upload is out of scope for this sketch.">${icon("camera", "lg")}Add a photo to your story</button>
-      </div>`, { title: "Rate your quest", footer: `<div class="action-bar">${btn("Collect this story", { "data-act": "submitRating", disabled: !r.stars }, "primary", "sparkle")}</div>` });
-  } };
-
+  // Figma: 22 Event day. Getting there, entrances, the floor plan (tap a spot), live host updates.
+  const ZONES = [["bar", "Bar", "Drinks and the bar"], ["stage", "Main room", "Where it's happening"], ["front", "Front", "Up front, by the stage"], ["door", "Door", "Entrance and coat check"]];
   S.eventday = { role: "attendee", label: "Event day mode", render: () => {
     const e = ev(U().quest) || SQ.d.events[0];
     const u = me();
     const t = trip(e, u.origin);
-    const msgs = SQ.d.hostMessages.filter((m) => m.eventId === e.id);
-    const last = msgs[msgs.length - 1];
-    const mins = Math.round((new Date(e.startsAt) - SQ.now()) / 60000);
-    const status = isPast(e) ? "It's over. How was it?" : mins > 0 ? (mins < 120 ? `Doors in ${mins} min` : mins < 48 * 60 ? `Starts in ${Math.round(mins / 60)} hours` : `Starts in ${Math.round(mins / 1440)} days`) : "Happening now";
-    const crew = [...new Set([...partyGoing(e), ...(SQ.d.party.locked === e.id ? SQ.d.party.members : [])])];
-    const PINS = [[18, 44], [72, 30], [30, 70], [60, 64]];
+    const msgs = SQ.d.hostMessages.filter((m) => m.eventId === e.id).slice().reverse();
+    const party = [...new Set([...partyGoing(e), ...(SQ.d.party.locked === e.id ? SQ.d.party.members : [])])];
+    const zone = U().zone;
+    const leave = t ? clock(new Date(Date.parse(e.startsAt) - (t.minutes + 5) * 6e4).toISOString()) : "";
+    const ticket = SQ.ticketFor(e.id);
+    const checked = u.log[e.id] && u.log[e.id].checkedIn;
+    const where = (i) => ZONES[[1, 0, 2, 3][i % 4]][0]; // where each friend is standing
+    const card = (ic, title, inner) => `<div class="day-card"><span class="row start" style="gap:10px">${icon(ic)}<span class="t-title-m">${title}</span></span>${inner}</div>`;
     return screen(`
-      <div class="pad stack">
-        <div class="row"><span class="badge live">Event day</span><span class="small muted">${esc(e.date)}</span></div>
-        <div class="stack-xs"><h2 class="display-l">${esc(e.title)}</h2><p class="lead accent-text">${status}</p></div>
-        <div class="venue" aria-label="Venue map">
-          <span class="zone stage">Stage</span><span class="zone bar-z">Bar</span><span class="zone coats">Coats</span><span class="zone door">Entrance</span>
-          <span class="pin you" title="You">You</span>
-          ${crew.slice(0, 4).map((n, i) => `<span class="pin" style="left:${PINS[i][0]}%;top:${PINS[i][1]}%;background:${["#f2f2f2", "#d4d4d4", "#bdbdbd", "#e3e3e3"][i]}" title="${esc(n)}">${esc(n[0])}</span>`).join("")}
+      <div class="pad-x stack" style="gap:14px;padding-bottom:24px">
+        <div class="stack" style="gap:6px">
+          <div class="row start" style="gap:8px">${isToday(e) ? SQ.tag(hourOf(e) >= 17 ? "Tonight" : "Today", "hot") : SQ.tag(longDate(e))}${SQ.tag(SQ.is19(e) ? "19+" : "All ages")}${checked ? SQ.tag("Checked in", "success", "check") : ""}</div>
+          <h1 class="t-display-m">${esc(e.title)}</h1>
+          <span class="t-data c-secondary">${esc([`Starts ${clock(e.startsAt)}`, e.endsAt ? `Ends ${clock(e.endsAt)}` : "", e.venue ? e.venue.name : e.neighbourhood].filter(Boolean).join(" · "))}</span>
         </div>
-        <div class="meta-row"><span class="ic-box">${icon("door")}</span><span><strong>Entrance</strong><span class="small muted">${esc(e.dayInfo.entrance)}</span></span></div>
-        <div class="meta-row"><span class="ic-box">${icon("train")}</span><span><strong>Getting there</strong><span class="small muted">${t ? `TTC to ${esc(e.travel.stop)}: ${tripLabel(t)} from ${esc(originShort(u.origin))}.` : `Nearest stop: ${esc(e.travel.stop)}.`}${e.dayInfo.transit ? ` ${esc(e.dayInfo.transit)}` : ""}</span></span></div>
-        <div class="meta-row"><span class="ic-box">${icon("home")}</span><span><strong>Getting home</strong><span class="small muted">${esc(e.dayInfo.home)}</span></span></div>
-        <div class="meta-row"><span class="ic-box">${icon("coat")}</span><span><strong>Coat check and re-entry</strong><span class="small muted">${esc(e.dayInfo.coat)}</span></span></div>
-        <div class="card ${last ? "hot" : ""} stack-xs"><span class="row"><span class="label">${icon("megaphone", "sm")} Host update</span>${last ? `<span class="caption muted">${new Date(last.time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>` : ""}</span>
-          <p class="small">${last ? esc(last.text) : `No updates from ${esc(e.organizer.name)} yet. They'll show up here live.`}</p></div>
-        ${SQ.ticketFor(e.id) ? btn("Show my ticket", { "data-act": "openWalletTicket", "data-arg": SQ.ticketFor(e.id).id }, "primary", "ticket") : btn("Add my ticket", { "data-act": "addTicket", "data-arg": e.id }, "outline", "ticket")}
-        <div class="btn-row">${btn("Group chat", { "data-go": "eventday-chat" }, "secondary", "chat")}${btn("Find my party", { "data-act": "findParty", "data-arg": e.id }, "primary", "users")}</div>
-      </div>`, { title: "Event day" });
+        ${card("walk", "Getting there", `<p class="t-body-m c-secondary">${esc([distLabel(e), t ? tripLabel(t) : `nearest stop ${e.travel.stop}`].join(" · "))}.${leave ? ` Leave by ${esc(leave)} to make the start.` : ""}${e.dayInfo.transit ? ` ${esc(e.dayInfo.transit)}` : ""}</p>`)}
+        ${card("door", "Entrances", `<div class="stack" style="gap:8px">
+          <span class="row start" style="gap:8px">${SQ.matchPill(90)}<span class="t-body-m">${esc(e.dayInfo.entrance)}</span></span>
+          <span class="row start" style="gap:8px">${SQ.matchPill(30)}<span class="t-body-m c-secondary">Coat check · ${esc(e.dayInfo.coat)}</span></span>
+          <span class="t-caption c-secondary">Getting home: ${esc(e.dayInfo.home)}</span></div>`)}
+        ${card("map", "Floor plan", `<div class="floor" role="group" aria-label="Floor plan, tap a spot">
+            ${ZONES.map(([k, label]) => `<button class="zone z-${k}${zone === k ? " on" : ""}" data-act="pickZone" data-arg="${k}" aria-pressed="${zone === k}">${label}
+              ${party.map((n, i) => (where(i) === k ? avatar(n, "xs") : "")).join("")}</button>`).join("")}
+          </div>
+          <p class="t-caption c-secondary">${zone ? esc(`${ZONES.find((z) => z[0] === zone)[2]}.${party.filter((n, i) => where(i) === zone).length ? ` ${andList(party.filter((n, i) => where(i) === zone))} ${party.filter((n, i) => where(i) === zone).length > 1 ? "are" : "is"} here.` : ""}`) : party.length ? `Tap a spot to see who from your party is there.` : "Tap a spot to see what's there."}</p>`)}
+        ${card("megaphone", "Live updates", msgs.length ? msgs.slice(0, 3).map((m) => `<div class="row start top" style="gap:12px"><span class="t-data c-secondary">${clock(m.time)}</span><span class="t-body-m">${esc(m.text)}</span></div>`).join("")
+          : `<p class="t-body-m c-secondary">No updates from ${esc(e.organizer.name)} yet. They'll show up here live.</p>`)}
+        ${isPast(e) ? "" : `<button class="btn btn-ghost m" data-act="skipToAfter" data-arg="${e.id}">Demo: skip to after the event</button>`}
+      </div>`, { title: "Event day", right: iconBtn("share", { "data-act": "share", "data-arg": e.id, "aria-label": "Share" }),
+      footer: `<div class="footer-bar row" style="gap:10px">${checked ? btn("You're checked in", { "data-go": "checkin-done" }, "secondary", "check") : btn("Check in at the door", { "data-go": "checkin" }, "primary", "qr")}
+        ${iconBtn("wallet", ticket ? { "data-act": "openWalletTicket", "data-arg": ticket.id, "aria-label": "Show my ticket" } : { "data-act": "addTicket", "data-arg": e.id, "aria-label": "Add my ticket" })}
+        ${iconBtn("bubble", { "data-go": "eventday-chat", "aria-label": "Attendee chat" })}</div>` });
   } };
 
+  // Figma: 22 Attendee chat. Channels, the host's pinned note, then the room.
+  const CHANNELS = ["general", "record requests", "meet up first"];
   S["eventday-chat"] = { role: "attendee", label: "Event day: attendee chat", render: () => {
     const e = ev(U().quest) || SQ.d.events[0];
-    const chat = SQ.d.eventChat[e.id] || [];
-    const myName = me().name || "You";
+    const ch = U().chatCh || "general";
+    const chat = (SQ.d.eventChat[e.id] || []).filter((m) => (m.channel || "general") === ch);
+    const pinned = SQ.d.hostMessages.filter((m) => m.eventId === e.id).slice(-1)[0];
+    const mine = myName();
     return screen(`
-      <div class="pad stack">
-        <p class="small muted">Everyone going to ${esc(e.title)}. ${esc(e.organizer.name)} can moderate.</p>
-        <div class="bubbles">${chat.length ? chat.map((m) => `<p class="bubble${m.from === myName ? " mine" : m.host ? " host" : ""}"><b>${esc(m.from)}${m.host ? " · Host" : ""}</b>${esc(m.text)}</p>`).join("") : '<p class="bubble system">No messages yet. Say hi.</p>'}</div>
-      </div>`, { title: "Attendee chat", footer: `<div class="action-bar"><form class="composer grow" data-act="eventChat"><input data-bind="eventMsg" value="${esc(U().eventMsg)}" placeholder="Say hi" aria-label="Message attendees"><button class="icon-btn" type="submit" aria-label="Send">${icon("send")}</button></form></div>` });
+      <div class="pad-x stack" style="gap:14px;padding-bottom:16px">
+        <div class="chips scroll-x">${CHANNELS.map((c) => chip(`# ${c}`, c === ch, { "data-act": "chatChannel", "data-arg": c })).join("")}</div>
+        <div class="pinned"><span class="overline row start" style="gap:6px">${icon("pinned")}Pinned by the host</span><p class="t-body-m">${esc(pinned ? pinned.text : `Entrance: ${String(e.dayInfo.entrance).replace(/\.+$/, "")}. Coat check: ${String(e.dayInfo.coat).replace(/\.+$/, "")}.`)}</p></div>
+        ${chat.map((m) => m.from === mine ? `<p class="msg mine">${esc(m.text)}</p>` : `<div class="msg-group"><span class="row start" style="gap:8px">${avatar(m.from, "xs")}<span class="t-caption c-secondary">${esc(m.from)}</span>${m.host ? SQ.tag("Host", "solid") : ""}</span><p class="msg${m.host ? " host" : ""}">${esc(m.text)}</p></div>`).join("")
+          || `<p class="t-body-m c-secondary center">No messages in # ${esc(ch)} yet. Say hi.</p>`}
+      </div>`, { title: e.title, right: iconBtn("more", { "data-act": "toast", "data-arg": `${e.organizer.name} moderates this chat.`, "aria-label": "More" }),
+      footer: `<div class="footer-bar"><form class="composer" data-act="eventChat"><input data-bind="eventMsg" value="${esc(U().eventMsg)}" placeholder="Message # ${esc(ch)}" aria-label="Message attendees">${icon("image")}<button class="icon-btn" type="submit" aria-label="Send">${icon("arrow")}</button></form></div>` });
+  } };
+
+  // Figma: Check-in scan and Check-in done. The camera reads the venue's QR if the browser can; tapping the frame or location works too.
+  S.checkin = { role: "attendee", label: "Check-in scan", render: () => {
+    const e = ev(U().quest) || SQ.d.events[0];
+    return screen(`
+      <div class="checkin">${poster(e)}<span class="checkin-dim"></span>
+        <label class="scan-frame" aria-label="Scan the door QR">${["tl", "tr", "bl", "br"].map((c) => `<i class="${c}"></i>`).join("")}<span class="qr-box">${icon("qr")}</span>
+          <input type="file" accept="image/*" capture="environment" data-upload="scanCheckIn" class="sr-only"></label>
+        <p class="t-label c-white center">Point at the QR by the ${esc(String(e.dayInfo.entrance).length <= 24 ? String(e.dayInfo.entrance).toLowerCase() : "door")}</p>
+      </div>`, { title: "Check in", close: true, cls: "bleed dark-bar", footer: `<div class="footer-bar">${btn("Check in by location instead", { "data-act": "checkInHere", "data-arg": e.id }, "outline", "pin")}</div>` });
+  } };
+  S["checkin-done"] = { role: "attendee", label: "Check-in done", render: () => {
+    const e = ev(U().quest) || SQ.d.events[0];
+    const at = (me().log[e.id] || {}).checkedIn;
+    return screen(`<div class="age-check"><span class="done-ic"><span>${icon("check")}</span></span><h1 class="t-display-l">You're in.</h1>
+        <span class="t-data c-secondary">${esc([at ? `Checked in at ${clock(at)}` : "Checked in", e.venue ? e.venue.name : e.neighbourhood].join(" · "))}</span></div>`,
+      { title: "", back: "eventday", close: true, footer: `<div class="footer-bar">${btn("Back to event day", { "data-go": "eventday" })}</div>` });
+  } };
+
+  // Figma: 24 Rate. Overall, the details, who you were with, photos.
+  const DETAILS = ["Host", "Ambience", "Venue", "Accessibility", "Vibes"];
+  S.rate = { role: "attendee", label: "Rate a quest", render: () => {
+    const e = ev(U().quest) || SQ.d.events[0];
+    const r = U().rating;
+    const starBtns = (n, act, arg = "") => [1, 2, 3, 4, 5].map((i) => `<button class="star-btn" data-act="${act}" data-arg="${arg}${i}" aria-label="${i} star${i > 1 ? "s" : ""}" aria-pressed="${i <= n}">${icon(i <= n ? "starFill" : "star")}</button>`).join("");
+    const people = [...new Set([...SQ.d.party.members, ...r.with])];
+    return screen(`
+      <div class="pad-x stack" style="gap:16px;padding-bottom:24px">
+        <div class="stack" style="gap:8px"><span class="overline">Rate your sidequest · ${esc(longDate(e).replace(",", ""))}</span><h1 class="t-display-m">How was ${esc(e.title)}?</h1></div>
+        <div class="overall"><span class="overline">Overall</span><span class="stars-big">${starBtns(r.stars, "setStars")}</span></div>
+        <div class="stack" style="gap:4px"><span class="overline">Rate the details · optional</span>
+          ${DETAILS.map((d) => `<div class="detail-row"><span class="t-body-l">${d}</span><span class="stars-sm">${starBtns(r.details[d] || 0, "setDetail", `${d}:`)}</span></div>`).join("")}</div>
+        <div class="stack" style="gap:10px"><span class="overline">Who were you with?</span>
+          <div class="chips">${people.map((n) => chip(n, r.with.includes(n), { "data-act": "rateWith", "data-arg": n })).join("")}<button class="chip outline" data-act="rateSomeone">+ Someone new</button></div></div>
+        <div class="stack" style="gap:10px"><span class="overline">Photos</span>
+          <div class="photo-row">${r.photos.map((p, i) => `<button class="shot" style="background-image:url('${p}')" data-act="removeRatePhoto" data-arg="${i}" aria-label="Remove photo"></button>`).join("")}
+            ${r.photos.length < 3 ? `<label class="shot add">${icon("camera")}<span class="t-caption">Add</span><input type="file" accept="image/*" data-upload="addRatePhoto" class="sr-only"></label>` : ""}</div></div>
+      </div>`, { title: "", close: true, footer: `<div class="footer-bar">${btn("Save to past sidequests", { "data-act": "submitRating", disabled: !r.stars })}</div>` });
+  } };
+
+  // Figma: Saved quest. A past sidequest in your memory book.
+  S.memory = { role: "attendee", label: "Saved quest", render: () => {
+    const e = ev(U().quest) || SQ.d.events[0];
+    const l = me().log[e.id] || {};
+    const who = withWho(e, l);
+    const photos = l.photos && l.photos.length ? l.photos : [];
+    const met = who.filter((n) => !SQ.d.friends[n]);
+    return screen(`
+      <div class="group-header plan">${poster(e)}<span class="scrim-top"></span><span class="scrim-bottom"></span>
+        <div class="gh-nav">${iconBtn("back", { "data-back": "", "aria-label": "Back" }, "ghost c-white")}</div>
+        <div class="gh-info"><span class="overline c-white" style="opacity:.85">${esc(new Date(e.startsAt).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: TZ }))}</span>
+          <h1 class="t-display-m c-white">${esc(e.title)}</h1>${l.rating ? stars5(l.rating) : ""}</div></div>
+      <div class="pad-x stack" style="gap:16px;padding-top:20px;padding-bottom:24px">
+        <div class="photo-strip">${photos.length ? photos.map((p) => `<span class="shot" style="background-image:url('${p}')"></span>`).join("") : poster(e, "shot")}</div>
+        <div class="qd-tags">${who.length ? SQ.tag(`With ${andList(who.slice(0, 2))}`, "social", "crew") : ""}${tilesOf(e).slice(0, 1).map((x) => SQ.tag(x, "signature")).join("")}${l.rating >= 4 ? SQ.tag("Would go again", "success", "heart") : ""}</div>
+        ${met.length ? `<span class="overline">People you met</span>${met.map((n) => `<div class="list-row">${avatar(n)}<span class="text"><span>${esc(n)}</span><span class="t-caption">Also at ${esc(e.title)}</span></span>${btn("Connect", { "data-act": "toast", "data-arg": `Sent ${n} a connect request.` }, "secondary s")}</div>`).join("")}` : ""}
+        ${l.status === "went" ? btn(l.rating ? "Change my rating" : "Rate this sidequest", { "data-act": "openRate", "data-arg": e.id }, "secondary m", "star") : ""}
+      </div>`, { cls: "bleed" });
+  } };
+
+  // Figma: 27 Wrapped. Your year, a few slides; tap to go on.
+  S.wrapped = { role: "attendee", label: "Sidequest Wrapped", render: () => {
+    const went = logEntries().filter(({ e, l }) => l.status === "went" && new Date(e.startsAt).getFullYear() === SQ.now().getFullYear());
+    const n = went.length;
+    const count = (arr) => Object.entries(arr.reduce((m, x) => ((m[x] = (m[x] || 0) + 1), m), {})).sort((a, b) => b[1] - a[1])[0];
+    const topVibe = count(went.flatMap(({ e }) => tilesOf(e).slice(0, 1)));
+    const most = count(went.flatMap(({ e, l }) => withWho(e, l)));
+    const hood = count(went.map(({ e }) => e.neighbourhood).filter(Boolean));
+    const best = went.filter((x) => x.l.rating).sort((a, b) => b.l.rating - a.l.rating)[0];
+    const day = SQ.now().getTime() - new Date(SQ.now().getFullYear(), 0, 1).getTime();
+    const every = n ? Math.max(1, Math.round(day / 864e5 / n)) : 0;
+    const slides = [
+      `<span class="t-title-m">You went out</span><span class="wr-big">${n}</span><span class="wr-line">${n === 1 ? "time" : "times"} this year.${every ? ` That's a sidequest every ${every} day${every === 1 ? "" : "s"}.` : ""}</span>
+       <div class="row start" style="gap:10px"><span class="wr-stat"><span class="overline">Top vibe</span><span class="t-title-l">${esc(topVibe ? topVibe[0] : "Still exploring")}</span></span><span class="wr-stat"><span class="overline">Most with</span><span class="t-title-l">${esc(most ? `${most[0]} · ${most[1]}` : "Solo")}</span></span></div>`,
+      `<span class="t-title-m">Your neighbourhood</span><span class="wr-line big">${esc(hood ? hood[0] : "All over town")}</span><span class="wr-line">${hood ? `${hood[1]} sidequest${hood[1] === 1 ? "" : "s"} there this year.` : "Go out a few times and we'll find your spot."}</span>`,
+      `<span class="t-title-m">Your best night</span><span class="wr-line big">${esc(best ? best.e.title : "Yet to come")}</span>${best ? stars5(best.l.rating, "dark") : '<span class="wr-line">Rate your sidequests and your favourite shows up here.</span>'}`,
+    ];
+    const i = Math.min(U().wrapStep || 0, slides.length - 1);
+    return `<div class="screen wrapped">
+      <div class="wr-bars">${slides.map((_, k) => `<span class="${k <= i ? "on" : ""}"></span>`).join("")}</div>
+      <div class="wr-top"><span class="overline">Sidequest Wrapped · ${SQ.now().getFullYear()}</span><button class="icon-btn ghost" data-back aria-label="Close">${icon("x")}</button></div>
+      <button class="wr-tap" data-act="wrapStep" data-arg="${i + 1 < slides.length ? i + 1 : 0}" aria-label="Next">${slides[i]}</button>
+      <div class="wr-foot">${btn("Share my Wrapped", { "data-act": "shareWrapped", "data-arg": `${n}|${topVibe ? topVibe[0] : ""}` }, "outline wr-share", "share")}</div>
+    </div>`;
   } };
 
   /* ===================== Profile ===================== */

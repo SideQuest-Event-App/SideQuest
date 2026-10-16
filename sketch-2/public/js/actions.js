@@ -465,10 +465,86 @@
     toast("Thanks for being honest. We only count nights people really went.");
   };
   A.openRate = (id) => {
+    const l = SQ.me().log[id] || {};
     U().quest = Number(id);
-    U().rating = { stars: 0, tags: [] };
+    U().rating = { stars: l.rating || 0, tags: l.tags || [], details: { ...(l.details || {}) }, with: [...(l.with || SQ.partyGoing(SQ.ev(id)))], photos: [...(l.photos || [])] };
     return "rate";
   };
+  A.setDetail = (arg) => {
+    const [k, n] = arg.split(":");
+    U().rating.details[k] = U().rating.details[k] === Number(n) ? 0 : Number(n);
+  };
+  A.rateWith = (name) => toggle(U().rating.with, name);
+  A.rateSomeone = () => {
+    const n = (prompt("Who else was there?") || "").trim().slice(0, 30);
+    if (n && !U().rating.with.includes(n)) U().rating.with.push(n);
+  };
+  // Photos are shrunk to 640px JPEGs so a few fit in the log
+  A.addRatePhoto = async (file) => {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 640 / Math.max(bmp.width, bmp.height));
+    const c = Object.assign(document.createElement("canvas"), { width: Math.round(bmp.width * k), height: Math.round(bmp.height * k) });
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    U().rating.photos.push(c.toDataURL("image/jpeg", 0.75));
+  };
+  A.removeRatePhoto = (i) => U().rating.photos.splice(Number(i), 1);
+  A.openMemory = (id) => {
+    U().quest = Number(id);
+    return "memory";
+  };
+  A.toggleLogCal = () => {
+    U().logTab = "Upcoming";
+    U().logCal = !U().logCal;
+  };
+  A.calMonth = (d) => {
+    U().calMonth = (U().calMonth || 0) + Number(d);
+  };
+  A.calDay = (k) => {
+    U().calDay = k;
+  };
+  A.pickZone = (z) => {
+    U().zone = U().zone === z ? null : z;
+  };
+  A.chatChannel = (c) => {
+    U().chatCh = c;
+  };
+  A.wrapStep = (i) => {
+    U().wrapStep = Number(i);
+  };
+  A.shareWrapped = (arg) => {
+    const [n, vibe] = arg.split("|");
+    return shareText(`I went on ${n} sidequests this year${vibe ? `, mostly ${vibe}` : ""}. Found on Sidequest.`);
+  };
+  // Check in: the venue's door QR (read by the browser when it can), or being there
+  const checkIn = async (id, how) => {
+    await SQ.act("checkIn", { eventId: Number(id), how });
+    return "checkin-done";
+  };
+  A.scanCheckIn = async (file) => {
+    if ("BarcodeDetector" in window) {
+      try {
+        const codes = await new window.BarcodeDetector({ formats: ["qr_code"] }).detect(await createImageBitmap(file));
+        if (!codes.length) return toast("Couldn't find a QR code in that photo. Try again, or check in by location.");
+      } catch {}
+    }
+    return checkIn(U().quest, "qr");
+  };
+  A.checkInHere = (id) => new Promise((resolve) => {
+    const e = SQ.ev(id);
+    if (!navigator.geolocation || !e.venue || e.venue.lat == null) return resolve(checkIn(id, "location"));
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const r = Math.PI / 180;
+      const km = 6371 * Math.hypot((pos.coords.longitude - e.venue.lng) * r * Math.cos(e.venue.lat * r), (pos.coords.latitude - e.venue.lat) * r);
+      if (km > 0.5) {
+        toast(`You look ${km.toFixed(1)} km away. Check in once you're at the door.`);
+        return resolve();
+      }
+      resolve(checkIn(id, "location"));
+    }, () => {
+      toast("Location is off, so we checked you in on your word.");
+      resolve(checkIn(id, "location"));
+    }, { timeout: 8000 });
+  });
   A.setStars = (n) => {
     U().rating.stars = Number(n);
   };
@@ -476,10 +552,11 @@
   A.submitRating = async () => {
     const r = U().rating;
     if (!r.stars) return toast("Tap a star rating first.");
-    const res = await SQ.act("rate", { eventId: U().quest, stars: r.stars, tags: r.tags });
+    const res = await SQ.act("rate", { eventId: U().quest, stars: r.stars, tags: r.tags, details: r.details, with: r.with, photos: r.photos });
     toast(res.learned && res.learned.length ? `Story collected. Your taste avatar learned: ${res.learned.join(", ")}.` : "Story collected. Your taste avatar just updated.");
     U().logTab = "Completed";
-    return "profile";
+    U().logCal = false;
+    return "questlog";
   };
   A.findParty = (id) => {
     const e = SQ.ev(id);
@@ -491,7 +568,7 @@
     const text = U().eventMsg.trim();
     if (!text) return;
     U().eventMsg = "";
-    await SQ.act("eventChat", { eventId: U().quest, text });
+    await SQ.act("eventChat", { eventId: U().quest, text, channel: U().chatCh || "general" });
   };
 
   // ---------- profile and switching ----------
