@@ -144,6 +144,14 @@ function save() {
   }, 500);
 }
 
+// Write now and wait for it; throws if the write fails
+function saveNow() {
+  clearTimeout(timer);
+  const done = writing.then(write);
+  writing = done.catch((err) => console.error("Save failed:", err.message));
+  return done;
+}
+
 function reset() {
   data = seed();
   replaceEvents = true;
@@ -157,6 +165,7 @@ module.exports = {
   },
   load,
   save,
+  saveNow,
   reset,
   FRIENDS,
 };
