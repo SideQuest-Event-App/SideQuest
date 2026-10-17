@@ -13,6 +13,8 @@ node server.js            # http://localhost:3001, so it can run next to Sketch 
 
 There's nothing to install. Copy `.env.example` to `.env` to turn on the AI (`ANTHROPIC_API_KEY`) and Supabase (`SUPABASE_URL`, `SUPABASE_SECRET_KEY`). Anything Sketch 2's `.env` leaves out is read from `../sketch-1/.env`, so Sketch 1's keys work here too. The server's first lines say which database it's using. Without them the app runs on keyword matching and `data/db.json`. With Supabase, run `supabase/schema.sql` once, after Sketch 1's schema.
 
+Where accounts show up in Supabase, once onboarding is finished (or a host is approved): **Authentication > Users** gets the email, with the username, name and role in its metadata, and the **Table Editor**'s `sketch2_accounts` view lists every account. The full profiles live in the `app_state` table, row 2 (`data.users` and `data.hosts`).
+
 ## Log in and sign up
 
 - **Log in:** enter your email. If an account (attendee or host) uses it, a 6-digit code is sent and you go to the code screen. The right code takes you into that account.

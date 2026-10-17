@@ -362,6 +362,16 @@ async function supabaseAuth(route, body) {
   if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).msg || "").includes("rate") ? "Too many codes sent. Wait a minute, then resend." : "The code didn't go through. Try again.");
 }
 const useSupabaseAuth = () => !!(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY);
+// A finished account also goes into Supabase's Authentication > Users, with its username and role, so it's there to see
+// (the full profile lives in app_state; the sketch2_accounts view lists it). An email that's already there is left as it is.
+async function addAuthUser(a, role) {
+  if (!useSupabaseAuth() || !a.email) return;
+  const key = process.env.SUPABASE_SECRET_KEY;
+  const headers = { apikey: key, "content-type": "application/json", ...(key.startsWith("eyJ") ? { Authorization: `Bearer ${key}` } : {}) };
+  const res = await fetch(`${process.env.SUPABASE_URL}/auth/v1/admin/users`, { method: "POST", headers,
+    body: JSON.stringify({ email: a.email, email_confirm: true, user_metadata: { sidequest_id: a.id, role, name: a.name, username: a.handle || "", phone: a.phone || "" } }) });
+  if (!res.ok && res.status !== 422) throw new Error(`Supabase Auth ${res.status}: ${await res.text()}`);
+}
 A.requestCode = async (ctx, { email }) => {
   const e = clean(email, 80).toLowerCase();
   if (!EMAIL.test(e)) throw new Error("Enter the email on your account.");
@@ -1690,6 +1700,9 @@ const server = http.createServer(async (req, res) => {
       if ((type === "setProfile" && args && args.registered) || type === "hostApprove") {
         try {
           await db.saveNow();
+          const host = type === "hostApprove";
+          const a = host ? ctx.host : ctx.user;
+          if (a) await addAuthUser(a, host ? "host" : "attendee").catch((err) => console.error("Auth user not added:", err.message));
         } catch (err) {
           console.error("Save failed:", err.message);
           return sendJSON(res, 500, { error: "Your account couldn't be saved. Try again in a moment." });
