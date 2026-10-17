@@ -801,8 +801,8 @@
       <div class="page-head"><span class="overline">Plan with friends</span>
         <div class="row" style="align-items:flex-end"><h1 class="t-display-xl">Community</h1>${iconBtn("userPlus", { "data-act": "openFriends", "aria-label": "Add friends" })}</div></div>
       <div class="comm-sec"><div class="section-header pad-x"><span>Friends</span>${friends.length ? `<button data-act="openFriends">See all ${friends.length}</button>` : ""}</div>
-        <div class="hscroll friend-row"><button class="friend-chip" data-act="openFriends"><span class="av add">${icon("userPlus")}</span>Add</button>
-          ${friends.map((f) => `<span class="friend-chip">${friendAv(f, "fr")}${esc(f.name)}</span>`).join("")}</div></div>
+        ${friends.length ? `<div class="hscroll friend-row">${friends.map((f) => `<button class="friend-chip" data-act="openFriend" data-arg="${esc(f.key)}">${friendAv(f, "fr")}${esc(f.name)}</button>`).join("")}</div>`
+          : `<p class="pad-x t-caption c-tertiary">No friends yet. Find people with the add button above.</p>`}</div>
       <div class="comm-sec"><div class="pad-x"><div class="section-header"><span>Friends’ highlights</span>${hl.length > 2 ? `<button data-act="openFriends">See all</button>` : ""}</div>
           <p class="t-body-m c-secondary">Quests your friends rated 4 stars and up</p></div>
         ${hl.length ? `<div class="hscroll">${hl.map((h) => {
@@ -822,26 +822,42 @@
       </div>`, { tabbar: attendeeTabs("parties") });
   } };
 
-  // Friends (Figma: 05 Parties · Friends): search people on Sidequest and add them
+  // Friends (Figma: 05 Parties · Friends): requests waiting on you, search people on Sidequest, and your friends
   const friendAv = (f, cls = "") => f.photo ? `<span class="av photo-av ${cls}" style="background-image:url('${f.photo}')" title="${esc(f.name)}"></span>` : avatar(f.name, cls);
   S.friends = { role: "attendee", label: "Friends", render: () => {
     const fr = U().friendsPage;
-    const mine = me().friendList;
+    const u = me();
     const q = fr.q.trim().toLowerCase().replace(/^@/, "");
-    const shown = mine.filter((f) => !q || [f.full, f.handle].some((x) => String(x || "").toLowerCase().includes(q)));
+    const list = u.friendList.filter((f) => !q || [f.full, f.handle].some((x) => String(x || "").toLowerCase().includes(q)));
     const party = SQ.d.party.members;
-    const list = fr.partyOnly ? shown.filter((f) => party.includes(f.key)) : shown;
     const found = (fr.found || []).filter((p) => !p.friend);
-    const row = (p, action) => `<div class="person divided">${friendAv(p)}<span class="text"><span>${esc(p.full || p.name)}</span><span>${esc(p.handle || "")}</span></span>${action}</div>`;
+    const row = (p, action, open) => `<div class="person divided">${open ? `<button class="person-open" data-act="openFriend" data-arg="${esc(p.key)}">` : ""}${friendAv(p)}<span class="text"><span>${esc(p.full || p.name)}</span><span>${esc(p.handle || "")}</span></span>${open ? "</button>" : ""}${action}</div>`;
+    const section = (label, items) => (items.length ? `<div><span class="overline">${label} · ${items.length}</span>${items.join("")}</div>` : "");
     return screen(`
       <div class="pad-x stack" style="gap:14px;padding-top:4px;padding-bottom:24px">
-        <div class="row" style="gap:10px"><form class="search grow" data-act="findPeople">${icon("search")}<input data-bind="friendsPage.q" data-live value="${esc(fr.q)}" placeholder="Search name or @username" aria-label="Search name or @username" autocapitalize="off"></form>
-          ${iconBtn("sliders", { "data-act": "friendsFilter", "aria-label": fr.partyOnly ? "Show all friends" : "Show only your party", "aria-pressed": String(!!fr.partyOnly) })}</div>
-        ${btn("Add friend", { "data-act": "findPeople" }, "primary", "userPlus")}
-        ${fr.searched ? `<div><span class="overline">On Sidequest</span>${found.length ? found.map((p) => row(p, btn("Add", { "data-act": "addFriend", "data-arg": p.key }, "secondary s", "plus"))).join("") : `<p class="t-caption c-tertiary" style="padding-top:8px">Nobody new on Sidequest matches “${esc(fr.searched)}”. Try their exact email or @username.</p>`}</div>` : ""}
-        <div><span class="overline">${fr.partyOnly ? "In your party" : "Your friends"} · ${list.length}</span>
-          ${list.map((f) => row(f, party.includes(f.key) ? SQ.tag("In your party", "social") : "")).join("") || `<p class="t-caption c-tertiary" style="padding-top:8px">${q ? "None of your friends match that." : "No friends yet. Search for someone above."}</p>`}</div>
+        <form class="search" data-act="findPeople">${icon("search")}<input data-bind="friendsPage.q" data-live value="${esc(fr.q)}" placeholder="Search name or @username" aria-label="Search name or @username" autocapitalize="off"></form>
+        ${btn("Search", { "data-act": "findPeople" }, "primary", "search")}
+        ${fr.searched ? `<div><span class="overline">On Sidequest</span>${found.length ? found.map((p) => row(p, p.pending ? SQ.tag("Pending", "social") : btn("Add", { "data-act": "addFriend", "data-arg": p.key }, "secondary s", "plus"))).join("") : `<p class="t-caption c-tertiary" style="padding-top:8px">Nobody new on Sidequest matches “${esc(fr.searched)}”. Try their exact email or @username.</p>`}</div>` : ""}
+        ${section("Friend requests", u.friendRequests.map((p) => row(p, `<span class="row" style="gap:6px">${btn("Accept", { "data-act": "answerFriend", "data-arg": `${p.key.slice(2)}|1` }, "primary s")}${btn("Decline", { "data-act": "answerFriend", "data-arg": `${p.key.slice(2)}|0` }, "secondary s")}</span>`)))}
+        ${section("Pending", u.pendingFriends.map((p) => row(p, SQ.tag("Pending", "social"))))}
+        <div><span class="overline">Your friends · ${list.length}</span>
+          ${list.map((f) => row(f, party.includes(f.key) ? SQ.tag("In your party", "social") : icon("chevR"), true)).join("") || `<p class="t-caption c-tertiary" style="padding-top:8px">${q ? "None of your friends match that." : "No friends yet. Search for someone above."}</p>`}</div>
       </div>`, { title: "Friends", tabbar: attendeeTabs("parties") });
+  } };
+
+  // A friend's profile: their recent sidequests, and remove friend
+  S.friend = { role: "attendee", label: "Friend", render: () => {
+    const f = U().friendProfile;
+    const recent = f.recent.map((r) => ({ ...r, e: ev(r.eventId) })).filter((r) => r.e);
+    return screen(`
+      <div class="pad-x stack" style="gap:20px;padding-top:8px;padding-bottom:24px">
+        <div class="identity">${friendAv(f, "xl")}<h1 class="t-display-m">${esc(f.full || f.name)}</h1><span class="t-data c-secondary">${esc(f.handle || "")}</span></div>
+        <div class="stack" style="gap:0"><div class="section-head"><span class="t-title-l">Recent sidequests</span></div>
+          ${recent.map(({ e, status }) => `<button class="log-row" data-act="openQuest" data-arg="${e.id}">${poster(e)}
+            <span class="text"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-data c-secondary ellipsis">${esc([dayTime(e), e.venue ? e.venue.name : e.neighbourhood].join(" · "))}</span>
+              ${SQ.tag(status === "went" ? "Went" : "Going", status === "went" ? "success" : "social")}</span>${icon("chevR")}</button>`).join("") || `<p class="t-body-m c-secondary">No sidequests yet.</p>`}</div>
+        ${btn("Remove friend", { "data-act": "removeFriend" }, "secondary", "x")}
+      </div>`, { title: "" });
   } };
 
   S.party = { role: "attendee", label: "Party: Crew Blend + vote", render: () => {
@@ -1051,7 +1067,7 @@
     const m = Math.max(1, Math.round((SQ.now() - new Date(iso)) / 6e4));
     return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
   };
-  const notifIcon = (n) => (n.requestId ? "bulb" : n.rate ? "star" : /^Update/.test(n.title) ? "clock" : n.eventId ? "spark" : "bell");
+  const notifIcon = (n) => (n.friendFrom ? "userPlus" : n.requestId ? "bulb" : n.rate ? "star" : /^Update/.test(n.title) ? "clock" : n.eventId ? "spark" : "bell");
   S.notifications = { role: "attendee", label: "Notifications", render: () => {
     const list = me().notifications.slice().reverse();
     const today = SQ.now().toDateString();

@@ -1051,6 +1051,8 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .hc-num { font-weight: 300; font-size: 80px; line-height: 80px; letter-spacing: -3.2px; }
 .headcount .btn-row .btn { flex: 1; }
 .person.divided { border-bottom: 1px solid var(--border-subtle); padding: 10px 0; }
+.person-open { all: unset; flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-md); cursor: pointer; }
+.person-open:focus-visible { outline: 2px solid var(--border-focus, currentColor); outline-offset: 2px; border-radius: 8px; }
 .line-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border-subtle); }
 .line-tabs > button { height: 44px; font-weight: 600; font-size: 16px; line-height: 22px; color: var(--text-secondary); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .line-tabs > button.on { color: var(--text-primary); border-color: var(--action-primary); }

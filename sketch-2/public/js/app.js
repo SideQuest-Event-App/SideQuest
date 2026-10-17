@@ -51,7 +51,7 @@
     vibeText: "",
     areaText: "",
     friendText: "",
-    friendsPage: { q: "", found: null, searched: "", partyOnly: false },
+    friendsPage: { q: "", found: null, searched: "" },
     maps: {}, // each map's centre and zoom, so re-renders keep the view
     search: { q: "", ran: "", loading: false, result: null, error: null },
     reqDraft: null,
@@ -191,6 +191,7 @@
   function guard(id) {
     const scr = SQ.screens[id];
     if (!scr) return "landing";
+    if (id === "friend" && !SQ.u.friendProfile) return "friends"; // a reload forgets whose profile it was
     if (OPEN.includes(id)) return id;
     if (scr.role === "host") return SQ.d.host ? id : "host-type";
     if (!SQ.d.user) return "landing";
