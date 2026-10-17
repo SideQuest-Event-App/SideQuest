@@ -238,17 +238,7 @@
     const r = await SQ.act("save", { eventId: Number(id) });
     toast(r.saved ? "Saved to your Quest Log." : "Removed from saved.");
   };
-  A.share = async (id) => {
-    const e = SQ.ev(id);
-    const text = `${e.title}, ${e.date} in ${e.neighbourhood}. ${SQ.priceLabel(e)}. Found on Sidequest.`;
-    try {
-      if (navigator.share) await navigator.share({ title: e.title, text });
-      else {
-        await navigator.clipboard.writeText(text);
-        toast("Copied. Paste it in your group chat.");
-      }
-    } catch {}
-  };
+  A.share = (id) => A.copyLink(id); // sharing an event copies its link
   A.accept = async (id) => {
     await SQ.act("accept", { eventId: Number(id) });
     U().quest = Number(id);

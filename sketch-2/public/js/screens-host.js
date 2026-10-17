@@ -386,7 +386,7 @@
         <div class="stack-sm"><h1 class="t-display-l">Your sidequest is live.</h1>
           <p class="t-body-l c-secondary">It’s in Weekly Sidequests for ${nf(fits)} matching ${fits === 1 ? "person" : "people"} from Monday.</p></div>
         ${res.requesters || res.followers ? `<div class="notice success">${icon("check")}<span>${res.requesters ? `${nf(res.requesters)} requesters were told you’re on it.` : ""}${res.followers ? ` ${nf(res.followers)} followers heard first.` : ""}</span></div>` : ""}
-        <div class="btn-row" style="gap:10px">${btn("Copy link", { "data-act": "copyLink", "data-arg": e.id }, "outline m", "link")}${btn("Share", { "data-act": "share", "data-arg": e.id }, "outline m", "share")}</div>
+        ${btn("Copy link", { "data-act": "copyLink", "data-arg": e.id }, "outline m", "link")}
       </div>`, { title: "", close: true, back: "host-quests", right: iconBtn("share", { "data-act": "share", "data-arg": e.id, "aria-label": "Share" }), footer: `<div class="footer-bar">${btn("Open event day tools", { "data-act": "openCheckin", "data-arg": e.id })}${btn("Back to your sidequests", { "data-go": "host-quests" }, "ghost m")}</div>` });
   } };
 
