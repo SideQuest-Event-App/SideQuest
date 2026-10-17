@@ -738,7 +738,7 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .sheet .btn { flex: 1; width: auto; }
 /* Vibe Mix hero */
 .mix-hero { position: relative; height: 300px; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 6px; padding: 28px var(--sp-xl) 22px; overflow: hidden; }
-.mix-hero > :not(.ph):not(.scrim) { position: relative; }
+.mix-hero > :not(.ph):not(.scrim):not(.mix-nav) { position: relative; }
 .mix-hero > .mix-nav { position: absolute; top: 36px; left: var(--sp-xl); right: var(--sp-xl); display: flex; justify-content: space-between; }
 .footer-bar.row > .btn { flex: 1; width: auto; min-width: 0; }
 .notif-row { align-items: flex-start; }
@@ -1071,3 +1071,19 @@ textarea.compose { width: 100%; resize: none; padding: 10px 14px; border-radius:
 .pop-scrim { position: absolute; inset: 0; z-index: 20; background: var(--bg-overlay); display: grid; place-items: center; padding: var(--sp-xl); }
 .pop { width: 100%; display: flex; flex-direction: column; gap: var(--sp-md); padding: var(--sp-xl); border-radius: var(--r-3xl); background: var(--bg-surface); text-align: center; box-shadow: 0 8px 32px rgba(19, 16, 27, 0.28); }
 .pop .btn { width: 100%; }
+/* A back button floating over a full-bleed map */
+.float-wrap { position: relative; }
+.float-back { position: absolute; top: 36px; left: var(--sp-xl); z-index: 2; }
+
+/* Community (Figma: 05 Parties): friends row, friends' highlights */
+.comm-sec { display: flex; flex-direction: column; gap: var(--sp-md); padding-top: 28px; }
+.friend-row { gap: 14px; }
+.friend-chip { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; color: var(--text-primary); }
+.av.fr, .av.add { width: 56px; height: 56px; font-size: 18px; }
+.av.add { background: var(--bg-raised); border: 1.5px dashed var(--border-default); color: var(--text-primary); }
+.av.add .ic { width: 22px; height: 22px; }
+.hl-card { flex: none; width: 180px; display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.hl-img { position: relative; height: 122px; border-radius: var(--r-lg); overflow: hidden; margin-bottom: 6px; }
+.hl-img > .poster { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; filter: grayscale(1); }
+.hl-img > .tag { position: absolute; top: 8px; left: 8px; }
+.hl-stars { color: var(--accent-yellow); font-size: 12px; letter-spacing: 1px; }

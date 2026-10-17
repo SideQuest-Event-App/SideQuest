@@ -43,13 +43,6 @@
     <button class="icon-btn s" data-zoom="home" aria-label="Back to home">${icon("loc")}</button>
   </div>`;
   SQ.mapLegend = () => `<div class="map-legend"><span><i class="strong"></i>Strong</span><span><i class="close"></i>Close</span><span><i class="low"></i>Worth a look</span></div>`;
-  // Centre a map's saved view on a spot, with the spot dy pixels above the centre
-  SQ.mapCenter = (id, lat, lng, dy = 0) => {
-    const v = SQ.u.maps && SQ.u.maps[id];
-    if (!v) return;
-    const pxPerDeg = (512 * 2 ** v.zoom) / 360 / Math.cos((lat * Math.PI) / 180);
-    Object.assign(v, { lat: lat - dy / pxPerDeg, lng });
-  };
 
   // Only land, parks, water and streets, in the design's colours (the map tokens in styles.css)
   const STYLE = () => {
@@ -119,15 +112,16 @@
           dragRotate: false, pitchWithRotate: false, touchPitch: false, attributionControl: { compact: true } });
         map.touchZoomRotate.disableRotation();
         map.on("moveend", () => Object.assign(SQ.u.maps[id], { lng: map.getCenter().lng, lat: map.getCenter().lat, zoom: map.getZoom() }));
-        m = live[id] = { el: ph, map, marks: [] };
+        m = live[id] = { el: ph, map, marks: [], styled: false, circles: [] };
+        // Circles can only go on once the style is in; whatever was asked for last is drawn then
+        map.once("style.load", () => {
+          m.styled = true;
+          if (m.circles.length) drawCircles(map, m.circles);
+        });
       }
       placeMarks(m, marks);
-      const circles = JSON.parse(ph.dataset.circles || "[]");
-      if (circles.length || m.map.getSource("circles")) {
-        const map = m.map;
-        if (map.isStyleLoaded()) drawCircles(map, circles);
-        else map.once("style.load", () => drawCircles(map, circles));
-      }
+      m.circles = JSON.parse(ph.dataset.circles || "[]");
+      if (m.styled && (m.circles.length || m.map.getSource("circles"))) drawCircles(m.map, m.circles);
     }
     // Maps no longer on screen let go of their WebGL context
     for (const id in live) if (!live[id].el.isConnected) {

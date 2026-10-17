@@ -12,7 +12,7 @@
     else arr.push(v);
   };
 
-  SQ.defaultReqDraft = () => ({ text: "", origin: (me() && me().origin) || "union", when: "Friday late", vibe: "", area: (me() && me().homeArea) || "", size: "2 to 4", budget: me() && me().budget != null ? String(me().budget) : "", source: "manual" });
+  SQ.defaultReqDraft = () => ({ text: "", origin: (me() && me().origin) || "union", when: ["Friday night"], vibe: [], vibeQ: "", area: (me() && me().homeArea) || "", size: "2 to 4", budget: me() && me().budget != null ? String(me().budget) : "", source: "manual" });
   const emptyDayInfo = () => ({ entrances: [""], transit: "", home: "", coatCheck: { on: false, note: "" }, reentry: { on: false, note: "" }, stepFree: { on: false, note: "" }, quietRoom: { on: false, note: "" }, payments: [], floorPlan: null });
   SQ.emptyHostDraft = (over = {}) => ({ id: null, kind: "new", eventId: null, title: "", description: "", date: "", time: "20:00", endTime: "", price: "", age: (SQ.d.host && SQ.d.host.agePolicy === "19+") ? "19+" : "All ages", vibes: [], venue: { name: SQ.d.host && SQ.d.host.type === "Venue" ? SQ.d.host.name : "", address: "" }, image: null, ticketLink: (SQ.d.host && SQ.d.host.ticketLink) || "", dayInfo: emptyDayInfo(), fromRequest: null, aiMode: null, ...over });
   SQ.emptySpotDraft = () => ({ title: "", description: "", date: "", time: "20:00", endTime: "", price: "", vibes: [], venue: { name: "", address: "" }, organizer: "", ticketLink: "", image: null });
@@ -32,12 +32,12 @@
     const f = U().signup;
     const phone = f.phone.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
     f.bad = { email: !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim()), phone: !!f.phone.trim() && phone.length !== 10 };
-    f.taken = f.linked = null;
+    f.linked = U().handleTaken = null;
     if (!f.name.trim()) return toast("Add your name to continue.");
     if (f.bad.email || f.bad.phone) return;
     const r = await SQ.act("checkSignup", f);
     if (r.linked) return void (f.linked = r.linked);
-    if (r.suggestions) return void (f.taken = r.suggestions);
+    if (r.suggestions) return void (U().handleTaken = { bind: "signup.username", list: r.suggestions });
     await SQ.act("signup", f);
     return "ob-vibes";
   };
@@ -50,8 +50,22 @@
     f.linked = null;
     return "login";
   };
-  A.pickUsername = (h) => {
-    Object.assign(U().signup, { username: h, taken: null });
+  // Usernames are checked as soon as you leave the field (sign-up and profile editing), with free ones to pick
+  const setBind = (path, v) => {
+    const keys = path.split(".");
+    keys.slice(0, -1).reduce((o, k) => o[k], U())[keys[keys.length - 1]] = v;
+  };
+  A.checkHandle = async (value, el) => {
+    const bind = el.dataset.bind;
+    U().handleTaken = null;
+    if (!value.replace(/^@+/, "").trim()) return;
+    const name = bind.startsWith("signup") ? U().signup.name : U().profileDraft.name;
+    const r = await SQ.act("checkSignup", { username: value, name });
+    if (r.suggestions) U().handleTaken = { bind, list: r.suggestions };
+  };
+  A.pickHandle = (h) => {
+    setBind(U().handleTaken.bind, h);
+    U().handleTaken = null;
   };
   // Log in: email -> 6-digit code -> whichever account (attendee or host) uses that email
   A.requestCode = async () => {
@@ -122,6 +136,26 @@
     await SQ.act("setProfile", { contactsSynced: true });
   };
   A.toggleMember = (name) => SQ.act("toggleMember", { name });
+  // Friends page: "Add friend" searches people on Sidequest by name, @username, email or phone
+  A.openFriends = () => {
+    U().friendsPage = { q: "", found: null, searched: "", partyOnly: false };
+    return "friends";
+  };
+  A.findPeople = async () => {
+    const f = U().friendsPage;
+    if (!f.q.trim()) return toast("Type a name, @username, email or phone first.");
+    f.found = (await SQ.act("findPeople", { q: f.q })).people;
+    f.searched = f.q.trim();
+  };
+  A.addFriend = async (key) => {
+    await SQ.act("addFriend", { key });
+    const f = U().friendsPage;
+    if (f.found) f.found = f.found.map((p) => (p.key === key ? { ...p, friend: true } : p));
+    toast("Added to your friends.");
+  };
+  A.friendsFilter = () => {
+    U().friendsPage.partyOnly = !U().friendsPage.partyOnly;
+  };
   A.setOrigin = (o) => SQ.act("setProfile", { origin: o });
   A.setTransit = (t) => SQ.act("setProfile", { transit: t });
   A.setBudget = (v) => SQ.act("setProfile", { budget: v });
@@ -151,9 +185,6 @@
   };
   A.mapPin = (id) => {
     U().mapSel = U().mapSel === Number(id) ? null : Number(id);
-    const e = SQ.ev(id);
-    // bring the picked pin into view, above the sheet
-    if (U().mapSel && e.venue) SQ.mapCenter("discover", e.venue.lat, e.venue.lng, 120);
     if (U().screen !== "discover-map") return "discover-map";
   };
   const shareText = async (text) => {
@@ -449,7 +480,12 @@
   };
   A.reqSet = (arg) => {
     const i = arg.indexOf(":");
-    U().reqDraft[arg.slice(0, i)] = arg.slice(i + 1);
+    const [k, v] = [arg.slice(0, i), arg.slice(i + 1)];
+    const d = U().reqDraft;
+    // Vibe and when are multiselect; where is one area, and the map moves to it
+    if (Array.isArray(d[k])) d[k] = d[k].includes(v) ? d[k].filter((x) => x !== v) : [...d[k], v];
+    else d[k] = v;
+    if (k === "area" && SQ.u.maps) delete SQ.u.maps["req-where"];
   };
   A.postRequest = async () => {
     const d = U().reqDraft;
@@ -609,6 +645,7 @@
   A.editProfile = () => {
     const u = me();
     U().profileDraft = { name: u.name || "", handle: u.handle || "" };
+    U().handleTaken = null;
     U().profileAdd = null;
     return "profile-edit";
   };
@@ -618,6 +655,7 @@
   A.saveProfile = async () => {
     const d = U().profileDraft;
     await SQ.act("setProfile", { name: d.name, handle: d.handle });
+    U().handleTaken = null;
     SQ.back();
   };
   // A small square photo, so it fits in the profile
@@ -1012,7 +1050,7 @@
   A.unclaim = (id) => SQ.act("unclaim", { requestId: Number(id) });
   // The next Friday / Saturday / Sunday / weeknight, for a request's "when"
   function nextDateFor(when) {
-    const target = { Fridays: [5], Saturdays: [6], Sundays: [0], Weeknights: [1, 2, 3, 4] }[when];
+    const target = { Fridays: [5], "Friday night": [5], Saturdays: [6], Sundays: [0], "Weekend days": [6, 0], Weeknights: [1, 2, 3, 4] }[when];
     for (let i = 1; i <= 14; i++) {
       const d = new Date(SQ.now().getTime() + i * 86400000);
       const key = d.toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
@@ -1023,7 +1061,7 @@
   A.draftFromRequest = (id) => {
     const r = SQ.req(id);
     U().poster = null;
-    U().hostDraft = SQ.emptyHostDraft({ fromRequest: r.id, title: r.text.replace(/^\w/, (c) => c.toUpperCase()), date: nextDateFor(r.when), price: r.budget == null ? "" : String(r.budget) });
+    U().hostDraft = SQ.emptyHostDraft({ fromRequest: r.id, title: r.text.replace(/^\w/, (c) => c.toUpperCase()), date: nextDateFor((r.whens || [r.when])[0]), price: r.budget == null ? "" : String(r.budget) });
     setTimeout(() => A.aiDraft().then(SQ.render), 0); // draft with AI straight away
     return "host-create";
   };

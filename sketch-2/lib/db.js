@@ -107,15 +107,22 @@ async function load() {
   return data;
 }
 
+// Accounts still in onboarding live in memory only: nothing about people who give up partway is stored
+function finished() {
+  const keep = (o) => Object.fromEntries(Object.entries(o).filter(([, x]) => x.registered !== false));
+  const users = keep(data.users);
+  return { ...data, users, hosts: keep(data.hosts), parties: Object.fromEntries(Object.entries(data.parties).filter(([id]) => users[id])) };
+}
+
 async function write() {
   if (!useSupabase) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     const tmp = DB_PATH + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(data));
+    fs.writeFileSync(tmp, JSON.stringify(finished()));
     fs.renameSync(tmp, DB_PATH); // atomic, so a crash never leaves half a file
     return;
   }
-  const { events, ...rest } = data;
+  const { events, ...rest } = finished();
   await upsert("app_state", [{ id: 2, data: rest, updated_at: new Date().toISOString() }]);
   if (replaceEvents) {
     replaceEvents = false;
