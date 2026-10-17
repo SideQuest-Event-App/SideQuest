@@ -276,7 +276,7 @@ function view(userId, hostId) {
     model: ai.MODEL,
     vocab: { VIBES, ORIGINS, AREAS, WHEN, WHEN_OUT, DAYS, CREW_SIZES, TRANSIT, RATE_TAGS, HOST_TYPES, PAST_SUGGESTIONS, FLAG_FIELDS },
     friends: db.FRIENDS,
-    user: user && { ...user, feedKey: feedKey(user), friendList: friendList(user), highlights: highlights(user) },
+    user: user && { ...user, feedKey: feedKey(user), friendList: friendList(user), highlights: highlights(user), friendRequests: requestsFor(user), pendingFriends: sentTo(user).map(person).filter(Boolean) },
     party: user && { ...d.parties[user.id], blendKey: blendKey(user) },
     host,
     organizers: organizerList(),
@@ -445,6 +445,9 @@ function person(key) {
   return u && u.registered ? { key, name: u.name.split(" ")[0], full: u.name, handle: u.handle || "", photo: u.photo } : null;
 }
 const friendList = (u) => friendKeys(u).map(person).filter(Boolean);
+// Requests this person has sent that are still waiting (as "u:" keys), and the ones waiting on them (as people)
+const sentTo = (u) => Object.values(db.data.users).filter((x) => (x.friendRequests || []).includes(u.id)).map((x) => "u:" + x.id);
+const requestsFor = (u) => (u.friendRequests || []).map((id) => person("u:" + id)).filter(Boolean);
 // Friends' highlights: what friends on Sidequest rated 4 stars and up, newest first
 const highlights = (u) => friendKeys(u).flatMap((k) => {
   const f = k.startsWith("u:") && db.data.users[k.slice(2)];
@@ -461,13 +464,53 @@ A.findPeople = (ctx, { q }) => {
     const x = k.startsWith("u:") && db.data.users[k.slice(2)];
     return p && ([p.full, p.handle.replace(/^@/, "")].some((v) => String(v || "").toLowerCase().includes(s)) || (x && (sameEmail(x.email, s) || (phoneOf(s).length === 10 && phoneOf(x.phone) === phoneOf(s)))));
   };
-  return { people: keys.filter(hit).slice(0, 8).map((k) => ({ ...person(k), friend: mine.includes(k) })) };
+  return { people: keys.filter(hit).slice(0, 8).map((k) => ({ ...person(k), friend: mine.includes(k), pending: sentTo(u).includes(k) })) };
+};
+// Adding someone on Sidequest sends them a friend request; they're a friend once they accept, and pending until then.
+// The sample friends aren't real people, so they're added straight away.
+const befriend = (u, key) => {
+  u.friends = friendKeys(u);
+  if (!u.friends.includes(key)) u.friends.push(key);
+};
+const unfriend = (u, key) => {
+  u.friends = friendKeys(u).filter((k) => k !== key);
 };
 A.addFriend = (ctx, { key }) => {
   const u = needUser(ctx);
-  if (!person(clean(key, 40)) || key === "u:" + u.id) throw new Error("That person isn't on Sidequest.");
-  u.friends = friendKeys(u);
-  if (!u.friends.includes(key)) u.friends.push(key);
+  key = clean(key, 40);
+  if (!person(key) || key === "u:" + u.id) throw new Error("That person isn't on Sidequest.");
+  const x = key.startsWith("u:") && db.data.users[key.slice(2)];
+  if (!x) return befriend(u, key);
+  if ((u.friendRequests || []).includes(x.id)) return A.answerFriend(ctx, { id: x.id, accept: true }); // they asked first
+  if (friendKeys(u).includes(key) || (x.friendRequests = x.friendRequests || []).includes(u.id)) return;
+  x.friendRequests.push(u.id);
+  notify(x, "Friend request", `${u.name || "Someone"}${u.handle ? ` (${u.handle})` : ""} wants to be friends.`, { friendFrom: u.id });
+};
+A.answerFriend = (ctx, { id, accept }) => {
+  const u = needUser(ctx);
+  u.friendRequests = (u.friendRequests || []).filter((r) => r !== id);
+  const x = db.data.users[id];
+  if (!accept || !x) return;
+  befriend(u, "u:" + x.id);
+  befriend(x, "u:" + u.id);
+  notify(x, "Friend request accepted", `You and ${u.name || "your friend"} are now friends.`, { friendFrom: u.id });
+};
+A.removeFriend = (ctx, { key }) => {
+  const u = needUser(ctx);
+  unfriend(u, key);
+  const x = String(key).startsWith("u:") && db.data.users[key.slice(2)];
+  if (x) unfriend(x, "u:" + u.id);
+};
+// A friend's profile: who they are and their recent sidequests (going or went), newest first
+A.friendProfile = (ctx, { key }) => {
+  const u = needUser(ctx);
+  if (!friendKeys(u).includes(key) || !person(key)) throw new Error("That person isn't your friend.");
+  const x = key.startsWith("u:") && db.data.users[key.slice(2)];
+  const recent = x
+    ? Object.entries(x.log).filter(([, l]) => l.status === "going" || l.status === "went").map(([id, l]) => ({ eventId: Number(id), status: l.status }))
+    : [...new Set([...Object.values(db.data.parties).map((p) => p.votes[key]), ...db.data.events.filter((e) => (e.friends || []).includes(key)).map((e) => e.id)])].filter(Boolean).map((id) => ({ eventId: id, status: "going" }));
+  const at = (r) => (db.data.events.find((e) => e.id === r.eventId) || {}).startsAt || "";
+  return { profile: { ...person(key), recent: recent.filter(at).sort((a, b) => at(b).localeCompare(at(a))).slice(0, 10) } };
 };
 A.toggleMember = (ctx, { name }) => {
   const u = needUser(ctx);

@@ -138,7 +138,7 @@
   A.toggleMember = (name) => SQ.act("toggleMember", { name });
   // Friends page: "Add friend" searches people on Sidequest by name, @username, email or phone
   A.openFriends = () => {
-    U().friendsPage = { q: "", found: null, searched: "", partyOnly: false };
+    U().friendsPage = { q: "", found: null, searched: "" };
     return "friends";
   };
   A.findPeople = async () => {
@@ -149,12 +149,27 @@
   };
   A.addFriend = async (key) => {
     await SQ.act("addFriend", { key });
+    const now = me().friendList.some((p) => p.key === key);
     const f = U().friendsPage;
-    if (f.found) f.found = f.found.map((p) => (p.key === key ? { ...p, friend: true } : p));
-    toast("Added to your friends.");
+    if (f.found) f.found = f.found.map((p) => (p.key === key ? { ...p, friend: now, pending: !now } : p));
+    toast(now ? "Added to your friends." : "Friend request sent.");
   };
-  A.friendsFilter = () => {
-    U().friendsPage.partyOnly = !U().friendsPage.partyOnly;
+  A.answerFriend = async (arg) => {
+    const [id, yes] = arg.split("|");
+    await SQ.act("answerFriend", { id, accept: yes === "1" });
+    toast(yes === "1" ? "You're friends now." : "Request declined.");
+  };
+  // A friend's profile: their recent sidequests, and remove friend
+  A.openFriend = async (key) => {
+    U().friendProfile = (await SQ.act("friendProfile", { key })).profile;
+    return "friend";
+  };
+  A.removeFriend = async () => {
+    const f = U().friendProfile;
+    if (!confirm(`Remove ${f.full || f.name} from your friends?`)) return;
+    await SQ.act("removeFriend", { key: f.key });
+    toast("Removed from your friends.");
+    SQ.back();
   };
   A.setOrigin = (o) => SQ.act("setProfile", { origin: o });
   A.setTransit = (t) => SQ.act("setProfile", { transit: t });
@@ -504,6 +519,7 @@
       SQ.act("readNotifications");
       return "requests";
     }
+    if (n.friendFrom) return A.openFriends();
   };
 
   // ---------- Quest Log, rating, event day ----------

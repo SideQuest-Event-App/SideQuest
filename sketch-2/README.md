@@ -31,7 +31,7 @@ Where accounts show up in Supabase, once onboarding is finished (or a host is ap
 | Attendee onboarding | Vibes, been to any of these, when you go out, areas (map), assemble your party, taste avatar |
 | Discover | Weekly Sidequests, Vibe Mixes, map with list sheet, search, filters |
 | Sidequest | Details, 19+ age check, all-ages notice, tickets hand-off, ticket import, ticket wallet |
-| Community | Friends, friends' highlights (what friends rated 4 stars and up), add friends, parties, party (Crew Blend, podium vote), group plan, Sidequest Requests, new request |
+| Community | Friends, friends' highlights (what friends rated 4 stars and up), friend requests (Add sends one; they're a friend once they accept, and show in Notifications and on the Friends page), a friend's profile with their recent sidequests and Remove friend, parties, party (Crew Blend, podium vote), group plan, Sidequest Requests, new request |
 | Sidequests log | Upcoming, Saved, Completed, calendar, event day, attendee chat, check-in, rating, memories, Wrapped |
 | Profile | Profile, edit profile, getting around, switch account |
 | Host onboarding | What you host, host account, verification, profile, ticketing, team, claim listings, review, demand map |
