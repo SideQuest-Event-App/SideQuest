@@ -340,7 +340,7 @@ A.signup = (ctx, { name, email, username, phone }) => {
   const linked = linkedTo(ctx, e, clean(phone, 30));
   if (linked) throw new Error(`${linked === "email" ? "Email" : "Phone"} already linked to an account. Please log in using those credentials.`);
   if (handleTaken(handleOf(username), ctx.user)) throw new Error("That username is taken. Pick another.");
-  const user = ctx.user || newUser();
+  const user = ctx.user && !ctx.user.registered ? ctx.user : newUser(); // never write over a finished account still signed in on this browser
   user.name = clean(name, 30);
   user.email = e;
   user.handle = handleOf(username) ? "@" + handleOf(username) : "";

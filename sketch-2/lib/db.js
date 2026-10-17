@@ -70,18 +70,38 @@ const upsert = (table, rows) => sb(table, { method: "POST", body: rows, prefer: 
 let data = null;
 let replaceEvents = false; // set after a reset or a fresh import, so old listings get deleted
 const savedEvents = new Map(); // event id -> the JSON last written, so only changed events are re-sent
+// Accounts get a row each in sketch2_accounts (once schema.sql has made that table), so the Table Editor shows them
+// and a server only ever writes the accounts it changed: two servers on the same Supabase can't erase each other's sign-ups
+let accountsTable = false;
+let replaceAccounts = false; // set after a reset
+const savedAccounts = new Map(); // account id -> the JSON last written
+const accountRow = (a, role) => ({ id: a.id, role, email: a.email || null, username: a.handle || null, name: a.name || null, phone: a.phone || null, created_at: a.createdAt || null, data: a });
+async function all(route) {
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const page = await sb(`${route}&limit=1000&offset=${from}`);
+    rows.push(...page);
+    if (page.length < 1000) return rows;
+  }
+}
 
 async function load() {
   if (useSupabase) {
     const [row] = await sb("app_state?id=eq.2&select=data");
-    if (row) {
-      const events = [];
-      for (let from = 0; ; from += 1000) {
-        const page = await sb(`sketch2_events?select=data&order=id&limit=1000&offset=${from}`);
-        events.push(...page.map((r) => r.data));
-        if (page.length < 1000) break;
+    const accounts = { users: {}, hosts: {} };
+    try {
+      for (const r of await all("sketch2_accounts?select=id,role,data&order=id")) {
+        accounts[r.role === "host" ? "hosts" : "users"][r.id] = r.data;
+        savedAccounts.set(r.id, JSON.stringify(r.data));
       }
-      data = { ...row.data, events };
+      accountsTable = true;
+    } catch (err) {
+      console.warn("No sketch2_accounts table yet, so accounts stay inside app_state. Run supabase/schema.sql to add it.", err.message);
+    }
+    if (row) {
+      const events = (await all("sketch2_events?select=data&order=id")).map((r) => r.data);
+      // Accounts from before the table existed are still in app_state; they move to the table on the next write
+      data = { ...row.data, users: { ...row.data.users, ...accounts.users }, hosts: { ...row.data.hosts, ...accounts.hosts }, events };
       for (const e of events) savedEvents.set(e.id, JSON.stringify(e));
     }
   } else {
@@ -122,8 +142,19 @@ async function write() {
     fs.renameSync(tmp, DB_PATH); // atomic, so a crash never leaves half a file
     return;
   }
-  const { events, ...rest } = finished();
-  await upsert("app_state", [{ id: 2, data: rest, updated_at: new Date().toISOString() }]);
+  const { events, users, hosts, ...rest } = finished();
+  if (accountsTable) {
+    if (replaceAccounts) {
+      replaceAccounts = false;
+      savedAccounts.clear();
+      await sb("sketch2_accounts?id=not.is.null", { method: "DELETE" });
+    }
+    const changed = [...Object.values(users).map((a) => accountRow(a, "attendee")), ...Object.values(hosts).map((a) => accountRow(a, "host"))]
+      .map((r) => [r, JSON.stringify(r.data)]).filter(([r, json]) => savedAccounts.get(r.id) !== json);
+    if (changed.length) await upsert("sketch2_accounts", changed.map(([r]) => r));
+    for (const [r, json] of changed) savedAccounts.set(r.id, json);
+  }
+  await upsert("app_state", [{ id: 2, data: accountsTable ? rest : { ...rest, users, hosts }, updated_at: new Date().toISOString() }]);
   if (replaceEvents) {
     replaceEvents = false;
     savedEvents.clear();
@@ -162,6 +193,7 @@ function saveNow() {
 function reset() {
   data = seed();
   replaceEvents = true;
+  replaceAccounts = true;
   save();
   return data;
 }
