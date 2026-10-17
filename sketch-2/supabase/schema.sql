@@ -4,13 +4,18 @@
 create table if not exists sketch2_events (id bigint primary key, data jsonb not null);
 alter table sketch2_events enable row level security;
 
--- Every finished account, one row each, to browse in the Table Editor. The accounts themselves live in app_state row 2
--- (data.users and data.hosts); this view only reads them. Only the dashboard and the server's secret key can see it.
-create or replace view sketch2_accounts with (security_invoker = true) as
-  select u.key as id, 'attendee' as role, u.value->>'email' as email, u.value->>'phone' as phone, u.value->>'handle' as username,
-         u.value->>'name' as name, (u.value->>'createdAt')::timestamptz as created_at
-    from app_state, jsonb_each(data->'users') u where app_state.id = 2
-  union all
-  select h.key, 'host', h.value->>'email', null, null, h.value->>'name', (h.value->>'createdAt')::timestamptz
-    from app_state, jsonb_each(data->'hosts') h where app_state.id = 2;
-revoke all on sketch2_accounts from anon, authenticated;
+-- Every finished account (attendees and hosts), one row each. The server writes a row when onboarding is done or a host
+-- is approved, and again whenever that account changes; data holds the whole profile. Only the server's secret key and
+-- the dashboard can read it (row level security is on, with no policies).
+drop view if exists sketch2_accounts;
+create table if not exists sketch2_accounts (
+  id text primary key,
+  role text not null,          -- attendee or host
+  email text,
+  username text,
+  name text,
+  phone text,
+  created_at timestamptz,
+  data jsonb not null
+);
+alter table sketch2_accounts enable row level security;
