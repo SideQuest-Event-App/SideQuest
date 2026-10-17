@@ -18,7 +18,8 @@ There's nothing to install. Copy `.env.example` to `.env` to turn on the AI (`AN
 - **Log in:** enter your email. If an account (attendee or host) uses it, a 6-digit code is sent and you go to the code screen. The right code takes you into that account.
   - With Supabase, Supabase Auth emails the code. Its "Magic Link" email template needs `{{ .Token }}` so the code is in the email.
   - Without Supabase there's no email service, so the code is shown in the side panel.
-- **Create an account:** pick "I'm going out" (attendee onboarding, 7 steps) or "I host events" (host onboarding, 8 steps). Usernames are unique; if one is taken, three free ones are suggested.
+- **Create an account:** pick "I'm going out" (attendee onboarding, 7 steps) or "I host events" (host onboarding, 8 steps). Usernames are unique. They're checked when you leave the field (at sign-up and in Edit profile), and a taken one gets three free suggestions.
+- **Nothing is stored until onboarding is done.** An account still in onboarding lives only in the server's memory, so nothing is kept about people who give up partway. It's written to the database when the attendee finishes onboarding, or when a host's account is approved.
 
 ## What's in it
 
@@ -28,13 +29,13 @@ There's nothing to install. Copy `.env.example` to `.env` to turn on the AI (`AN
 | Attendee onboarding | Vibes, been to any of these, when you go out, areas (map), assemble your party, taste avatar |
 | Discover | Weekly Sidequests, Vibe Mixes, map with list sheet, search, filters |
 | Sidequest | Details, 19+ age check, all-ages notice, tickets hand-off, ticket import, ticket wallet |
-| Community | Parties, party (Crew Blend, podium vote), group plan, Sidequest Requests, new request |
+| Community | Friends, friends' highlights (what friends rated 4 stars and up), add friends, parties, party (Crew Blend, podium vote), group plan, Sidequest Requests, new request |
 | Sidequests log | Upcoming, Saved, Completed, calendar, event day, attendee chat, check-in, rating, memories, Wrapped |
 | Profile | Profile, edit profile, getting around, switch account |
 | Host onboarding | What you host, host account, verification, profile, ticketing, team, claim listings, review, demand map |
 | Host tools | Demand insights (with a map), request detail, draft test, create a sidequest (2 steps), published, your sidequests (Live, Drafts, Past), event day tools, insights (Overview, Recap), audience, inbox, host profile |
 
-**Every map is a real, interactive map:** drag to pan, scroll or pinch to zoom, double-tap to zoom in, and use the zoom and home buttons. Pins open what they stand for.
+**Every map is a real, interactive map:** drag to pan, scroll or pinch to zoom, double-tap to zoom in, and use the zoom and home buttons. Pins open what they stand for, and the map stays where it is when you tap one. On a computer, the sideways rows on Discover scroll with the mouse wheel or by dragging.
 
 - The maps use [MapLibre](https://maplibre.org) with OpenStreetMap data from [OpenFreeMap](https://openfreemap.org), which needs no API key. Both load from the internet, so the maps stay blank offline.
 - The map style shows only land, parks, water and streets, in the design's map colours. It has no shops, restaurants, transit stops or place names.

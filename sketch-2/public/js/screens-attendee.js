@@ -125,7 +125,7 @@
         <div class="title-block"><h1 class="t-display-l">How are you using Sidequest?</h1><p class="t-body-l">One login for both sides. You can switch between accounts any time, like Instagram.</p></div>
         ${card("attendee", "I’m going out", "Sidequests picked for my taste, friends to go with.", "performer", "near")}
         ${card("host", "I host events", "See what people near me want, then plan it.", "bokeh-1", "megaphone")}
-      </div>`, { footer: footer(btn("Continue", { "data-act": "roleNext" })) });
+      </div>`, { title: "", footer: footer(btn("Continue", { "data-act": "roleNext" })) });
   } };
 
   S.login = { role: "attendee", label: "Log in: email", render: () => {
@@ -154,14 +154,20 @@
       </form>`, { footer: footer(btn("Log in", { "data-act": "verifyCode" }), note("Didn’t get it? Check spam, or resend after the timer.")) });
   } };
 
+  // The username field: checked when you leave it; a taken one turns red with three free ones to tap
+  const handleField = (bind, value, placeholder, extra = {}) => {
+    const t = U().handleTaken && U().handleTaken.bind === bind && U().handleTaken.list;
+    return `${field("Username", bind, value, "text", placeholder, { autocapitalize: "off", spellcheck: "false", "data-change": "checkHandle", ...extra, error: t && "That username is taken. Try one of these:" })}
+      ${t ? `<div class="chips">${t.map((h) => `<button type="button" class="chip outline" data-act="pickHandle" data-arg="${esc(h)}">${esc(h)}</button>`).join("")}</div>` : ""}`;
+  };
+
   S.signup = { role: "attendee", label: "Sign up", render: () => {
     const f = U().signup;
     return screen(`
       ${obHead(1, "Make your account")}
       <form class="ob-body" style="gap:14px" data-act="signup">
         ${field("Name", "signup.name", f.name, "text", "Alex Morgan", { autocomplete: "name" })}
-        ${field("Username", "signup.username", f.username, "text", "alex.out", { autocomplete: "username", help: "Friends find you by your username.", error: f.taken && "That username is taken. Try one of these:" })}
-        ${f.taken && f.taken.length ? `<div class="chips">${f.taken.map((h) => `<button class="chip outline" data-act="pickUsername" data-arg="${esc(h)}">${esc(h)}</button>`).join("")}</div>` : ""}
+        ${handleField("signup.username", f.username, "alex.out", { autocomplete: "username", help: "Friends find you by your username." })}
         ${field("Email", "signup.email", f.email, "email", "alex@example.com", { icon: "mail", autocomplete: "email", inputmode: "email", help: "Use an email you can open. Your login codes are sent there, and you can't log back in without it.", error: f.bad && f.bad.email && "Invalid email format" })}
         ${field("Phone", "signup.phone", f.phone, "tel", "(416) 555-0144", { icon: "phone", autocomplete: "tel", error: f.bad && f.bad.phone && "Invalid phone number" })}
       </form>
@@ -425,7 +431,8 @@
     }
     return screen(`${discoverHead()}
       <div class="disc-body">
-        <div class="pad-x stack-sm">${viewToggle("list")}<span class="t-caption c-tertiary">${list.length} sidequest${list.length === 1 ? "" : "s"} this week</span></div>
+        <div class="pad-x stack-sm"><form class="search" data-act="search" style="margin-bottom:6px">${icon("search")}<input data-bind="search.q" value="${esc(U().search.q)}" placeholder="What are you up for?" aria-label="Search sidequests" enterkeyhint="search"></form>
+          ${viewToggle("list")}<span class="t-caption c-tertiary">${list.length} sidequest${list.length === 1 ? "" : "s"} this week</span></div>
         <div class="chips scroll-x disc-chips pad-x">${chipRow()}</div>
         ${U().feedError ? `<div class="pad-x"><div class="notice hot">${icon("x")}<span>${esc(U().feedError)}</span></div></div>` : ""}
         ${body}
@@ -788,18 +795,53 @@
     const opts = voteOptions().length;
     const status = p.locked && ev(p.locked) ? SQ.tag(`Locked in · ${ev(p.locked).title}`, "social", "check")
       : SQ.tag(opts ? `Vote open · ${opts} pick${opts === 1 ? "" : "s"} nominated` : "No picks yet", "social", "check");
+    const friends = me().friendList;
+    const hl = me().highlights.filter((h) => ev(h.eventId));
     return screen(`
-      <div class="page-head"><span class="overline">Plan with friends</span><h1 class="t-display-xl">Parties</h1>
-        <p class="t-body-l c-secondary">Each party blends everyone's taste into shared themes and group picks.</p></div>
-      <div class="pad-x stack" style="gap:14px;padding-top:22px;padding-bottom:24px">
+      <div class="page-head"><span class="overline">Plan with friends</span>
+        <div class="row" style="align-items:flex-end"><h1 class="t-display-xl">Community</h1>${iconBtn("userPlus", { "data-act": "openFriends", "aria-label": "Add friends" })}</div></div>
+      <div class="comm-sec"><div class="section-header pad-x"><span>Friends</span>${friends.length ? `<button data-act="openFriends">See all ${friends.length}</button>` : ""}</div>
+        <div class="hscroll friend-row"><button class="friend-chip" data-act="openFriends"><span class="av add">${icon("userPlus")}</span>Add</button>
+          ${friends.map((f) => `<span class="friend-chip">${friendAv(f, "fr")}${esc(f.name)}</span>`).join("")}</div></div>
+      <div class="comm-sec"><div class="pad-x"><div class="section-header"><span>Friends’ highlights</span>${hl.length > 2 ? `<button data-act="openFriends">See all</button>` : ""}</div>
+          <p class="t-body-m c-secondary">Quests your friends rated 4 stars and up</p></div>
+        ${hl.length ? `<div class="hscroll">${hl.map((h) => {
+          const e = ev(h.eventId);
+          return `<button class="hl-card" data-act="openQuest" data-arg="${e.id}"><span class="hl-img">${poster(e)}${SQ.tag(isPast(e) ? "Rated" : isWeekend(e) ? "This week" : "Coming up", "photo")}</span>
+            <span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-data c-secondary ellipsis">${esc(whenLabel(e))} · ${esc(e.neighbourhood || "")}</span>
+            <span class="row start" style="gap:6px">${avatar(h.friend, "xs")}<span class="t-caption">${esc(h.friend)}</span><span class="hl-stars">${"★".repeat(h.stars)}</span></span></button>`;
+        }).join("")}</div>` : `<p class="pad-x t-caption c-tertiary">When a friend rates a sidequest 4 stars or more, it shows up here.</p>`}</div>
+      <div class="pad-x stack" style="gap:14px;padding-top:28px;padding-bottom:24px">
+        <div class="section-header"><span>Parties</span><button data-act="toast" data-arg="One party per person for now. Change who's in it from the party's settings.">New party</button></div>
         <button class="party-card" data-go="party">
           <span class="row start" style="gap:8px">${faces(people, 5, true)}${people.length > 5 ? `<span class="av neutral more-n">+${people.length - 5}</span>` : ""}<span class="grow"></span>${icon("arrow")}</span>
           <span class="t-title-l">${esc(p.name)}</span>
           <span class="t-body-m c-secondary">${people.length} ${people.length === 1 ? "person" : "people"}${sharedTiles().length ? ` · into ${esc(sharedTiles().slice(0, 3).join(", "))}` : ""}</span>
           ${status}
         </button>
-        ${btn("New party", { "data-act": "toast", "data-arg": "One party per person for now. Change who's in it from the party's settings." }, "outline", "plus")}
       </div>`, { tabbar: attendeeTabs("parties") });
+  } };
+
+  // Friends (Figma: 05 Parties · Friends): search people on Sidequest and add them
+  const friendAv = (f, cls = "") => f.photo ? `<span class="av photo-av ${cls}" style="background-image:url('${f.photo}')" title="${esc(f.name)}"></span>` : avatar(f.name, cls);
+  S.friends = { role: "attendee", label: "Friends", render: () => {
+    const fr = U().friendsPage;
+    const mine = me().friendList;
+    const q = fr.q.trim().toLowerCase().replace(/^@/, "");
+    const shown = mine.filter((f) => !q || [f.full, f.handle].some((x) => String(x || "").toLowerCase().includes(q)));
+    const party = SQ.d.party.members;
+    const list = fr.partyOnly ? shown.filter((f) => party.includes(f.key)) : shown;
+    const found = (fr.found || []).filter((p) => !p.friend);
+    const row = (p, action) => `<div class="person divided">${friendAv(p)}<span class="text"><span>${esc(p.full || p.name)}</span><span>${esc(p.handle || "")}</span></span>${action}</div>`;
+    return screen(`
+      <div class="pad-x stack" style="gap:14px;padding-top:4px;padding-bottom:24px">
+        <div class="row" style="gap:10px"><form class="search grow" data-act="findPeople">${icon("search")}<input data-bind="friendsPage.q" data-live value="${esc(fr.q)}" placeholder="Search name or @username" aria-label="Search name or @username" autocapitalize="off"></form>
+          ${iconBtn("sliders", { "data-act": "friendsFilter", "aria-label": fr.partyOnly ? "Show all friends" : "Show only your party", "aria-pressed": String(!!fr.partyOnly) })}</div>
+        ${btn("Add friend", { "data-act": "findPeople" }, "primary", "userPlus")}
+        ${fr.searched ? `<div><span class="overline">On Sidequest</span>${found.length ? found.map((p) => row(p, btn("Add", { "data-act": "addFriend", "data-arg": p.key }, "secondary s", "plus"))).join("") : `<p class="t-caption c-tertiary" style="padding-top:8px">Nobody new on Sidequest matches “${esc(fr.searched)}”. Try their exact email or @username.</p>`}</div>` : ""}
+        <div><span class="overline">${fr.partyOnly ? "In your party" : "Your friends"} · ${list.length}</span>
+          ${list.map((f) => row(f, party.includes(f.key) ? SQ.tag("In your party", "social") : "")).join("") || `<p class="t-caption c-tertiary" style="padding-top:8px">${q ? "None of your friends match that." : "No friends yet. Search for someone above."}</p>`}</div>
+      </div>`, { title: "Friends", tabbar: attendeeTabs("parties") });
   } };
 
   S.party = { role: "attendee", label: "Party: Crew Blend + vote", render: () => {
@@ -919,8 +961,8 @@
     const mine = u.myRequests.includes(r.id);
     const voted = mine || u.votedRequests.includes(r.id);
     const action = r.status === "live" ? `<button data-act="openQuest" data-arg="${r.eventId}" class="tag-btn">${SQ.tag("Booked", "success", "check")}</button>`
-      : voted ? btn(mine ? "Yours" : "You're in", { "data-act": "upvote", "data-arg": r.id, "aria-pressed": "true", disabled: mine }, "primary s", "check")
-      : btn("Me too", { "data-act": "upvote", "data-arg": r.id, "aria-pressed": "false" }, "secondary s", "plus");
+      : voted ? btn(mine ? "Yours" : "Interested", { "data-act": "upvote", "data-arg": r.id, "aria-pressed": "true", disabled: mine }, "primary s", "check")
+      : btn("I’m interested", { "data-act": "upvote", "data-arg": r.id, "aria-pressed": "false" }, "secondary s", "plus");
     return `<div class="req-card">
       <span class="req-count"><span class="t-display-m">${r.votes}</span><span class="t-caption c-secondary">asked</span></span>
       <span class="stack" style="gap:4px;flex:1;min-width:0"><span class="t-title-m">${esc(r.text)}</span><span class="t-body-m c-secondary">${requestMeta(r)}</span><span style="margin-top:6px">${action}</span></span>
@@ -940,27 +982,39 @@
       </div>`, { tabbar: attendeeTabs("requests") });
   } };
 
-  const REQ_WHEN = ["Weeknights", "Friday late", "Weekend days"];
+  SQ.budgetLabel = (b) => (b >= 60 ? "Any" : b ? `Under $${b}` : "Free");
+  const REQ_WHEN = ["Weeknights", "Friday night", "Weekend days"];
   S["request-new"] = { role: "attendee", label: "Request a quest", render: () => {
     const d = U().reqDraft;
     const u = me();
-    const tiles = [...new Set([...SQ.pickedTiles(u), ...TILES.map((t) => t[0])])].slice(0, 4);
+    // Vibe tags: search them, pick as many as fit; yours come first
+    const vq = d.vibeQ.trim().toLowerCase();
+    const vibes = [...new Set([...d.vibe, ...u.vibes, ...V().VIBES])].filter((v) => d.vibe.includes(v) || (vq ? v.toLowerCase().includes(vq) : true)).slice(0, vq ? 12 : Math.max(6, d.vibe.length));
+    const hood = SQ.HOODS.find((h) => h[0] === d.area);
     const wheres = [...new Set([u.homeArea, ...(u.areas || []), "Kensington"].filter(Boolean))].slice(0, 2).concat("Anywhere");
     const budget = d.budget === "" ? 60 : Number(d.budget);
     const words = (s) => (s.toLowerCase().match(/[a-z]{5,}/g) || []).filter((w) => !["night", "nights", "party", "event", "class"].includes(w));
     const mineWords = words(d.text);
     const asked = mineWords.length ? SQ.d.requests.filter((r) => r.status !== "live" && words(r.text).some((w) => mineWords.includes(w))).sort((a, b) => b.votes - a.votes)[0] : null;
-    const group = (label, list, key) => `<span class="overline">${label}</span><div class="chips wrap">${list.map((x) => chip(x, d[key] === x, { "data-act": "reqSet", "data-arg": `${key}:${x}` })).join("")}</div>`;
+    const chips = (list, key) => `<div class="chips wrap">${list.map((x) => chip(x, [].concat(d[key]).includes(x), { "data-act": "reqSet", "data-arg": `${key}:${x}` })).join("")}</div>`;
+    const group = (label, list, key) => `<span class="overline">${label}</span>${chips(list, key)}`;
     return screen(`
       <div class="pad-x stack" style="gap:16px;padding-top:4px;padding-bottom:24px">
         ${field("What would you go to?", "reqDraft.text", d.text, "text", "Late-night ramen pop-up", { "data-change": "render" })}
         ${d.source === "gap" ? `<div class="notice">${icon("search")}<span>From your search: nothing listed fit this yet.</span></div>` : ""}
-        ${group("Vibe", tiles, "vibe")}
-        ${group("When", REQ_WHEN, "when")}
+        <div class="section-head"><span class="overline">Vibe</span><span class="t-caption c-secondary">Pick any</span></div>
+        <div class="search">${icon("search")}<input data-bind="reqDraft.vibeQ" data-live value="${esc(d.vibeQ)}" placeholder="Search tags" aria-label="Search vibe tags"></div>
+        ${vibes.length ? chips(vibes, "vibe") : `<p class="t-caption c-tertiary">No tags match that.</p>`}
+        <div class="section-head"><span class="overline">When</span><span class="t-caption c-secondary">Pick any</span></div>
+        ${chips(REQ_WHEN, "when")}
         ${group("Where", wheres, "area")}
+        ${SQ.mapView("req-where", { labels: hood ? [hood[0]] : true, style: "height:180px;border-radius:20px",
+          view: hood ? { lat: hood[1], lng: hood[2], zoom: 13.2 } : { lat: 43.6532, lng: -79.3832, zoom: 10.8 },
+          pins: hood ? [{ lat: hood[1], lng: hood[2], tier: "strong", selected: true, label: hood[0] }] : [],
+          circles: hood ? [{ lat: hood[1], lng: hood[2], km: hood[4], on: true }] : [] })}
         <div class="stack" style="gap:10px">
-          <div class="section-head"><span class="overline">Budget</span><span class="t-data">${budget >= 60 ? "Any" : budget ? `Under $${budget}` : "Free"}</span></div>
-          <input type="range" class="range" style="--fill:${(budget / 60) * 100}%" min="0" max="60" step="5" value="${budget}" data-bind="reqDraft.budget" data-change="noop" aria-label="Budget">
+          <div class="section-head"><span class="overline">Budget</span><span class="t-data" data-out="reqDraft.budget">${SQ.budgetLabel(budget)}</span></div>
+          <input type="range" class="range" style="--fill:${(budget / 60) * 100}%" min="0" max="60" step="5" value="${budget}" data-bind="reqDraft.budget" data-format="budgetLabel" aria-label="Budget">
           <div class="section-head"><span class="t-data c-secondary">$0</span><span class="t-data c-secondary">$60</span></div>
         </div>
         ${asked ? `<span class="overline">Already asked · back one instead</span>${requestCard(asked)}` : ""}
@@ -1317,7 +1371,7 @@
       <div class="pad-x stack" style="gap:16px;padding-top:4px;padding-bottom:24px">
         <div class="row start" style="gap:14px">${meAvatar(u, "l")}<label class="btn btn-secondary s" style="cursor:pointer">${icon("camera")}Change photo<input type="file" accept="image/*" data-upload="profilePhoto" class="sr-only"></label></div>
         ${field("Name", "profileDraft.name", d.name, "text", "Your name", { autocomplete: "name" })}
-        ${field("Username", "profileDraft.handle", d.handle, "text", "@you", { autocapitalize: "off", spellcheck: "false" })}
+        ${handleField("profileDraft.handle", d.handle, "you")}
         <span class="overline">Your vibes · tap to remove</span>
         <div class="chips">${tiles.map((t) => chip(t, true, { "data-act": "toggleTile", "data-arg": t }, "x")).join("")}<button class="chip outline" data-act="profileAdd" data-arg="vibes" aria-pressed="${add === "vibes"}">${icon(add === "vibes" ? "x" : "plus")}${add === "vibes" ? "Done adding" : "Add vibe"}</button></div>
         ${add === "vibes" ? `<div class="chips">${TILES.map((t) => t[0]).filter((t) => !tiles.includes(t)).map((t) => chip(t, false, { "data-act": "toggleTile", "data-arg": t }, "plus")).join("")}</div>` : ""}

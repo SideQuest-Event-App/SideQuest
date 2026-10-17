@@ -182,7 +182,8 @@
       .reduce((keep, e) => (keep.length < 10 && keep.every((x) => Math.hypot(x.venue.lat - e.venue.lat, x.venue.lng - e.venue.lng) > 0.004) ? [...keep, e] : keep), []) // spread out, so one busy venue doesn't hide the rest
       .map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, tier: (e.vibes || []).some((v) => vibes.includes(v)) ? "strong" : "close", label: e.title }));
     return screen(`
-      ${SQ.mapView("host-ready", { pins, home: hood ? area : null, labels: true, view: hood ? { lat: hood[1] - 0.0068, lng: hood[2] + 0.0106, zoom: 12.4 } : undefined, style: "height:360px" })}
+      <div class="float-wrap">${SQ.mapView("host-ready", { pins, home: hood ? area : null, labels: true, view: hood ? { lat: hood[1] - 0.0068, lng: hood[2] + 0.0106, zoom: 12.4 } : undefined, style: "height:360px" })}
+        <div class="float-back">${iconBtn("back", { "data-back": "", "aria-label": "Back" }, "glass s")}</div></div>
       <div class="ob-body" style="gap:14px;padding-top:24px">
         <span class="t-overline">Your demand map is ready</span>
         <span class="big-num">${people.toLocaleString("en-US")}</span>
@@ -299,7 +300,7 @@
   SQ.tweakFor = (d) => {
     const r = req(d.fromRequest);
     if (r && r.budget != null && d.price !== "" && Number(d.price) > r.budget) return { text: `Drop the price to $${r.budget}. Most requesters asked for under $${r.budget}.`, set: { price: String(r.budget) } };
-    if (d.time && d.time >= "22:00") return { text: `Start at 9 PM instead of ${fmt12(d.time).replace(" PM", "")}. Requesters who go out ${r && r.when !== "Any time" ? `on ${r.when.replace(/ late$/, "")}s`.replace(/ss$/, "s") : "late"} mostly arrive before ${fmt12(d.time).replace(" PM", "")}.`, set: { time: "21:00" } };
+    if (d.time && d.time >= "22:00") return { text: `Start at 9 PM instead of ${fmt12(d.time).replace(" PM", "")}. Requesters ${r && r.when !== "Any time" ? `who asked for ${r.when.toLowerCase()}` : "who go out late"} mostly arrive before ${fmt12(d.time).replace(" PM", "")}.`, set: { time: "21:00" } };
     if (!(d.vibes || []).length) return { text: "Add vibe tags so it reaches people whose taste fits.", go: "host-create" };
     return null;
   };

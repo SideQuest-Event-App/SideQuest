@@ -32,7 +32,7 @@ const PORT = process.env.PORT || 3001; // Sketch 1 uses 3000, so both can run at
 const VIBES = ["Live music", "Jazz", "Indie gigs", "Comedy", "Dance", "Electronic", "Records & vinyl", "Film nights", "Zines & print", "Art & making", "Photography", "Writing & poetry", "Tech & coding", "Anime & cosplay", "Outdoors", "Run & ride", "Climbing", "Games & social", "Food & drink", "Markets", "Wellness"];
 const ORIGINS = { union: "Downtown (Union)", finch: "North York (Finch)", kennedy: "Scarborough (Kennedy)", kipling: "Etobicoke (Kipling)" };
 const AREAS = ["West End", "Downtown", "East End", "Midtown", "North York", "Scarborough", "Etobicoke"];
-const WHEN = ["Weeknights", "Fridays", "Saturdays", "Sundays", "Any time", "Friday late", "Weekend days"];
+const WHEN = ["Weeknights", "Fridays", "Saturdays", "Sundays", "Any time", "Friday night", "Weekend days"];
 const WHEN_OUT = ["Mornings", "Afternoons", "Evenings", "Late nights"]; // onboarding: when you go out
 const DAYS = ["Weekdays", "Weekends", "Both"];
 const CREW_SIZES = ["Solo", "2 to 4", "5+"];
@@ -276,7 +276,7 @@ function view(userId, hostId) {
     model: ai.MODEL,
     vocab: { VIBES, ORIGINS, AREAS, WHEN, WHEN_OUT, DAYS, CREW_SIZES, TRANSIT, RATE_TAGS, HOST_TYPES, PAST_SUGGESTIONS, FLAG_FIELDS },
     friends: db.FRIENDS,
-    user: user && { ...user, feedKey: feedKey(user) },
+    user: user && { ...user, feedKey: feedKey(user), friendList: friendList(user), highlights: highlights(user) },
     party: user && { ...d.parties[user.id], blendKey: blendKey(user) },
     host,
     organizers: organizerList(),
@@ -304,15 +304,22 @@ const needHost = (ctx) => {
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const sameEmail = (a, b) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 // Usernames are unique, ignoring case and the leading @ (the sample friends' handles count as taken too)
-const handleOf = (s) => clean(s, 30).replace(/^@+/, "").toLowerCase();
-const handleTaken = (h, except) => !!h && (Object.values(db.data.users).some((u) => u !== except && handleOf(u.username) === h) || Object.values(db.FRIENDS).some((f) => handleOf(f.handle) === h));
-// Three free usernames built from the one asked for (or the name)
+const handleOf = (s) => clean(s, 30).replace(/^@+/, "").toLowerCase().replace(/[^a-z0-9._]/g, "");
+const handleTaken = (h, except) => !!h && (Object.values(db.data.users).some((u) => u !== except && handleOf(u.handle || u.username) === h) || Object.values(db.FRIENDS).some((f) => handleOf(f.handle) === h));
+// Three free usernames: the taken one with a number, their name joined to it, and their name on its own
 function handleIdeas(want, name, except) {
-  const base = (handleOf(want) || clean(name, 30).toLowerCase()).replace(/[^a-z0-9._]/g, "").replace(/^\.+|\.+$/g, "") || "sidequester";
-  const first = clean(name, 30).toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9]/g, "");
-  const tries = [`${base}.out`, `${base}.to`, first && !base.startsWith(first) ? `${first}.${base}` : "", `${base}${new Date().getFullYear() % 100}`];
-  for (let n = 2; tries.length < 40; n++) tries.push(`${base}${n}`);
-  return [...new Set(tries.filter(Boolean))].filter((h) => !handleTaken(h, except)).slice(0, 3).map((h) => "@" + h);
+  const slug = (s) => s.toLowerCase().replace(/[^a-z0-9._]+/g, ".").replace(/^\.+|\.+$/g, "");
+  const full = slug(clean(name, 30)) || "sidequester";
+  const [first, last] = full.split(".");
+  const base = slug(handleOf(want)) || full;
+  const free = (h) => h && !handleTaken(h, except);
+  const numbered = (b, from = 2) => { for (let n = from; ; n++) if (free(`${b}${n}`)) return `${b}${n}`; };
+  // Name + username: the part of their name the username doesn't already have, in front (first name) or behind (last name)
+  const extra = [first, last].find((p) => p && !base.split(".").includes(p));
+  const combo = extra === first ? `${first}.${base}` : extra ? `${base}.${extra}` : "";
+  const ideas = new Set([numbered(base), free(combo) ? combo : numbered(combo || `${base}.${first}`), free(full) ? full : numbered(full)]);
+  for (let n = 2; ideas.size < 3; n++) ideas.add(numbered(base, n));
+  return [...ideas].map((h) => "@" + h);
 }
 // A phone is its digits, without a leading 1 (so "+1 416..." and "(416)..." match)
 const phoneOf = (s) => String(s || "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
@@ -336,7 +343,7 @@ A.signup = (ctx, { name, email, username, phone }) => {
   const user = ctx.user || newUser();
   user.name = clean(name, 30);
   user.email = e;
-  user.username = clean(username, 30).replace(/^@?/, "@").replace(/^@$/, "");
+  user.handle = handleOf(username) ? "@" + handleOf(username) : "";
   user.phone = clean(phone, 30);
   return { userId: user.id };
 };
@@ -408,12 +415,49 @@ A.setProfile = (ctx, args) => {
   if (args.maxMinutes !== undefined) u.maxMinutes = Number(args.maxMinutes) || null;
   if (args.name !== undefined) u.name = clean(args.name, 30) || u.name;
   if (args.adult !== undefined) u.adult = !!args.adult;
-  if (args.handle !== undefined) u.handle = clean(args.handle, 30) ? `@${clean(args.handle, 30).replace(/^@+/, "").replace(/[^a-zA-Z0-9._]/g, "")}` : "";
+  if (args.handle !== undefined) {
+    const h = handleOf(args.handle);
+    if (handleTaken(h, u)) throw new Error("That username is taken. Pick another.");
+    u.handle = h ? "@" + h : "";
+  }
   if (typeof args.photo === "string" && /^data:image\/jpeg;base64,/.test(args.photo) && args.photo.length < 120000) u.photo = args.photo;
   if (args.registered) {
     if (u.vibes.length < 2) throw new Error("Pick at least 2 vibes first.");
     u.registered = true;
   }
+};
+// --- friends: the sample friends (keyed by first name) and other people on Sidequest (keyed "u:" + their id) ---
+// Until someone adds a friend themselves, their friends are their contacts (once synced) or their party
+const friendKeys = (u) => u.friends || (u.contactsSynced ? Object.keys(db.FRIENDS) : [...((db.data.parties[u.id] || {}).members || [])]);
+function person(key) {
+  if (db.FRIENDS[key]) return { key, name: key, full: db.FRIENDS[key].full, handle: db.FRIENDS[key].handle };
+  const u = key.startsWith("u:") && db.data.users[key.slice(2)];
+  return u && u.registered ? { key, name: u.name.split(" ")[0], full: u.name, handle: u.handle || "", photo: u.photo } : null;
+}
+const friendList = (u) => friendKeys(u).map(person).filter(Boolean);
+// Friends' highlights: what friends on Sidequest rated 4 stars and up, newest first
+const highlights = (u) => friendKeys(u).flatMap((k) => {
+  const f = k.startsWith("u:") && db.data.users[k.slice(2)];
+  return f ? Object.entries(f.log).filter(([, l]) => l.rating >= 4).map(([id, l]) => ({ eventId: Number(id), friend: f.name.split(" ")[0], stars: l.rating, at: l.ratedAt || "" })) : [];
+}).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 12);
+A.findPeople = (ctx, { q }) => {
+  const u = needUser(ctx);
+  const s = clean(q, 60).toLowerCase().replace(/^@/, "");
+  if (!s) return { people: [] };
+  const mine = friendKeys(u);
+  const keys = [...Object.keys(db.FRIENDS), ...Object.values(db.data.users).filter((x) => x !== u && x.registered).map((x) => "u:" + x.id)];
+  const hit = (k) => {
+    const p = person(k);
+    const x = k.startsWith("u:") && db.data.users[k.slice(2)];
+    return p && ([p.full, p.handle.replace(/^@/, "")].some((v) => String(v || "").toLowerCase().includes(s)) || (x && (sameEmail(x.email, s) || (phoneOf(s).length === 10 && phoneOf(x.phone) === phoneOf(s)))));
+  };
+  return { people: keys.filter(hit).slice(0, 8).map((k) => ({ ...person(k), friend: mine.includes(k) })) };
+};
+A.addFriend = (ctx, { key }) => {
+  const u = needUser(ctx);
+  if (!person(clean(key, 40)) || key === "u:" + u.id) throw new Error("That person isn't on Sidequest.");
+  u.friends = friendKeys(u);
+  if (!u.friends.includes(key)) u.friends.push(key);
 };
 A.toggleMember = (ctx, { name }) => {
   const u = needUser(ctx);
@@ -537,9 +581,10 @@ A.postRequest = (ctx, args) => {
     time: new Date().toISOString(),
     text,
     origin: ORIGINS[args.origin] ? args.origin : u.origin || "",
-    when: WHEN.includes(args.when) ? args.when : "Any time",
+    // When and vibe can each be several picks; when and vibe keep them as one line for display
+    whens: [].concat(args.when || []).filter((w) => WHEN.includes(w)),
+    vibes: [].concat(args.vibe || []).map((v) => clean(v, 40)).filter(Boolean).slice(0, 6),
     area: clean(args.area, 40),
-    vibe: clean(args.vibe, 40),
     size,
     budget: budgetOf(args.budget),
     source: args.source === "gap" ? "gap" : "manual", // "gap" = came from a search nothing fit
@@ -549,6 +594,8 @@ A.postRequest = (ctx, args) => {
     claimedBy: null,
     eventId: null,
   };
+  r.when = r.whens.join(", ") || "Any time";
+  r.vibe = r.vibes.join(", ");
   list.push(r);
   u.myRequests.push(r.id);
   logVote(r, u);
@@ -1199,12 +1246,13 @@ function hostReport(host) {
 
   // Heatmap: when and where people asked to go out (request votes by starting point and day)
   const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const daysOf = { Weeknights: [0, 1, 2, 3], Fridays: [4], Saturdays: [5], Sundays: [6], "Any time": [0, 1, 2, 3, 4, 5, 6] };
+  const daysOf = { Weeknights: [0, 1, 2, 3], Fridays: [4], "Friday night": [4], Saturdays: [5], Sundays: [6], "Weekend days": [5, 6], "Any time": [0, 1, 2, 3, 4, 5, 6] };
   const heat = Object.keys(ORIGINS).map((o) => ({ origin: o, days: DAYS.map(() => 0) }));
   for (const r of d.requests) {
     const rowH = heat.find((h) => h.origin === r.origin);
     if (!rowH) continue;
-    const days = daysOf[r.when] || daysOf["Any time"];
+    const days = [...new Set((r.whens || [r.when]).flatMap((w) => daysOf[w] || []))];
+    if (!days.length) days.push(...daysOf["Any time"]);
     for (const i of days) rowH.days[i] += r.votes / days.length;
   }
 
@@ -1638,8 +1686,8 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 400, { error: err.message });
       }
       trackAction(type, { userId: result.userId || userId, hostId: result.hostId || hostId, sessionId, args, result });
-      // A new account (or a new login email) is written before we answer, so "Continue" never means "saved later, maybe"
-      if (type === "signup" || (type === "hostSet" && args && args.email)) {
+      // An account is stored once onboarding is done, and written before we answer, so "done" never means "saved later, maybe"
+      if ((type === "setProfile" && args && args.registered) || type === "hostApprove") {
         try {
           await db.saveNow();
         } catch (err) {

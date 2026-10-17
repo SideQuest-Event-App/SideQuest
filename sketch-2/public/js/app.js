@@ -51,6 +51,7 @@
     vibeText: "",
     areaText: "",
     friendText: "",
+    friendsPage: { q: "", found: null, searched: "", partyOnly: false },
     maps: {}, // each map's centre and zoom, so re-renders keep the view
     search: { q: "", ran: "", loading: false, result: null, error: null },
     reqDraft: null,
@@ -275,6 +276,42 @@
     }
   }, 1000);
 
+  // Sideways rows (cards, mixes, filter chips) scroll with a mouse too: the wheel moves them sideways while they
+  // can still move, and a mouse drag scrolls them (a drag doesn't count as a tap)
+  const ROWS = ".hscroll, .scroll-x";
+  screenEl.addEventListener("wheel", (e) => {
+    const row = e.target.closest && e.target.closest(ROWS);
+    if (!row || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const max = row.scrollWidth - row.clientWidth;
+    if (max <= 0 || (e.deltaY < 0 && row.scrollLeft <= 0) || (e.deltaY > 0 && row.scrollLeft >= max - 1)) return;
+    e.preventDefault();
+    row.scrollLeft += e.deltaY;
+  }, { passive: false });
+  let dragged = false;
+  screenEl.addEventListener("pointerdown", (e) => {
+    const row = e.pointerType === "mouse" && !e.button && e.target.closest(ROWS);
+    if (!row) return;
+    const x0 = e.clientX, left = row.scrollLeft;
+    dragged = false;
+    row.style.scrollSnapType = "none"; // snapping fights a drag; it comes back on release
+    const move = (ev) => {
+      if (Math.abs(ev.clientX - x0) > 5) dragged = true;
+      if (dragged) row.scrollLeft = left - (ev.clientX - x0);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", () => {
+      window.removeEventListener("pointermove", move);
+      row.style.scrollSnapType = "";
+    }, { once: true });
+  });
+  screenEl.addEventListener("click", (e) => {
+    if (dragged) {
+      dragged = false;
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+
   // "Slide to explore": drag the handle to the end (or tap, or press Enter) to go on
   screenEl.addEventListener("pointerdown", (e) => {
     const slider = e.target.closest("[data-slide]");
@@ -409,6 +446,13 @@
     obj[keys[keys.length - 1]] = e.target.value;
     if (e.target.value.trim()) e.target.classList.remove("invalid");
     if (e.target.hasAttribute("data-live")) render(false);
+    // Sliders show their value while sliding: the fill and the label named data-out="<same path>"
+    if (e.target.type === "range") {
+      const r = e.target;
+      r.style.setProperty("--fill", `${((r.value - r.min) / (r.max - r.min)) * 100}%`);
+      const out = screenEl.querySelector(`[data-out="${CSS.escape(path)}"]`);
+      if (out && SQ[r.dataset.format]) out.textContent = SQ[r.dataset.format](Number(r.value));
+    }
     // Typing the listing's link fills in "Found on", unless they wrote their own
     if (path === "shot.draft.sourceUrl") {
       const d = SQ.u.shot.draft;
