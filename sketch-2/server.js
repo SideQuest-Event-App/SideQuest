@@ -1416,23 +1416,33 @@ async function apiFeed({ userId, force }) {
   return user.feed;
 }
 
-async function apiSearch({ userId, query }) {
+// Search answers a page of picks at a time. only: the ids that pass the filters set in the app (null when none are on).
+// exclude: ids already on screen, so the next page picks from the rest.
+const SEARCH_PAGE = 10;
+async function apiSearch({ userId, query, only, exclude }) {
   const user = db.data.users[userId];
   if (!user) throw new Error("Sign up first.");
   const interests = clean(query, 300);
   if (!interests) throw new Error("Say what you're in the mood for.");
   const origins = user.origin ? [user.origin] : [];
   const { pool, excluded } = applyLimits({ budget: user.budget, origins, maxMinutes: user.maxMinutes });
+  const allowed = Array.isArray(only) ? new Set(only.map(Number)) : null;
+  const seen = new Set((Array.isArray(exclude) ? exclude : []).map(Number));
+  const firstPage = !seen.size;
+  const left = pool.filter((e) => (!allowed || allowed.has(e.id)) && !seen.has(e.id));
   const people = [{ name: user.name || "You", interests, origin: user.origin }];
   const words = ai.wordsOf(interests);
   // Searching an event's name finds it, even when its words ("art", "con") also hit hundreds of others
   const phrase = interests.toLowerCase();
-  const candidates = shortlist(pool, (e) => (e.title.toLowerCase().includes(phrase) ? 20 : 0) + wordHits(e, words) * 3 + vibeOverlap(e, user.vibes) * 0.5 + soonness(e) * 0.2, 35);
-  const result = candidates.length ? await ai.match(people, candidates) : { mode: ai.mode(), matches: [], unmet: ai.phrasesOf(interests).map((i) => ({ person: people[0].name, interest: i })) };
+  const candidates = shortlist(left, (e) => (e.title.toLowerCase().includes(phrase) ? 20 : 0) + wordHits(e, words) * 3 + vibeOverlap(e, user.vibes) * 0.5 + soonness(e) * 0.2, 35);
+  const result = candidates.length ? await ai.match(people, candidates, SEARCH_PAGE) : { mode: ai.mode(), matches: [], unmet: firstPage ? ai.phrasesOf(interests).map((i) => ({ person: people[0].name, interest: i })) : [] };
+  // A full page means there are probably more good fits; a short one means the AI (or the keywords) ran out
+  const more = result.matches.length >= SEARCH_PAGE && left.length > result.matches.length;
+  if (!firstPage) return { mode: result.mode, error: result.error, matches: result.matches, unmet: [], more };
   const unmet = result.unmet.map((u) => ({ ...u, reason: unmetReason(u.interest, excluded) }));
   db.data.logs.searches.push({ time: new Date().toISOString(), mode: result.mode, userId, interests, budget: user.budget, origins, maxMinutes: user.maxMinutes, matchedIds: result.matches.map((m) => m.id), unmet });
   db.save();
-  return { ...result, unmet, limits: limitsSummary(user.budget, pool, excluded) };
+  return { ...result, unmet, more, limits: limitsSummary(user.budget, pool, excluded) };
 }
 
 async function apiBlend({ userId, force }) {

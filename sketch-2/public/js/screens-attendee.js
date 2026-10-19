@@ -3,7 +3,7 @@
    Inputs use data-bind="path" to write straight into SQ.u (UI state), so typing survives re-renders. */
 (function () {
   const SQ = window.SQ;
-  const { esc, icon, iconBtn, ph, poster, avatar, avatars, btn, chip, field, textarea, progress, meter, empty, stars, tabs, screen, thinking, aiTag, me, ev, req, whenLabel, isToday, isWeekend, priceLabel, trip, tripLabel, originShort, pick, partyGoing, isPast, statusBadge, whenRow } = SQ;
+  const { esc, icon, iconBtn, ph, poster, avatar, avatars, btn, chip, field, textarea, progress, meter, empty, stars, tabs, screen, thinking, aiTag, me, ev, req, whenLabel, isToday, isWeekend, priceLabel, trip, tripLabel, originShort, pick, partyGoing, isPast, statusBadge } = SQ;
 
   const V = () => SQ.d.vocab;
   const U = () => SQ.u;
@@ -20,10 +20,6 @@
   SQ.attendeeTabs = attendeeTabs;
 
 
-  const metaLine = (e) => {
-    const t = trip(e, me() && me().origin);
-    return [e.neighbourhood, priceLabel(e), t ? `${t.minutes} min away` : ""].filter(Boolean).map(esc).join(" · ");
-  };
   const friendsLine = (e) => {
     const party = partyGoing(e);
     const others = (e.friends || []).filter((f) => !party.includes(f));
@@ -108,7 +104,7 @@
     </div>
     <div class="landing-actions">
       <div class="slider" data-slide="role" role="button" tabindex="0" aria-label="Slide to explore">
-        <span class="handle">${icon("arrow")}</span><span class="text">Slide to explore</span>${icon("chevR", "chev")}${icon("chevR", "chev")}
+        <span class="handle">${icon("arrow")}</span><span class="text">Slide to explore</span>${icon("chevR", "chev")}
       </div>
       <p class="login-line">Already have an account?<button class="link" data-go="login">Log in</button></p>
     </div>`, { cls: "bleed" }) };
@@ -302,8 +298,13 @@
 
   // Filters (Figma: 11 Filters). Amenities aren't in listings, so they match words in the tags and description.
   const CAT_TILES = ["Live Sets", "Food Pop-ups", "Art Nights", "Markets", "Comedy", "Dance Nights", "Film"];
-  const PRICES = ["Free", "Under $20"];
-  const DISTS = [["Walkable · 2 km", "Walkable", 2], ["Short ride · 6 km", "Short ride", 6]];
+  // Price and distance are sliders. Price: the most you'll pay, Free ($0) to $100+ (no limit, stored as "").
+  // Distance: within 1 to 10 km of home; "" means no limit until the slider is moved.
+  const PRICE_MAX = 100, DIST_MIN = 1, DIST_MAX = 10;
+  const priceCap = (f) => (typeof f.price === "number" && f.price < PRICE_MAX ? f.price : null);
+  const distCap = (f) => (typeof f.dist === "number" ? f.dist : null);
+  SQ.priceCapLabel = (p) => (p >= PRICE_MAX ? "$100+" : p ? `Up to $${p}` : "Free");
+  SQ.distCapLabel = (k) => `Within ${k} km`;
   const AFTER = [["5 PM", 17], ["8 PM", 20], ["10 PM", 22]];
   const AMEN = [["Step-free access", /accessib|wheelchair|step[- ]free/i, "access"], ["All ages", /all ages|all-ages|family|kids/i], ["Food", /food|eat|dinner|brunch|snack/i], ["Drinks", /drink|bar\b|beer|wine|cocktail/i], ["Small room", /intimate|small|cozy|limited/i]];
   const TODS = [["Anytime", "clock"], ["Daytime", "sun"], ["Evening", "moon"]];
@@ -314,10 +315,10 @@
     if (f.tod === "Daytime" && h >= 17) return false;
     if (f.tod === "Evening" && h < 17) return false;
     if (f.cats.length && !f.cats.some((c) => tileVibes(c).some((v) => (e.vibes || []).includes(v)))) return false;
-    if (f.price === "Free" && e.price !== 0) return false;
-    if (f.price === "Under $20" && !(e.price != null && e.price < 20)) return false;
-    const d = DISTS.find((x) => x[0] === f.dist);
-    if (d && !(kmFrom(e) <= d[2])) return false;
+    const p = priceCap(f);
+    if (p != null && !(e.price != null && e.price <= p)) return false;
+    const d = distCap(f);
+    if (d != null && !(kmFrom(e) <= d)) return false;
     if (f.friends && !(e.friends || []).length) return false;
     const a = AFTER.find((x) => x[0] === f.after);
     if (a && h < a[1]) return false;
@@ -326,13 +327,17 @@
   }
   // The filters that are on, as [label shown on the chip, how to turn it off]
   const activeFilters = (f = DF()) => [
+    ...(f.tod !== "Anytime" ? [[f.tod, ["dfTod", "Anytime"]]] : []),
     ...f.cats.map((c) => [c, ["dfCat", c]]),
-    ...(f.price ? [[f.price, ["dfSet", "price:"]]] : []),
-    ...(f.dist ? [[DISTS.find((x) => x[0] === f.dist)[1], ["dfSet", "dist:"]]] : []),
+    ...(priceCap(f) != null ? [[SQ.priceCapLabel(priceCap(f)), ["dfPrice", ""]]] : []),
+    ...(distCap(f) != null ? [[SQ.distCapLabel(distCap(f)), ["dfDist", ""]]] : []),
     ...(f.friends ? [["Friends going", ["dfFriends", ""]]] : []),
     ...(f.after ? [[`After ${f.after}`, ["dfSet", "after:"]]] : []),
     ...f.amen.map((n) => [n, ["dfAmen", n]]),
   ];
+  // Search sends the ids that pass the filters (null when none are on), and searches again when they change
+  SQ.filterSig = () => JSON.stringify(DF());
+  SQ.filteredIds = () => (activeFilters().length ? SQ.d.events.filter((e) => passes(e)).map((e) => e.id) : null);
 
   // This week's sidequests: the taste avatar's picks in the next 7 days, best match first
   const inWeek = (e) => {
@@ -385,26 +390,22 @@
     const n = me().notifications.filter((x) => !x.read).length;
     return `<button class="icon-btn" data-go="notifications" aria-label="Notifications${n ? `, ${n} unread` : ""}">${icon("bell")}${n ? `<span class="count-badge">${n}</span>` : ""}</button>`;
   };
-  const viewToggle = (on, [a, b] = ["Recommendations", "Map"], style = "") => `<div class="seg" style="${style}">
-    <button class="${on === "list" ? "on" : ""}" data-go="discover" aria-pressed="${on === "list"}">${a}</button>
-    <button class="${on === "map" ? "on" : ""}" data-go="discover-map" aria-pressed="${on === "map"}">${b}</button></div>`;
-  // The chip row: the default quick filters, or once Filters are set, a count and each filter that's on
-  function chipRow() {
-    const f = DF();
-    const on = activeFilters(f);
-    if (on.length) return `${chip(`Filters · ${on.length}`, true, { "data-go": "filters" }, "sliders")}${on.map(([l, [act, arg]]) => chip(l, true, { "data-act": act, "data-arg": arg })).join("")}`;
-    return `<button class="chip outline" data-go="filters">${icon("sliders")}Filters</button>
-      ${TODS.map(([l, ic]) => chip(l, f.tod === l, { "data-act": "dfTod", "data-arg": l }, ic)).join("")}
-      ${chip("Under $20", f.price === "Under $20", { "data-act": "dfSet", "data-arg": `price:${f.price === "Under $20" ? "" : "Under $20"}` })}`;
-  }
-  const discoverHead = () => {
-    const u = me();
-    const day = SQ.now().toLocaleDateString("en-US", { weekday: "long", timeZone: TZ });
-    return `<div class="disc-head">
-      <div class="disc-title"><span class="overline">${day} · Toronto</span><span class="t-display-xl">Your week,</span><span class="t-display-xl c-accent">picked.</span></div>
-      <div class="row start" style="gap:10px">${bell()}<button class="av" data-go="profile" aria-label="Profile">${esc((u.name || "Y")[0].toUpperCase())}</button></div>
-    </div>`;
+  const viewToggle = (on) => `<div class="seg">
+    <button class="${on === "list" ? "on" : ""}" data-go="discover" aria-pressed="${on === "list"}">For you</button>
+    <button class="${on === "map" ? "on" : ""}" data-go="discover-map" aria-pressed="${on === "map"}">Map</button></div>`;
+  // The search bar, with Filters at its end (a count shows when any are on). Used on For you, Map and Search.
+  const searchBar = () => {
+    const n = activeFilters().length;
+    return `<form class="search" data-act="search">${icon("search")}<input data-bind="search.q" value="${esc(U().search.q)}" placeholder="What are you up for?" aria-label="Search sidequests" enterkeyhint="search">
+      <button type="button" class="icon-btn search-filters${n ? " on" : ""}" data-go="filters" aria-label="Filters${n ? `, ${n} on` : ""}">${icon("sliders")}${n ? `<span class="count-badge">${n}</span>` : ""}</button></form>`;
   };
+  // Each filter that's on, as a chip that turns it off (nothing shows when none are on)
+  const filterChips = () => {
+    const on = activeFilters();
+    return on.length ? `<div class="chips scroll-x">${on.map(([l, [act, arg]]) => chip(l, true, { "data-act": act, "data-arg": arg }, "x")).join("")}</div>` : "";
+  };
+  // The top of Discover, the same on For you and Map: the view switch and bell, the search bar, then any filters
+  const discoverTop = (on) => `<div class="row" style="gap:10px">${viewToggle(on)}${bell()}</div>${searchBar()}${filterChips()}`;
 
   S.discover = { role: "attendee", label: "Discover · list", render: () => {
     const u = me();
@@ -421,19 +422,18 @@
     else {
       const m = mixes();
       body = `<section class="disc-sec">
-          <div class="pad-x stack" style="gap:2px"><div class="section-header"><h2>Weekly Sidequests</h2><button data-go="weekly">See all</button></div><span class="t-caption c-secondary">Fresh every Monday</span></div>
+          <div class="pad-x stack" style="gap:2px"><div class="section-header"><h2>Weekly Sidequests</h2><button data-go="weekly">See all (${all.length})</button></div><span class="t-caption c-secondary">Fresh every Monday</span></div>
           <div class="hscroll">${list.slice(0, 12).map(questCard).join("")}</div>
         </section>
         ${m.length ? `<section class="disc-sec">
           <div class="pad-x section-header"><h2>Vibe Mixes</h2></div>
-          <div class="hscroll">${m.map(([l, p, n]) => `<button class="mix" data-act="openMix" data-arg="${esc(l)}"><span class="mix-cover">${ph(p)}<span class="scrim"></span><span class="t-title-l">${esc(l)}</span></span><span class="t-caption c-secondary">${n} this week</span></button>`).join("")}</div>
+          <div class="hscroll">${m.map(([l, p, n]) => `<button class="mix" data-act="openMix" data-arg="${esc(l)}" aria-label="${esc(l)}, ${n} sidequest${n === 1 ? "" : "s"} this week"><span class="mix-cover">${ph(p)}<span class="scrim"></span><span class="mix-count">${n}</span><span class="t-title-m">${esc(l)}</span></span></button>`).join("")}</div>
         </section>` : ""}`;
     }
-    return screen(`${discoverHead()}
+    const day = SQ.now().toLocaleDateString("en-US", { weekday: "long", timeZone: TZ });
+    return screen(`<div class="disc-top">${discoverTop("list")}</div>
       <div class="disc-body">
-        <div class="pad-x stack-sm"><form class="search" data-act="search" style="margin-bottom:6px">${icon("search")}<input data-bind="search.q" value="${esc(U().search.q)}" placeholder="What are you up for?" aria-label="Search sidequests" enterkeyhint="search"></form>
-          ${viewToggle("list")}<span class="t-caption c-tertiary">${list.length} sidequest${list.length === 1 ? "" : "s"} this week</span></div>
-        <div class="chips scroll-x disc-chips pad-x">${chipRow()}</div>
+        <div class="disc-title pad-x"><span class="overline">${day} · Toronto</span><span class="t-display-xl">Your week,</span><span class="t-display-xl c-accent">picked.</span></div>
         ${U().feedError ? `<div class="pad-x"><div class="notice hot">${icon("x")}<span>${esc(U().feedError)}</span></div></div>` : ""}
         ${body}
       </div>`, { tabbar: attendeeTabs("discover") });
@@ -444,16 +444,13 @@
     const u = me();
     const list = weekly().filter((e) => passes(e) && e.venue && e.venue.lat != null);
     const sel = list.find((e) => e.id === U().mapSel);
-    const f = DF();
     const pins = list.map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, tier: SQ.matchTier(matchOf(e)), selected: sel === e, act: "mapPin", arg: e.id, label: e.title }));
     const home = u.homeArea || homeLL(u);
     const going = sel ? [...partyGoing(sel), ...(sel.friends || []).filter((x) => !partyGoing(sel).includes(x))] : [];
     return screen(`<div class="disc-map">
       ${SQ.mapView("discover", { pins, home, labels: ["Kensington", "Queen West", ...(u.areas || [])] })}
       <div class="map-ctrls">
-        <div class="row" style="gap:10px">${sel ? `${viewToggle("map", ["List", "Map"], "width:180px")}<span class="grow"></span>` : viewToggle("map")}${bell()}</div>
-        <form class="search surface" data-act="search">${icon("search")}<input data-bind="search.q" value="${esc(U().search.q)}" placeholder="What are you up for?" aria-label="Search sidequests" enterkeyhint="search"></form>
-        <div class="chips scroll-x">${chip("Your vibes", !f.cats.length, { "data-act": "dfCats", "data-arg": "" })}${CAT_TILES.slice(0, 4).map((l) => chip(l, f.cats.length === 1 && f.cats[0] === l, { "data-act": "dfCats", "data-arg": l })).join("")}</div>
+        ${discoverTop("map")}
       </div>
       <div class="map-zoom-at">${SQ.mapZoom("discover")}</div>
       ${sel ? `<div class="sheet">
@@ -472,15 +469,23 @@
     const f = DF();
     const n = weekly().filter((e) => passes(e)).length;
     const group = (title, chips) => `<div class="stack" style="gap:10px"><h2 class="t-title-m">${title}</h2><div class="chips">${chips}</div></div>`;
+    // A slider shows its value while sliding (data-out), and applies it on release (data-change)
+    const slider = (title, key, value, min, max, step, format, act, [lo, hi], shown = "") => `<div class="stack" style="gap:10px">
+        <div class="section-head"><h2 class="t-title-m">${title}</h2><span class="t-data c-accent" data-out="df.${key}">${esc(shown || SQ[format](value))}</span></div>
+        <input type="range" class="range" style="--fill:${((value - min) / (max - min)) * 100}%" min="${min}" max="${max}" step="${step}" value="${value}" data-bind="df.${key}" data-format="${format}" data-change="${act}" aria-label="${title}">
+        <div class="section-head"><span class="t-data c-secondary">${lo}</span><span class="t-data c-secondary">${hi}</span></div>
+      </div>`;
     const set = (key, list) => list.map(([v, l = v]) => chip(l, f[key] === v, { "data-act": "dfSet", "data-arg": `${key}:${v}` })).join("");
+    const fromSearch = U().history[U().history.length - 1] === "search";
     return screen(`<div class="pad stack" style="gap:20px;padding-top:8px">
-      ${group("Category", chip("Any", !f.cats.length, { "data-act": "dfCats", "data-arg": "" }) + CAT_TILES.map((c) => chip(c, f.cats.includes(c), { "data-act": "dfCat", "data-arg": c })).join(""))}
-      <hr class="divider">${group("Price", set("price", [["", "Any price"], ...PRICES.map((p) => [p])]))}
-      <hr class="divider">${group("Distance from home", set("dist", [["", "Anywhere"], ...DISTS.map((d) => [d[0]])]))}
+      ${group("Time of day", TODS.map(([l, ic]) => chip(l, f.tod === l, { "data-act": "dfTod", "data-arg": l }, ic)).join(""))}
+      <hr class="divider">${group("Category", chip("Any", !f.cats.length, { "data-act": "dfCats", "data-arg": "" }) + CAT_TILES.map((c) => chip(c, f.cats.includes(c), { "data-act": "dfCat", "data-arg": c })).join(""))}
+      <hr class="divider">${slider("Price", "price", priceCap(f) ?? PRICE_MAX, 0, PRICE_MAX, 5, "priceCapLabel", "dfPrice", ["Free", "$100+"])}
+      <hr class="divider">${slider("Distance from home", "dist", distCap(f) ?? DIST_MAX, DIST_MIN, DIST_MAX, 1, "distCapLabel", "dfDist", ["1 km", "Within 10 km"], distCap(f) == null ? "Anywhere" : "")}
       <hr class="divider">${group("Who’s going", chip("Anyone", !f.friends, { "data-act": "dfFriends", "data-arg": "" }) + chip("Friends going", f.friends, { "data-act": "dfFriends", "data-arg": "1" }, "crew"))}
       <hr class="divider">${group("Starts after", set("after", [["", "Any time"], ...AFTER.map((a) => [a[0]])]))}
       <hr class="divider">${group("Amenities", AMEN.map(([l, , ic]) => chip(l, f.amen.includes(l), { "data-act": "dfAmen", "data-arg": l }, ic || "")).join(""))}
-    </div>`, { title: "Filters", close: true, footer: `<div class="footer-bar row">${btn("Clear", { "data-act": "dfClear", style: "width:110px;flex:none" }, "outline")}${btn(`Show ${n} sidequest${n === 1 ? "" : "s"}`, { "data-back": "" })}</div>` });
+    </div>`, { title: "Filters", close: true, footer: `<div class="footer-bar row">${btn("Clear", { "data-act": "dfClear", style: "width:110px;flex:none" }, "outline")}${btn(fromSearch ? "Show results" : `Show ${n} sidequest${n === 1 ? "" : "s"}`, { "data-back": "" })}</div>` });
   } };
 
   // Figma: Weekly Quests · full list
@@ -511,49 +516,39 @@
       <div class="pad stack" style="gap:14px;padding-top:18px">${list.length ? rows(list) : empty("search", "Nothing in this mix this week.")}</div>`, { cls: "bleed" });
   } };
 
-  // Search results: Sketch 0's matching, inside the For You flow
+  // Search results: the AI's picks within your filters, revealed 5 at a time as you scroll (see A.searchMore)
   S.search = { role: "attendee", label: "Search results", render: () => {
     const s = U().search;
     const u = me();
     const r = s.result;
+    // A filter changed (here, in the Filters sheet, or on Discover) since these results: search again with it
+    if (s.ran && !s.loading && s.sig !== SQ.filterSig()) setTimeout(() => SQ.actions.search(null, null, true));
     let body = "";
-    if (s.loading) body = thinking(`Finding quests for "${s.ran}"…`);
+    if (s.loading) body = thinking(`Finding sidequests for "${s.ran}"…`);
     else if (s.error) body = `<div class="notice hot">${icon("x")}<span>${esc(s.error)}</span></div>`;
     else if (r) {
-      const shown = r.matches.filter((m) => ev(m.id) && !u.notForMe.includes(m.id));
+      const hits = s.matches.filter((m) => ev(m.id) && !u.notForMe.includes(m.id));
+      const shown = hits.slice(0, s.shown);
+      const done = !s.loadingMore && s.shown >= hits.length && !s.more;
       const l = r.limits;
+      const hit = (m) => {
+        const e = ev(m.id);
+        return `<div class="search-hit">
+          <button class="quest-row" data-act="openQuest" data-arg="${e.id}">${poster(e)}<span class="text"><span>${esc(e.title)}</span><span>${esc(qMeta(e))}</span></span>${SQ.matchPill(m.match)}</button>
+          ${m.reason ? `<p class="hit-reason">${icon("sparkle")}<span>${esc(m.reason)}</span></p>` : ""}
+          <button class="hit-not" data-act="notForMe" data-arg="${e.id}">${icon("thumbDown")}Not for me</button>
+        </div>`;
+      };
       body = `
-        <div class="row small"><span class="muted">${l.fit} of ${l.total} quests fit${u.budget != null ? ` your ${u.budget ? `$${u.budget}` : "free-only"} budget` : ""}${u.origin && u.maxMinutes ? ` and ${u.maxMinutes}-min trip` : ""}</span>${aiTag(r.mode)}</div>
+        <div class="stack-sm">${aiTag(r.mode)}<span class="t-caption c-tertiary">${l.fit} of ${l.total} sidequests fit${u.budget != null ? ` your ${u.budget ? `$${u.budget}` : "free-only"} budget` : ""}${u.origin && u.maxMinutes ? ` and ${u.maxMinutes}-min trip` : ""}</span></div>
         ${r.error ? `<div class="notice">${icon("sparkle")}<span>The AI didn't answer, so these are keyword matches.</span></div>` : ""}
-        ${shown.length ? shown.map((m) => {
-          const e = ev(m.id);
-          return `<div class="card tight stack-sm">
-            <button class="row start" style="gap:12px;text-align:left" data-act="openQuest" data-arg="${e.id}">${poster(e, "thumb")}
-              <span class="stack-xs grow">${whenRow(e)}<strong>${esc(e.title)}</strong><span class="small muted">${metaLine(e)}</span></span>
-              <span class="match-num">${m.match}%</span></button>
-            <p class="reason">${icon("sparkle", "sm")}${esc(m.reason)}</p>
-            <div class="row"><button class="link muted" data-act="notForMe" data-arg="${e.id}">${icon("thumbDown", "sm")}Not for me</button><button class="link" data-act="openQuest" data-arg="${e.id}">See quest ${icon("chev", "sm")}</button></div>
-          </div>`;
-        }).join("") : empty("search", "Nothing fit that. Hosts can see this gap.")}
-        ${r.unmet.length ? `<div class="card hot stack-sm">
-          <span class="label">Nothing fit</span>
-          ${r.unmet.map((x) => `<div class="row"><span class="small"><strong>${esc(x.interest)}</strong> <span class="muted">${x.reason === "price" ? "· over your budget" : x.reason === "travel" ? "· too far for your trip time" : "· nothing listed yet"}</span></span>
-            <button class="btn btn-secondary sm" data-act="requestGap" data-arg="${esc(x.interest)}">${icon("megaphone")}Request it</button></div>`).join("")}
-          <p class="small muted">Requests go to hosts. If one puts it on, you hear first.</p>
-        </div>` : ""}
-        ${r.unmet.length || !shown.length ? `<div class="card stack-sm">
-          <span class="label">Missing something?</span>
-          <div class="row"><span class="small">Know of an event like this? Add it to SideQuest!</span>
-            <button class="btn btn-secondary sm" data-act="addEvent">${icon("plus")}Add event</button></div>
-          <p class="small muted">Paste its link, use a screenshot, or type it in.</p>
-        </div>` : ""}`;
+        ${shown.length ? `<div class="stack" style="gap:16px">${shown.map(hit).join('<hr class="divider">')}</div>` : empty("search", "Nothing fit that. Hosts can see this gap.")}
+        ${s.loadingMore ? thinking("Finding more sidequests…") : !done ? '<div class="reveal-more" data-reveal="searchMore" aria-hidden="true"></div>' : ""}
+        ${done && r.unmet.length ? r.unmet.map((x) => `<div class="notice hot">${icon("bulb")}<span>Nothing fit <strong>${esc(x.interest)}</strong>${x.reason === "price" ? ", over your budget" : x.reason === "travel" ? ", too far for your trip time" : ", nothing listed yet"}. Hosts see requests, and you hear first if one puts it on.</span><button class="action" data-act="requestGap" data-arg="${esc(x.interest)}">Request it</button></div>`).join("") : ""}
+        ${done ? `<div class="notice signature">${icon("plus")}<span>Know of an event like this? Add it to Sidequest from its link, a screenshot, or by typing it in.</span><button class="action" data-act="addEvent">Add event</button></div>` : ""}`;
     }
-    return screen(`
-      <div class="pad stack">
-        <form class="search" data-act="search">
-          ${icon("search")}<input data-bind="search.q" value="${esc(s.q)}" placeholder="What are you in the mood for?" aria-label="Search quests" enterkeyhint="search">
-          <button class="icon-btn" type="submit" aria-label="Search">${icon("sparkle")}</button>
-        </form>
+    return screen(`<div class="pad stack" style="gap:14px;padding-top:4px">
+        ${searchBar()}${filterChips()}
         ${body}
       </div>`, { title: "Search" });
   } };

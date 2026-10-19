@@ -111,6 +111,10 @@
         const map = new maplibregl.Map({ container: ph, style: STYLE(), center: [v.lng, v.lat], zoom: v.zoom, minZoom: 9, maxZoom: 18,
           dragRotate: false, pitchWithRotate: false, touchPitch: false, attributionControl: { compact: true } });
         map.touchZoomRotate.disableRotation();
+        // The map credit (OpenStreetMap's licence asks for it) stays folded into a small "i" button instead of a banner
+        const fold = () => ph.querySelectorAll(".maplibregl-compact-show").forEach((x) => x.classList.remove("maplibregl-compact-show"));
+        fold();
+        map.once("load", fold);
         map.on("moveend", () => Object.assign(SQ.u.maps[id], { lng: map.getCenter().lng, lat: map.getCenter().lat, zoom: map.getZoom() }));
         m = live[id] = { el: ph, map, marks: [], styled: false, circles: [] };
         // Circles can only go on once the style is in; whatever was asked for last is drawn then

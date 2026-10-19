@@ -53,7 +53,7 @@
     friendText: "",
     friendsPage: { q: "", found: null, searched: "" },
     maps: {}, // each map's centre and zoom, so re-renders keep the view
-    search: { q: "", ran: "", loading: false, result: null, error: null },
+    search: { q: "", ran: "", loading: false, result: null, error: null, matches: [], shown: 5, more: false, loadingMore: false, sig: "" },
     reqDraft: null,
     rating: { stars: 0, tags: [] },
     partyMsg: "",
@@ -263,10 +263,27 @@
       for (const p of SQ.u.invalid) screenEl.querySelectorAll(`[data-bind="${CSS.escape(p)}"], [data-req="${CSS.escape(p)}"]`).forEach((el) => el.classList.add("invalid"));
     }
     SQ.initMaps(screenEl);
+    watchReveal(screenEl.querySelector("[data-reveal]"));
     renderSide();
     ensure();
   }
   SQ.render = () => render(false);
+
+  // Lists that grow as you scroll: an element with data-reveal="action" at the end of the list runs that action
+  // once it scrolls into view (or is already in view, so a short list keeps filling the screen)
+  let revealer = null;
+  function watchReveal(el) {
+    if (revealer) revealer.disconnect();
+    revealer = null;
+    if (!el) return;
+    revealer = new IntersectionObserver(async (entries) => {
+      if (!entries.some((x) => x.isIntersecting)) return;
+      revealer.disconnect();
+      await SQ.actions[el.dataset.reveal]();
+      render(false);
+    }, { root: screenEl.querySelector(".scroll"), rootMargin: "0px 0px 240px 0px" });
+    revealer.observe(el);
+  }
 
   // "Resend code in 0:42": count down, then re-render so the resend button appears
   setInterval(() => {
@@ -484,6 +501,12 @@
     const code = document.getElementById("side-code");
     const demo = SQ.u.login && SQ.u.login.demoCode;
     code.hidden = !demo;
+    if (demo && !code.dataset.shown) {
+      code.dataset.shown = "1";
+      side.classList.add("open"); // so the code is in view without opening the panel first
+      sideToggle.setAttribute("aria-expanded", "true");
+    }
+    if (!demo) delete code.dataset.shown;
     if (demo) code.innerHTML = `No email service is set up, so here's the code that would have been emailed to ${SQ.esc(SQ.u.login.email)}:<b>${SQ.esc(demo)}</b>`;
   }
   document.getElementById("side-role").addEventListener("click", (e) => {
@@ -499,6 +522,28 @@
     SQ.go(id);
   });
   document.getElementById("side-brand").innerHTML = SQ.logo();
+
+  // ---------- Layout ----------
+  // By window width: phone (the design as drawn), tablet (the same screens in a centred column), and desktop
+  // (the tab bar becomes a sidebar and the column widens). See "App shell" in styles.css.
+  const tablet = matchMedia("(min-width: 761px)");
+  const desktop = matchMedia("(min-width: 1100px)");
+  const side = document.getElementById("side");
+  const sideToggle = document.getElementById("side-toggle");
+  sideToggle.insertAdjacentHTML("afterbegin", SQ.icon("settings"));
+  function applyLayout() {
+    document.documentElement.dataset.layout = desktop.matches ? "desktop" : tablet.matches ? "tablet" : "phone";
+    if (SQ.d) render(false);
+  }
+  applyLayout();
+  tablet.addEventListener("change", applyLayout);
+  desktop.addEventListener("change", applyLayout);
+  // On a tablet or desktop the panel floats over the app, opened from its button
+  sideToggle.addEventListener("click", () => {
+    const open = !side.classList.contains("open");
+    side.classList.toggle("open", open);
+    sideToggle.setAttribute("aria-expanded", String(open));
+  });
   document.getElementById("side-reset").addEventListener("click", async () => {
     if (!confirm("Reset everything? This deletes all accounts, requests, ratings and logs, and restores the sample data.")) return;
     await SQ.act("reset");

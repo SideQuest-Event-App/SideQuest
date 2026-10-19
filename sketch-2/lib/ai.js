@@ -227,7 +227,8 @@ function feedKeywords(profile, pool) {
 
 // ---------- 2 + 3. Search and Crew Blend: interests in (one person or a party), picks out ----------
 // people: [{ name, interests, origin }]. Same prompt as Sketch 0, so the two sketches stay comparable.
-function match(people, pool) {
+// n: how many picks to ask for (search asks for a page of 10 at a time)
+function match(people, pool, n = 5) {
   const crew = people.length > 1;
   const origins = [...new Set(people.map((p) => p.origin).filter(Boolean))];
   const who = people.map((p) => `- ${p.name}: "${p.interests}"${p.origin ? ` (starting from ${ORIGIN_NAMES[p.origin]}; their trip is travel.from.${p.origin})` : ""}`).join("\n");
@@ -237,12 +238,12 @@ ${who}
 Here are the upcoming events that already fit ${crew ? "the group's" : "their"} budget and travel limits (JSON). "price" is in Canadian dollars; 0 means free.
 ${JSON.stringify(pool.map((e) => compact(e, origins)))}
 
-Pick up to 5 events that best match${crew ? " the whole group. Prefer events every person would enjoy over ones that suit only one person" : " what they asked for"}. For each, write one short, specific sentence explaining why it's a good pick, and a "match" score from 0 to 100.
+Pick up to ${n} events that best match${crew ? " the whole group. Prefer events every person would enjoy over ones that suit only one person" : " what they asked for"}. For each, write one short, specific sentence explaining why it's a good pick, and a "match" score from 0 to 100.
 Each event's "friends" field lists friends who are going, and "organizer" has the organizer's rating and a review.
 Where it helps, work in a detail from the reviews, the price, the trip, or who's going (e.g. "it's free, and your friend Maya is going").${crew && origins.length > 1 ? `
 Friends start from different places. Prefer events that are an easy trip for everyone, not a short trip for one and a long one for another.` : ""}
 Only use reviews, organizer and attendee details that appear in the event data; never invent any.
-Only choose from the list. If fewer than 5 are a genuine fit, return fewer.${crew ? `
+Only choose from the list. If fewer than ${n} are a genuine fit, return fewer.${crew ? `
 For each pick, also give "fits": an object with one key per person (${people.map((p) => JSON.stringify(p.name)).join(", ")}) whose value is a few words on why it suits them, or "" if it doesn't really suit them.` : ""}
 Finally, list in "unmet" every interest (copy the person's own wording, as a short phrase) that none of these events fits well.
 Respond with JSON only, no other text, in this shape:
@@ -250,7 +251,7 @@ Respond with JSON only, no other text, in this shape:
 
   return withFallback(
     async () => {
-      const json = await askJSON(prompt, 1800);
+      const json = await askJSON(prompt, Math.max(1800, n * 200));
       const matches = (json.matches || [])
         .map((m) => {
           const e = pool.find((x) => x.id === m.id);
@@ -262,12 +263,12 @@ Respond with JSON only, no other text, in this shape:
         .map((u) => ({ person: String(u.person || ""), interest: u.interest.trim().toLowerCase() }));
       return { matches, unmet };
     },
-    () => matchKeywords(people, pool)
+    () => matchKeywords(people, pool, n)
   );
 }
 
 // Plain keyword overlap (NOT AI). For a crew, events that match more people rank first.
-function matchKeywords(people, pool) {
+function matchKeywords(people, pool, n = 5) {
   const crew = people.length > 1;
   const matches = pool
     .map((e) => {
@@ -290,7 +291,7 @@ function matchKeywords(people, pool) {
     .filter((m) => m.fitCount > 0)
     // Ties go to events with friends going, then cheaper, then better-reviewed, then busier ones
     .sort((a, b) => b.fitCount - a.fitCount || b.hitTotal - a.hitTotal || (b.e.friends || []).length - (a.e.friends || []).length || a.e.price - b.e.price || (b.e.rating || 0) - (a.e.rating || 0) || (b.e.going || 0) - (a.e.going || 0))
-    .slice(0, 5)
+    .slice(0, n)
     .map(({ fitCount, hitTotal, e, ...m }) => m);
 
   // An interest is unmet when none of its words appear in any event that fits the limits

@@ -15,6 +15,21 @@ There's nothing to install. Copy `.env.example` to `.env` to turn on the AI (`AN
 
 Where accounts show up in Supabase, once onboarding is finished (or a host is approved): the `sketch2_accounts` table has one row per account (email, username, name, phone, role, and the whole profile in `data`), and **Authentication > Users** gets the email. Each server only writes the accounts it changed, so two people running Sketch 2 against the same Supabase don't erase each other's sign-ups. Until `supabase/schema.sql` has made that table, accounts stay inside `app_state` row 2 and the server says so when it starts.
 
+## Put it online (Render)
+
+Sketch 2 runs on Render the same way as Sketch 1, as a second web service from this repo, on the same Supabase project.
+
+1. In Supabase's SQL Editor, run `supabase/schema.sql` once (after Sketch 1's). The tables are already there in our project.
+2. On Render: **New > Web Service**, pick this repo, and copy Sketch 1's service settings with these changes:
+   - **Root Directory:** leave it empty. Sketch 2 reads Sketch 1's events and importer (`../sketch-1/seed`, `../sketch-1/import`), so it needs the whole repo.
+   - **Start Command:** `node sketch-2/server.js`. There's nothing to install, so the build command can be the same as Sketch 1's.
+   - **Environment variables:** `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (the same values as Sketch 1's service) and `ANTHROPIC_API_KEY`. Render sets `PORT` itself.
+3. Deploy. The log's first lines should say `Database: Supabase` and `Matching with AI via the Anthropic API`.
+
+Render has no Claude Code, so online the AI runs on the API key, and every feed, search page, Crew Blend and poster read is billed. Search asks for 10 picks at a time and only asks for the next 10 once you've scrolled through them. Without `ANTHROPIC_API_KEY` the online app falls back to keyword matching. On your own computer, leave the key out of `.env` to run the AI on your Claude subscription instead.
+
+Run one Sketch 2 server per Supabase project at a time. Each server keeps the app's shared state (parties, requests, notifications) in memory and writes the whole thing to `app_state` row 2, so a local server and the Render one would overwrite each other's changes. Accounts are safe either way, because each account is its own row in `sketch2_accounts`.
+
 ## Log in and sign up
 
 - **Log in:** enter your email. If an account (attendee or host) uses it, a 6-digit code is sent and you go to the code screen. The right code takes you into that account.
@@ -29,13 +44,15 @@ Where accounts show up in Supabase, once onboarding is finished (or a host is ap
 |---|---|
 | Start | Landing, going out or hosting, log in (email, code), make your account |
 | Attendee onboarding | Vibes, been to any of these, when you go out, areas (map), assemble your party, taste avatar |
-| Discover | Weekly Sidequests, Vibe Mixes, map with list sheet, search, filters |
+| Discover | For you (Weekly Sidequests, Vibe Mixes) and Map, with the same header: For you / Map, notifications, and the search bar with Filters. Search results come in 5 at a time as you scroll, and changing a filter searches again |
 | Sidequest | Details, 19+ age check, all-ages notice, tickets hand-off, ticket import, ticket wallet |
 | Community | Friends, friends' highlights (what friends rated 4 stars and up), friend requests (Add sends one; they're a friend once they accept, and show in Notifications and on the Friends page), a friend's profile with their recent sidequests and Remove friend, parties, party (Crew Blend, podium vote), group plan, Sidequest Requests, new request |
 | Sidequests log | Upcoming, Saved, Completed, calendar, event day, attendee chat, check-in, rating, memories, Wrapped |
 | Profile | Profile, edit profile, getting around, switch account |
 | Host onboarding | What you host, host account, verification, profile, ticketing, team, claim listings, review, demand map |
 | Host tools | Demand insights (with a map), request detail, draft test, create a sidequest (2 steps), published, your sidequests (Live, Drafts, Past), event day tools, insights (Overview, Recap), audience, inbox, host profile |
+
+**Phone, tablet and desktop.** The app is full screen at every size, and its layout follows the window's width. Up to 760px it's the phone design as drawn. From 761px it's the tablet layout: the same screens in a centred column, with the tab bar at the bottom. From 1100px it's the desktop layout: the tab bar becomes a sidebar, the main tabs get a wider column, the landing page splits into photos and pitch, and the map fills the space. The sketch controls (screen jump, role, reset, demo login codes) open from a button in the bottom-left corner on a tablet or desktop. On a phone they're hidden.
 
 **Every map is a real, interactive map:** drag to pan, scroll or pinch to zoom, double-tap to zoom in, and use the zoom and home buttons. Pins open what they stand for, and the map stays where it is when you tap one. On a computer, the sideways rows on Discover scroll with the mouse wheel or by dragging.
 

@@ -14,8 +14,9 @@
 </head>
 <body>
   <div class="shell">
-    <!-- Desktop only: demo controls next to the phone. Hidden on a real phone. -->
-    <aside class="side" aria-label="Sketch controls">
+    <!-- Demo controls: a floating panel on a tablet or desktop, opened from its button. Hidden on a phone. -->
+    <button type="button" class="side-toggle" id="side-toggle" aria-expanded="false" aria-controls="side" aria-label="Sketch controls"><span>Sketch controls</span></button>
+    <aside class="side" id="side" aria-label="Sketch controls">
       <div class="brand" id="side-brand"></div>
       <p>Sketch 2 · the Figma redesign, built on Sketch 1's server, database and AI.</p>
       <span class="ai-pill" id="ai-pill"><i></i><span>Connecting…</span></span>

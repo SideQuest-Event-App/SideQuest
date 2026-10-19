@@ -192,6 +192,9 @@
   A.dfCats = (c) => { DF().cats = c ? [c] : []; };
   A.dfFriends = (v) => { DF().friends = !!v; };
   A.dfAmen = (n) => toggle(DF().amen, n);
+  // Sliders: "" turns the limit off; the price slider's top stop ($100+) and the chip's x do the same
+  A.dfPrice = (v) => { DF().price = v === "" || Number(v) >= 100 ? "" : Number(v); };
+  A.dfDist = (v) => { DF().dist = v === "" ? "" : Number(v); };
   A.dfClear = () => { U().df = { tod: "Anytime", cats: [], price: "", dist: "", friends: false, after: "", amen: [] }; };
   A.setWeekTab = (t) => { U().weekTab = t; };
   A.openMix = (l) => {
@@ -213,18 +216,55 @@
   };
   A.shareWeek = () => shareText("My Weekly Sidequests on Sidequest, picked for my taste.");
   A.shareMix = () => shareText(`The ${U().mix || "Live Sets"} Vibe Mix on Sidequest this week.`);
-  A.search = async () => {
+  // Search: the AI ranks a page of picks within the filters that are on, and the results page reveals them 5 at a
+  // time as you scroll, asking for the next page once they've all been shown. Changing a filter searches again.
+  const REVEAL = 5;
+  let searchRun = 0; // only the latest search may write its answer
+  A.search = (arg, el, again = false) => {
     const s = U().search;
-    const q = s.q.trim();
+    const q = again ? s.ran : s.q.trim();
     if (!q) return toast("Say what you're in the mood for, like \"jazz and cheap eats\".");
-    Object.assign(s, { ran: q, loading: true, result: null, error: null });
-    SQ.go("search");
-    try {
-      s.result = await SQ.post("/api/search", { userId: SQ.userId(), query: q });
-    } catch (err) {
-      s.error = err.message;
+    const run = ++searchRun;
+    Object.assign(s, { ran: q, loading: true, result: null, error: null, matches: [], shown: REVEAL, more: false, loadingMore: false, sig: SQ.filterSig() });
+    if (SQ.u.screen !== "search") SQ.go("search");
+    else SQ.render();
+    SQ.post("/api/search", { userId: SQ.userId(), query: q, only: SQ.filteredIds() })
+      .then((r) => {
+        if (run !== searchRun) return;
+        Object.assign(s, { result: r, matches: r.matches, more: r.more });
+      }, (err) => {
+        if (run === searchRun) s.error = err.message;
+      })
+      .finally(() => {
+        if (run !== searchRun) return;
+        s.loading = false;
+        SQ.render();
+      });
+  };
+  // The results page reached its end: show the next 5, fetching another page first if they've all been shown
+  A.searchMore = async () => {
+    const s = U().search;
+    if (s.loading || s.loadingMore) return;
+    if (s.shown < s.matches.length) {
+      s.shown += REVEAL;
+      return;
     }
-    s.loading = false;
+    if (!s.more) return;
+    const run = searchRun;
+    s.loadingMore = true;
+    SQ.render();
+    try {
+      const exclude = [...s.matches.map((m) => m.id), ...me().notForMe];
+      const r = await SQ.post("/api/search", { userId: SQ.userId(), query: s.ran, only: SQ.filteredIds(), exclude });
+      if (run !== searchRun) return;
+      s.matches = [...s.matches, ...r.matches];
+      s.more = r.more && r.matches.length > 0;
+      s.shown += REVEAL;
+    } catch (err) {
+      if (run === searchRun) s.more = false;
+      toast(err.message);
+    }
+    if (run === searchRun) s.loadingMore = false;
   };
   A.openQuest = (id) => {
     U().quest = Number(id);
