@@ -1,14 +1,16 @@
-// Meetup: the public "find events" pages for in-person events within 25 miles of Toronto, one day
-// at a time (each page shows a day's top events, so it's read twice: by relevance and by time),
-// plus the Toronto city page. Then each event's page for the venue's coordinates, fee and photo.
-// Meetup's official API needs a paid Pro account, and /meetup_api is off-limits in robots.txt.
+// Meetup: each Toronto group's upcoming-events page (meetup.com/<group>/events/), then each event's page for
+// the venue's coordinates, fee and photo. The groups are the ones in meetup-groups.json, the ones behind last
+// run's Meetup events, and any new ones on the Toronto city page.
+// Meetup's robots.txt rules out its search pages (/find/ with location, distance or date filters), and its
+// official API needs a paid Pro account, so groups are found this way instead.
 
+const fs = require("fs");
+const path = require("path");
 const { get, jsonLdEvents, nextData } = require("../fetch");
 
-const ymd = (d) => d.toLocaleDateString("sv-SE", { timeZone: "America/Toronto" });
-const addDays = (s, n) => ymd(new Date(Date.parse(`${s}T12:00:00Z`) + n * 86400000));
-// Toronto's UTC offset on a given day, as "-04:00" or "-05:00"
-const offsetOn = (s) => (new Date(`${s}T12:00:00-04:00`).toLocaleString("en-US", { timeZone: "America/Toronto", hour: "numeric", hour12: false }) === "12" ? "-04:00" : "-05:00");
+const GROUPS_FILE = path.join(__dirname, "..", "meetup-groups.json");
+const PER_GROUP = 15; // a group's next events; weekly series repeat, so more would mostly be the same night
+const groupOf = (url) => (String(url).match(/meetup\.com\/([A-Za-z0-9-]+)\/events\/\d+/) || [])[1];
 
 const eventLinks = (html) => jsonLdEvents(html).filter((e) => e.url && /meetup\.com\/[^/]+\/events\/\d+/.test(e.url) && !/Online/.test(e.eventAttendanceMode || "")).map((e) => e.url.split("?")[0]);
 
@@ -38,30 +40,34 @@ function eventPageInfo(html) {
   };
 }
 
-async function fetchMeetup({ start, end, max, log }) {
+async function fetchMeetup({ max, log, previous = [] }) {
   const urls = new Set();
-  const find = (day, sort) => {
-    const off = offsetOn(day);
-    const q = new URLSearchParams({ location: "ca--on--Toronto", source: "EVENTS", eventType: "inPerson", distance: "twentyFiveMiles", dateRange: "custom", customStartDate: `${day}T00:00:00${off}`, customEndDate: `${day}T23:59:00${off}` });
-    if (sort) q.set("sortField", sort);
-    return `https://www.meetup.com/find/?${q}`;
-  };
+  let known = [];
   try {
-    for (const u of eventLinks(await get("https://www.meetup.com/cities/ca/on/toronto/"))) urls.add(u);
+    known = JSON.parse(fs.readFileSync(GROUPS_FILE, "utf8"));
+  } catch {}
+  const groups = new Set([...known, ...previous.filter((e) => e.source === "Meetup").map((e) => groupOf(e.sourceUrl)).filter(Boolean)]);
+  try {
+    for (const u of eventLinks(await get("https://www.meetup.com/cities/ca/on/toronto/"))) {
+      urls.add(u);
+      if (groupOf(u)) groups.add(groupOf(u));
+    }
   } catch (err) {
     log(`  meetup city page: ${err.message}`);
   }
-  const last = ymd(end);
-  for (let day = ymd(start); day <= last && urls.size < max; day = addDays(day, 1)) {
-    for (const sort of [null, "DATETIME"]) {
-      try {
-        for (const u of eventLinks(await get(find(day, sort)))) urls.add(u);
-      } catch (err) {
-        log(`  meetup ${day}: ${err.message}`);
-      }
+  log(`  meetup: reading ${groups.size} groups' upcoming events`);
+  for (const g of groups) {
+    if (urls.size >= max) break;
+    try {
+      const html = await get(`https://www.meetup.com/${g}/events/`);
+      const ids = [...new Set([...html.matchAll(new RegExp(`/${g}/events/(\\d{6,})`, "g"))].map((m) => m[1]))].slice(0, PER_GROUP);
+      for (const id of ids) urls.add(`https://www.meetup.com/${g}/events/${id}/`);
+    } catch (err) {
+      log(`  meetup ${g}: ${err.message}`);
     }
-    if (day.endsWith("01") || day.endsWith("15")) log(`  meetup: through ${day}, ${urls.size} events found`);
   }
+  // Keep the list of groups for next time (in CI this only lasts the run; last run's events carry them over)
+  if (groups.size > known.length) fs.writeFileSync(GROUPS_FILE, JSON.stringify([...groups].sort(), null, 1) + "\n");
   const list = [...urls].slice(0, max);
   log(`  meetup: ${list.length} in-person events, reading each event page`);
 

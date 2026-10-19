@@ -68,3 +68,27 @@
 
 ## Sidequests
 - Sidequest Wrapped cards hidden (`SHOW_WRAPPED` in `screens-attendee.js` brings them back). The Wrapped screen itself still exists.
+# Sketch 2 changelog: 2026-10-19 (event import)
+
+## Automation
+- New GitHub Action `.github/workflows/import-events.yml`: all sources on Mondays; Ticketmaster and Instagram on Thursdays. Uses no AI.
+- The import goes to Supabase Storage (private bucket "imports", gzipped). The server checks for a new one every 6 hours and loads it without a restart.
+- The window is now 3 months (was 4).
+- Source order: Ticketmaster, Instagram, then DICE, Meetup, Luma, City of Toronto, Toronto Public Library, Eventbrite. The earlier source wins a tie between duplicates.
+
+## Sources
+- New: Toronto Public Library, from TPL's open-data feed. Only adult outings (arts, crafts, games, book clubs, writing, film); a weekly program shows its next 4 dates. About 800 events.
+- Meetup now reads Toronto groups' event pages (`import/meetup-groups.json`, 189 groups, plus new ones from the city page). Its search pages are ruled out by Meetup's robots.txt, which the old importer had been using.
+- NOW Toronto isn't imported: it answers our importer with 403.
+- Instagram split in two. `node import/instagram.js` (by hand, Claude Code) downloads and reads new posts. The scheduled run only picks up the saved events.
+
+## Instagram
+- `reference/instagram-accounts.md` is now the account list: 61 accounts, with posts read, events found and paused notes. The by-hand run keeps the numbers up to date.
+- Guardrails: at most 40 AI calls a run (`IG_MAX_CALLS`), 2 images per post, accounts paused after 20 posts read with no events, downloaded images deleted once read, and old readings dropped.
+
+## Guardrails
+- The importer checks every site's robots.txt (and its Crawl-delay) before each request, and stops asking a site that answers 403 or 429.
+- A source that fails, or brings back under half of last run's events, keeps last run's events.
+
+## Repo
+- `sketch-1/import/.cache/` (1,373 files, ~270 MB) and `instagram-raw.json` (4.6 MB) removed from git's index; they stay on disk and are now ignored.

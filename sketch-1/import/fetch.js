@@ -1,5 +1,6 @@
-// Polite fetching for the importer: identifies itself honestly, waits between requests to the
-// same site, retries once, and caches every response in import/.cache so re-runs don't re-download.
+// Polite fetching for the importer: identifies itself honestly, follows each site's robots.txt (its rules and
+// Crawl-delay), waits between requests to the same site, retries once, stops asking a site that blocks or
+// rate-limits us, and caches every response in import/.cache so re-runs don't re-download.
 
 const fs = require("fs");
 const path = require("path");
@@ -12,6 +13,76 @@ const GAP_MS = Number(process.env.GAP_MS || 900); // between requests to the sam
 
 const lastHit = {};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------- robots.txt ----------
+// Official APIs and open-data downloads aren't crawling, so robots.txt doesn't govern them (Facebook's, for one,
+// turns away every crawler, though the Graph API is how Instagram data is meant to be read)
+const API_HOSTS = new Set(["app.ticketmaster.com", "graph.facebook.com", "ckan0.cf.opendata.inter.prod-toronto.ca"]);
+const UA_TOKEN = "sidequestsketch";
+const robots = {}; // host -> Promise<{ rules: [[allow, pattern]], delayMs }>
+const blocked = {}; // host -> why we've stopped asking it this run
+
+// The rules for us: a group naming our user-agent if there is one, otherwise the "*" group
+function parseRobots(text) {
+  const groups = [];
+  let cur = null;
+  let lastWasAgent = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/#.*/, "").trim();
+    const m = line.match(/^([A-Za-z-]+)\s*:\s*(.*)$/);
+    if (!m) continue;
+    const [key, value] = [m[1].toLowerCase(), m[2].trim()];
+    if (key === "user-agent") {
+      if (!lastWasAgent) groups.push((cur = { agents: [], rules: [], delay: null }));
+      cur.agents.push(value.toLowerCase());
+      lastWasAgent = true;
+      continue;
+    }
+    lastWasAgent = false;
+    if (!cur) continue;
+    if (key === "allow" || key === "disallow") {
+      if (value) cur.rules.push([key === "allow", value]);
+      else if (key === "disallow") cur.rules.push([true, "/"]); // "Disallow:" with nothing means allow all
+    } else if (key === "crawl-delay" && Number(value) > 0) cur.delay = Number(value);
+  }
+  const mine = groups.filter((g) => g.agents.some((a) => a !== "*" && UA_TOKEN.includes(a)));
+  const use = mine.length ? mine : groups.filter((g) => g.agents.includes("*"));
+  return { rules: use.flatMap((g) => g.rules), delayMs: Math.max(0, ...use.map((g) => (g.delay || 0) * 1000)) };
+}
+// Google's matching: * is any run of characters, $ ends the path, the longest pattern wins, Allow wins a tie
+function allowedBy({ rules }, pathAndQuery) {
+  let best = null;
+  for (const [allow, pattern] of rules) {
+    const re = new RegExp("^" + pattern.replace(/[.+?^{}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\\\$$/, "$"));
+    if (!re.test(pathAndQuery)) continue;
+    if (!best || pattern.length > best[1].length || (pattern.length === best[1].length && allow)) best = [allow, pattern];
+  }
+  return !best || best[0];
+}
+function robotsFor(origin) {
+  if (!robots[origin]) {
+    robots[origin] = (async () => {
+      try {
+        const res = await fetch(`${origin}/robots.txt`, { headers: { "user-agent": UA }, redirect: "follow", signal: AbortSignal.timeout(20000) });
+        if (res.status >= 400 && res.status < 500) return { rules: [], delayMs: 0 }; // no robots.txt: everything is allowed
+        if (!res.ok) throw new Error(String(res.status));
+        return parseRobots(await res.text());
+      } catch (err) {
+        // Can't read it (server error, timeout): treat the whole site as off-limits this run, as Google does
+        return { rules: [[false, "/"]], delayMs: 0, error: err.message };
+      }
+    })();
+  }
+  return robots[origin];
+}
+// Throws if robots.txt rules this address out; returns the site's Crawl-delay in ms
+async function checkRobots(url) {
+  const u = new URL(url);
+  if (API_HOSTS.has(u.host)) return 0;
+  const r = await robotsFor(u.origin);
+  if (!allowedBy(r, u.pathname + u.search)) throw new Error(`robots.txt disallows ${url}${r.error ? ` (robots.txt unreadable: ${r.error})` : ""}`);
+  return r.delayMs;
+}
 
 // extract: optional (body) => JSON-able value. Only that value is cached, so big pages we read
 // thousands of (Eventbrite and Meetup event pages) don't fill the disk.
@@ -30,7 +101,9 @@ async function get(url, { json = false, headers = {}, extract = null, timeoutMs 
   if (process.env.OFFLINE) throw new Error(`not cached (offline): ${url}`);
 
   const host = new URL(url).host;
-  const wait = (lastHit[host] || 0) + (HOST_GAP[host] || GAP_MS) - Date.now();
+  if (blocked[host]) throw new Error(`skipped, ${host} ${blocked[host]}: ${url}`);
+  const crawlDelay = await checkRobots(url);
+  const wait = (lastHit[host] || 0) + Math.max(HOST_GAP[host] || GAP_MS, crawlDelay) - Date.now();
   if (wait > 0) await sleep(wait);
   lastHit[host] = Date.now();
 
@@ -40,9 +113,12 @@ async function get(url, { json = false, headers = {}, extract = null, timeoutMs 
       const res = await fetch(url, { headers: { "user-agent": UA, "accept-language": "en-CA,en;q=0.8", ...headers }, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
       if (res.status === 429) {
         lastErr = new Error(`429 rate limited: ${url}`);
-        await sleep(30000);
+        if (attempt) blocked[host] = "is rate-limiting us (429), so we stopped asking it this run";
+        else await sleep(30000);
         continue;
       }
+      // A site that turns us away isn't asked again this run
+      if (res.status === 403 || res.status === 401) blocked[host] = `turned us away (${res.status}), so we stopped asking it this run`;
       if (!res.ok) throw new Error(`${res.status} ${url}`);
       const body = await res.text();
       if (extract) {
@@ -54,6 +130,7 @@ async function get(url, { json = false, headers = {}, extract = null, timeoutMs 
       return json ? JSON.parse(body) : body;
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
+      if (blocked[host]) break;
       await sleep(2000);
     }
   }
@@ -132,4 +209,4 @@ function nextData(html) {
   }
 }
 
-module.exports = { get, jsonLdEvents, embeddedObject, nextData, sleep };
+module.exports = { get, jsonLdEvents, embeddedObject, nextData, sleep, checkRobots, parseRobots, allowedBy, blocked };

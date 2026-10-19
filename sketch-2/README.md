@@ -71,6 +71,23 @@ The exceptions, each marked in the code with a `ponytail:` comment:
 - **Review.** There's no review team in this sketch, so submitting for review approves the host straight away.
 - **Scheduled announcements and sidequests** go out on the first app load after their time, not to the minute.
 
+## Where the events come from (automatic import)
+
+Sketch 1's importer (`sketch-1/import/`) gathers the next three months of in-person GTA events. A GitHub Action (`.github/workflows/import-events.yml`) runs it on its own and puts the result in Supabase Storage. This server checks for a new import every 6 hours, so you don't need to commit, redeploy or restart.
+
+- **Monday:** every source. **Thursday:** Ticketmaster and Instagram only; the other sources keep Monday's events.
+- **Order** (the earlier source wins a tie between duplicates): Ticketmaster, Instagram, DICE, Meetup, Luma, City of Toronto, Toronto Public Library, Eventbrite.
+- **Instagram is read by hand,** with Claude Code (no extra cost): from `sketch-1/`, run `node import/instagram.js` once or twice a week, before Monday. It reads only posts it hasn't read yet, saves their events to Supabase, and updates the numbers in `reference/instagram-accounts.md`. To add or drop an account, edit that file. The scheduled runs never use the AI.
+- **Not imported:** NOW Toronto (it turns automated visitors away), Resident Advisor, Partiful and blogTO (their robots.txt or terms rule it out).
+
+One-time setup: on GitHub, go to Settings → Secrets and variables → Actions and add `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `TICKETMASTER_API_KEY` (the same values as in `sketch-1/.env`). Then on the Actions tab, open "Import events" and click "Run workflow" for the first import. Until that first import exists, the server uses `sketch-1/seed/events.json`.
+
+Guardrails:
+- Every site is read within its robots.txt, including its Crawl-delay. A site that answers 403 or 429 (blocked or rate-limited) isn't asked again that run.
+- If a source fails, or brings back under half of last run's events, it keeps last run's events.
+- Instagram makes at most `IG_MAX_CALLS` AI calls per run (default 40), reads 2 images per post, and reads each post only once. It pauses accounts with 20 posts read and no events, and deletes downloaded images once they're read.
+- Only events in the next three months are kept. Neither the import nor its download cache is committed to git.
+
 ## Kept from Sketch 1 beyond the design
 
 These Sketch 1 features have no screen in the Figma file. They were kept and restyled with the design's tokens:

@@ -6,14 +6,22 @@
 const fs = require("fs");
 const path = require("path");
 const { dedupe } = require("../../sketch-1/import/dedupe");
+const store = require("../../sketch-1/lib/store");
 
 const ROOT = path.join(__dirname, "..");
 const DATA_DIR = path.join(ROOT, "data");
 const DB_PATH = path.join(DATA_DIR, "db.json");
 // Sketch 2 shares Sketch 1's imported listings (read-only), so one import feeds both
 const readSeed = (name) => JSON.parse(fs.readFileSync(path.join(ROOT, "..", "sketch-1", "seed", name), "utf8"));
-// seed/events.json is written by `node import/run.js`: real listings plus when they were imported
-function seedEvents() {
+// The import (sketch-1/import/run.js): real listings plus when they were imported. The weekly scheduled import
+// puts it in Supabase Storage; without Supabase (or before the first one) it's sketch-1/seed/events.json.
+async function seedEvents() {
+  try {
+    const stored = await store.get("events.json");
+    if (stored) return stored;
+  } catch (err) {
+    console.warn(`Couldn't read the import from Supabase Storage (${err.message}); using sketch-1/seed/events.json`);
+  }
   const file = readSeed("events.json");
   return Array.isArray(file) ? { importedAt: "sample", events: file } : file;
 }
@@ -27,8 +35,7 @@ const FRIENDS = {
   Priya: { full: "Priya Nair", handle: "@priya.n", vibes: ["Climbing", "Run & ride", "Art & making"], origin: "kipling", budget: 40 },
 };
 
-function seed() {
-  const { importedAt, events } = seedEvents();
+function seed({ importedAt, events }) {
   return {
     version: 1,
     createdAt: new Date().toISOString(),
@@ -109,22 +116,31 @@ async function load() {
       data = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
     } catch {}
   }
+  const fresh = await seedEvents();
   if (!data) {
-    data = seed();
+    data = seed(fresh);
     replaceEvents = true;
     await write();
     return data;
   }
-  // A fresh import replaces the listings but keeps accounts, logs, requests, the quests hosts published or claimed,
-  // and the events attendees added; where one of those is also in the import, it's kept as one listing
-  const fresh = seedEvents();
-  if (data.eventsImportedAt !== fresh.importedAt) {
-    data.events = dedupe([...data.events.filter((e) => e.publishedBy || e.submittedBy || e.importedBy), ...fresh.events]).events;
-    data.eventsImportedAt = fresh.importedAt;
-    replaceEvents = true;
-    await write();
-  }
+  await takeImport(fresh);
   return data;
+}
+
+// A fresh import replaces the listings but keeps accounts, logs, requests, the quests hosts published or claimed,
+// and the events attendees added; where one of those is also in the import, it's kept as one listing
+async function takeImport(fresh) {
+  if (!fresh || data.eventsImportedAt === fresh.importedAt) return false;
+  data.events = dedupe([...data.events.filter((e) => e.publishedBy || e.submittedBy || e.importedBy), ...fresh.events]).events;
+  data.eventsImportedAt = fresh.importedAt;
+  replaceEvents = true;
+  await write();
+  return true;
+}
+// The server calls this every few hours, so a new weekly import shows up without a restart
+async function checkImport() {
+  if (!data || !store.configured()) return false;
+  return takeImport(await seedEvents());
 }
 
 // Accounts still in onboarding live in memory only: nothing about people who give up partway is stored
@@ -190,8 +206,8 @@ function saveNow() {
   return done;
 }
 
-function reset() {
-  data = seed();
+async function reset() {
+  data = seed(await seedEvents());
   replaceEvents = true;
   replaceAccounts = true;
   save();
@@ -203,6 +219,7 @@ module.exports = {
     return data;
   },
   load,
+  checkImport,
   save,
   saveNow,
   reset,

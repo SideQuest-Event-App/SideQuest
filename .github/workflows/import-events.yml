@@ -1,0 +1,58 @@
+# Imports the next three months of GTA events and puts them in Supabase Storage, where Sketch 2's server picks
+# them up within 6 hours (no commit, no redeploy). See sketch-1/import/run.js.
+#   Monday:   every source.
+#   Thursday: Ticketmaster and Instagram only; everyone else keeps Monday's events.
+# Instagram here is only the events saved by the last `node sketch-1/import/instagram.js` (run by hand);
+# this workflow never uses the AI, so it never touches the paid API key.
+# Needs repository secrets SUPABASE_URL, SUPABASE_SECRET_KEY and TICKETMASTER_API_KEY
+# (GitHub: Settings → Secrets and variables → Actions).
+
+name: Import events
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Monday 9:00 UTC (5 AM in Toronto)
+    - cron: "0 9 * * 4" # Thursday
+  workflow_dispatch: # "Run workflow" button on the Actions tab
+    inputs:
+      only:
+        description: "Only these sources, comma-separated (empty = all)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: import-events
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            sketch-1/import
+            sketch-1/lib
+            sketch-2/reference
+          sparse-checkout-cone-mode: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Import
+        working-directory: sketch-1
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
+          AI: "off"
+          UPLOAD: "1"
+          # Thursday's run, or a hand-picked set of sources, keeps everyone else's events from the last run
+          ONLY: ${{ github.event.schedule == '0 9 * * 4' && 'Ticketmaster,Instagram' || inputs.only }}
+          MERGE: ${{ (github.event.schedule == '0 9 * * 4' || inputs.only) && '1' || '' }}
+        run: node import/run.js

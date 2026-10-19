@@ -2,6 +2,16 @@
 
 These are from the 2026-10-18 revision (claude.md), most important first. This replaces the earlier list from 2026-10-16, whose changes never reached the code.
 
+## Event import (2026-10-19)
+
+1. **Add three GitHub secrets, then run it once.** On GitHub, go to Settings → Secrets and variables → Actions and add `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `TICKETMASTER_API_KEY`. Then go to Actions → "Import events" → Run workflow. Nothing has run on GitHub yet, so I haven't seen a full run there. A full run reads a few thousand pages slowly (the robots.txt pacing), so expect it to take about an hour or more; the job allows up to 4 hours.
+2. **Instagram needs you once or twice a week:** run `node import/instagram.js` from `sketch-1/`. If you skip it, the scheduled runs keep the last saved Instagram events and the run log warns once they're over 8 days old. The Instagram token expires every 60 days; when it does, the script says so and builds from the last download.
+3. **Sketch 1 doesn't use the automatic import.** Only Sketch 2's server reads Supabase Storage. Sketch 1 still reads `sketch-1/seed/events.json`, which now changes only when someone runs the importer by hand.
+4. **Toronto Public Library adds about 800 listings,** mostly book clubs, chess, knitting and writing groups, all free. They're only picked for people whose tastes match, but they're about a third of all listings. To have fewer, tighten `OUTINGS` or `PER_PROGRAM` in `sources/tpl.js`.
+5. **Meetup may bring back fewer events** now that it reads only known groups (the search pages it used are against Meetup's robots.txt). New groups come in only from Meetup's Toronto city page.
+6. **The repo is still large in git history.** The download cache is out of the index now, but past commits still hold it. Shrinking history means rewriting it (for example with `git filter-repo`), which everyone with a copy would need to re-clone, so I haven't done it.
+7. **The untracking is staged, not committed.** `git status` shows the cache files and `instagram-raw.json` as deleted. That's only from git's index; the files are still on disk.
+
 ## Needs you
 
 1. **Render service for Sketch 2.** The code is ready, but the service has to be created on Render. The steps are in README → "Put it online (Render)". Leave Root Directory empty and use the start command `node sketch-2/server.js`, because Sketch 2 reads Sketch 1's events and importer.

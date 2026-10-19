@@ -1248,8 +1248,8 @@ A.flagInfo = (ctx, { eventId, field, note }) => {
   return { flags: e.flags.length };
 };
 
-A.reset = () => {
-  db.reset();
+A.reset = async () => {
+  await db.reset();
   return { reset: true };
 };
 
@@ -1836,6 +1836,8 @@ db.load().then(() => server.listen(PORT, () => {
   const upcoming = db.data.events.filter((e) => !isOver(e));
   console.log(`${upcoming.length} upcoming events in the database (imported ${db.data.eventsImportedAt})`);
   track("server_start", { aiMode: m, events: db.data.events.length });
+  // The weekly import lands in Supabase Storage; look for a new one every 6 hours
+  setInterval(() => db.checkImport().then((took) => took && console.log(`New import loaded (${db.data.eventsImportedAt})`), (err) => console.error("Import check failed:", err.message)), 6 * 3600 * 1000).unref();
 })).catch((err) => {
   console.error("Could not load the database:", err.message);
   process.exit(1);

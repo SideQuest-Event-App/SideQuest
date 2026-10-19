@@ -21,6 +21,7 @@ try {
 
 function mode() {
   if (process.env.AI === "off") return "keywords"; // `AI=off node server.js` skips the AI entirely
+  if (process.env.AI === "claude-code") return claudeCodeAvailable ? "claude-code" : "keywords"; // your subscription, never the paid key
   if (API_KEY) return "api";
   if (claudeCodeAvailable) return "claude-code";
   return "keywords";
