@@ -38,3 +38,33 @@
 ## Notes
 - `concerns.md` rewritten with open issues and decisions.
 - Nothing committed yet.
+
+# Sketch 2 changelog: 2026-10-19
+
+## Home (Discover)
+- Removed "Monday · Toronto" above "Your week, picked." and "Fresh every Monday" under Weekly Sidequests.
+
+## Filters
+- New order: Category, Date, Time of day, Price, Distance from home, Who's going, Amenities.
+- Date (new): Any day, Today, Tomorrow, This weekend, Custom. Custom shows From and To date pickers (either can be left empty).
+- Time of day: added Custom, with From and To time pickers. A range that ends before it starts runs past midnight (8 PM to 2 AM).
+- Who's going: "Friends going" is now "Friends" (the chip and the active-filter chip).
+- Removed "Starts after" (Custom time of day covers it).
+- Active filters show as chips: "This weekend", "Oct 22 to Oct 23", "8 PM to 2 AM", etc.
+
+## Search
+- Result rows are unchanged (match tag, the AI's reason, "Not for me").
+- The big boxes at the end are replaced by "That's everything for now", a short line naming what wasn't found, "Request this sidequest" and "Know one? Add an event". With no results the heading is "Nothing fit that yet".
+- The last search stays until a new one: leaving Search keeps its results, searching the same words again reopens them without asking the AI again, and a reload of the tab keeps them.
+- The top line is now "1346 matches with Claude API" (or "… keyword matches (no AI)") in the same small grey text; the AI tag and the "of 3748 sidequests fit … trip" wording are gone.
+- Search results have the tab bar. While a search is open, the Discover tab goes back to its results; the back arrow on Search closes it and Discover shows For you again.
+
+## Community
+- Removed the "Plan with friends" overline.
+- Friends' highlights hidden (`SHOW_HIGHLIGHTS` in `screens-attendee.js` brings it back).
+
+## Add Event
+- Removed the "Tell hosts what you want" overline.
+
+## Sidequests
+- Sidequest Wrapped cards hidden (`SHOW_WRAPPED` in `screens-attendee.js` brings them back). The Wrapped screen itself still exists.

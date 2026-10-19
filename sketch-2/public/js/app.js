@@ -31,12 +31,15 @@
   };
 
   // ---------- UI state (not saved on the server) ----------
+  // Discover filters. date: "" (any day) | "Today" | "Tomorrow" | "Weekend" | "Custom" (from/to, YYYY-MM-DD);
+  // tod: "Anytime" | "Daytime" | "Evening" | "Custom" (todFrom/todTo, HH:MM)
+  SQ.emptyDf = () => ({ cats: [], date: "", from: "", to: "", tod: "Anytime", todFrom: "", todTo: "", price: "", dist: "", friends: false, amen: [] });
   SQ.d = null; // server state, from /api/state
   SQ.report = null; // host report, from /api/host-report
   SQ.u = {
     screen: "landing",
     history: [],
-    df: { tod: "Anytime", cats: [], price: "", dist: "", friends: false, after: "", amen: [] }, // Discover filters
+    df: SQ.emptyDf(),
     weekTab: "All",
     mix: null,
     mapSel: null,
@@ -72,6 +75,20 @@
     shot: null, // the event being added from a screenshot
     flag: null, // { eventId, field, note }: the "Flag incorrect info" form
   };
+
+  // The last search's results, kept for this tab so a reload doesn't lose them (only for the account that ran it)
+  SQ.saveSearch = () => {
+    const { q, ran, result, matches, shown, more, sig } = SQ.u.search;
+    try {
+      sessionStorage.setItem("sq2.search", JSON.stringify({ user: ids.user, q, ran, result, matches, shown, more, sig }));
+    } catch {}
+  };
+  function restoreSearch() {
+    try {
+      const { user, ...saved } = JSON.parse(sessionStorage.getItem("sq2.search") || "null") || {};
+      if (user && user === ids.user && saved.result) Object.assign(SQ.u.search, saved);
+    } catch {}
+  }
 
   // A random id for this browser tab, so analytics can count visits (it isn't tied to who you are)
   const sessionId = (() => {
@@ -210,12 +227,18 @@
     const target = guard(id);
     if (SQ.u.screen !== target) trackScreen(target, SQ.u.screen);
     if (ROOTS.includes(target)) SQ.u.history = [];
+    // Search results sit on top of Discover: back always leads there, and the Discover tab returns to them
+    else if (target === "search") {
+      SQ.u.history = ["discover"];
+      SQ.u.searchOpen = true;
+    }
     else if (SQ.u.screen !== target) SQ.u.history.push(SQ.u.screen);
     direction = SQ.u.screen === target ? "" : "enter";
     SQ.u.screen = target;
     if (target === "notifications" && SQ.d.user && SQ.d.user.notifications.some((n) => !n.read)) SQ.act("readNotifications").then(render, () => {});
     try {
       sessionStorage.setItem("sq2.screen", target);
+      sessionStorage.setItem("sq2.searchOpen", SQ.u.searchOpen ? "1" : "");
     } catch {}
     render(true);
   };
@@ -223,6 +246,7 @@
     const prev = SQ.u.history.pop();
     direction = "enter-back";
     const from = SQ.u.screen;
+    if (from === "search") SQ.u.searchOpen = false; // leaving the results with back closes the search
     SQ.u.screen = guard(prev || (SQ.screens[SQ.u.screen].role === "host" ? "host-demand" : "discover"));
     if (SQ.u.screen !== from) trackScreen(SQ.u.screen, from);
     render(true);
@@ -568,8 +592,14 @@
       last = sessionStorage.getItem("sq2.screen");
     } catch {}
     const u = SQ.d.user;
+    restoreSearch();
+    if (last === "search" && SQ.u.search.result) SQ.u.history = ["discover"];
+    // A reload elsewhere keeps the Discover tab pointing at the results if they were still open
+    try {
+      SQ.u.searchOpen = !!SQ.u.search.result && (last === "search" || sessionStorage.getItem("sq2.searchOpen") === "1");
+    } catch {}
     const fallback = u ? (u.registered ? "discover" : "ob-vibes") : "landing";
-    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", "search", "host-request", "host-checkin", "host-recap", "host-published", "host-create", "host-create-dayinfo", "host-draft-test", "spot", "add-event"].includes(last) ? last : fallback);
+    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", ...(SQ.u.search.result ? [] : ["search"]), "host-request", "host-checkin", "host-recap", "host-published", "host-create", "host-create-dayinfo", "host-draft-test", "spot", "add-event"].includes(last) ? last : fallback);
     // A shared link to one sidequest (?quest=id) opens it
     const linked = Number(new URLSearchParams(location.search).get("quest"));
     if (linked && SQ.ev(linked)) {

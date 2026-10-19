@@ -376,6 +376,10 @@ button.card { display: block; text-align: left; }
 .hit-reason .ic { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--hot-text); }
 .hit-not { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; margin-left: 78px; font-weight: 600; font-size: 13px; line-height: 18px; color: var(--text-tertiary); }
 .hit-not .ic { width: 16px; height: 16px; }
+/* The end of the results: a short note, Request this sidequest, and "Know one? Add an event" */
+.search-end { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 12px 28px; text-align: center; }
+.search-end p.t-body-m { max-width: 340px; }
+.search-end .btn { width: auto; padding: 0 28px; margin-top: 4px; }
 .reveal-more { height: 1px; }
 
 /* Notice (Info / Success / Warning / Danger / Signature) */

@@ -15,7 +15,10 @@
     const u = me();
     const pending = u ? Object.entries(u.log).filter(([id, l]) => l.status === "going" && ev(id) && isPast(ev(id))).length : 0;
     const unread = u ? u.notifications.filter((n) => !n.read && n.requestId).length : 0;
-    return tabs([["discover", "Discover", "home2"], ["parties", "Community", "crew"], ["requests", "Add Event", "plus"], ["questlog", "Sidequests", "ticket"], ["profile", "Profile", "user"]], active, { questlog: pending, requests: unread });
+    // While a search is open, Discover goes back to its results (until the search is left with its back button)
+    const home = U().searchOpen ? "search" : "discover";
+    if (active === "discover") active = home;
+    return tabs([[home, "Discover", "home2"], ["parties", "Community", "crew"], ["requests", "Add Event", "plus"], ["questlog", "Sidequests", "ticket"], ["profile", "Profile", "user"]], active, { questlog: pending, requests: unread });
   }
   SQ.attendeeTabs = attendeeTabs;
 
@@ -305,34 +308,50 @@
   const distCap = (f) => (typeof f.dist === "number" ? f.dist : null);
   SQ.priceCapLabel = (p) => (p >= PRICE_MAX ? "$100+" : p ? `Up to $${p}` : "Free");
   SQ.distCapLabel = (k) => `Within ${k} km`;
-  const AFTER = [["5 PM", 17], ["8 PM", 20], ["10 PM", 22]];
   const AMEN = [["Step-free access", /accessib|wheelchair|step[- ]free/i, "access"], ["All ages", /all ages|all-ages|family|kids/i], ["Food", /food|eat|dinner|brunch|snack/i], ["Drinks", /drink|bar\b|beer|wine|cocktail/i], ["Small room", /intimate|small|cozy|limited/i]];
-  const TODS = [["Anytime", "clock"], ["Daytime", "sun"], ["Evening", "moon"]];
+  const TODS = [["Anytime", "clock"], ["Daytime", "sun"], ["Evening", "moon"], ["Custom", "edit"]];
+  const DATES = [["", "Any day"], ["Today"], ["Tomorrow"], ["Weekend", "This weekend"], ["Custom", "Custom", "cal"]];
+  // Custom date and time ranges. Either end can be left open; a time range that ends before it starts runs past midnight.
+  const hhmmOf = (e) => new Date(e.startsAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: TZ });
+  const inRange = (v, from, to) => (from && to && to < from ? v >= from || v <= to : (!from || v >= from) && (!to || v <= to));
+  const dayShort = (k) => new Date(`${k}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const clockShort = (t) => new Date(`2000-01-01T${t}:00`).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(":00", "");
+  const rangeLabel = (from, to, fmt) => (from && to ? `${fmt(from)} to ${fmt(to)}` : from ? `From ${fmt(from)}` : `Until ${fmt(to)}`);
+  const customDate = (f) => f.date === "Custom" && !!(f.from || f.to);
+  const customTime = (f) => f.tod === "Custom" && !!(f.todFrom || f.todTo);
+  function onDate(e, f) {
+    const k = SQ.dayKey(new Date(e.startsAt));
+    if (f.date === "Today") return k === SQ.dayKey(SQ.now());
+    if (f.date === "Tomorrow") return k === SQ.dayKey(new Date(SQ.now().getTime() + 864e5));
+    if (f.date === "Weekend") return isWeekend(e);
+    if (f.date === "Custom") return inRange(k, f.from, f.to);
+    return true;
+  }
   const DF = () => U().df;
   const tileVibes = (label) => (TILES.find((t) => t[0] === label) || [, , []])[2];
   function passes(e, f = DF()) {
     const h = hourOf(e);
     if (f.tod === "Daytime" && h >= 17) return false;
     if (f.tod === "Evening" && h < 17) return false;
+    if (customTime(f) && !inRange(hhmmOf(e), f.todFrom, f.todTo)) return false;
+    if (!onDate(e, f)) return false;
     if (f.cats.length && !f.cats.some((c) => tileVibes(c).some((v) => (e.vibes || []).includes(v)))) return false;
     const p = priceCap(f);
     if (p != null && !(e.price != null && e.price <= p)) return false;
     const d = distCap(f);
     if (d != null && !(kmFrom(e) <= d)) return false;
     if (f.friends && !(e.friends || []).length) return false;
-    const a = AFTER.find((x) => x[0] === f.after);
-    if (a && h < a[1]) return false;
     const text = `${(e.tags || []).join(" ")} ${e.description || ""} ${e.title}`;
     return f.amen.every((n) => AMEN.find((x) => x[0] === n)[1].test(text));
   }
   // The filters that are on, as [label shown on the chip, how to turn it off]
   const activeFilters = (f = DF()) => [
-    ...(f.tod !== "Anytime" ? [[f.tod, ["dfTod", "Anytime"]]] : []),
     ...f.cats.map((c) => [c, ["dfCat", c]]),
+    ...(f.date && (f.date !== "Custom" || customDate(f)) ? [[f.date === "Custom" ? rangeLabel(f.from, f.to, dayShort) : DATES.find((d) => d[0] === f.date)[1], ["dfDate", ""]]] : []),
+    ...(f.tod !== "Anytime" && (f.tod !== "Custom" || customTime(f)) ? [[f.tod === "Custom" ? rangeLabel(f.todFrom, f.todTo, clockShort) : f.tod, ["dfTod", "Anytime"]]] : []),
     ...(priceCap(f) != null ? [[SQ.priceCapLabel(priceCap(f)), ["dfPrice", ""]]] : []),
     ...(distCap(f) != null ? [[SQ.distCapLabel(distCap(f)), ["dfDist", ""]]] : []),
-    ...(f.friends ? [["Friends going", ["dfFriends", ""]]] : []),
-    ...(f.after ? [[`After ${f.after}`, ["dfSet", "after:"]]] : []),
+    ...(f.friends ? [["Friends", ["dfFriends", ""]]] : []),
     ...f.amen.map((n) => [n, ["dfAmen", n]]),
   ];
   // Search sends the ids that pass the filters (null when none are on), and searches again when they change
@@ -422,7 +441,7 @@
     else {
       const m = mixes();
       body = `<section class="disc-sec">
-          <div class="pad-x stack" style="gap:2px"><div class="section-header"><h2>Weekly Sidequests</h2><button data-go="weekly">See all (${all.length})</button></div><span class="t-caption c-secondary">Fresh every Monday</span></div>
+          <div class="pad-x section-header"><h2>Weekly Sidequests</h2><button data-go="weekly">See all (${all.length})</button></div>
           <div class="hscroll">${list.slice(0, 12).map(questCard).join("")}</div>
         </section>
         ${m.length ? `<section class="disc-sec">
@@ -430,10 +449,9 @@
           <div class="hscroll">${m.map(([l, p, n]) => `<button class="mix" data-act="openMix" data-arg="${esc(l)}" aria-label="${esc(l)}, ${n} sidequest${n === 1 ? "" : "s"} this week"><span class="mix-cover">${ph(p)}<span class="scrim"></span><span class="mix-count">${n}</span><span class="t-title-m">${esc(l)}</span></span></button>`).join("")}</div>
         </section>` : ""}`;
     }
-    const day = SQ.now().toLocaleDateString("en-US", { weekday: "long", timeZone: TZ });
     return screen(`<div class="disc-top">${discoverTop("list")}</div>
       <div class="disc-body">
-        <div class="disc-title pad-x"><span class="overline">${day} · Toronto</span><span class="t-display-xl">Your week,</span><span class="t-display-xl c-accent">picked.</span></div>
+        <div class="disc-title pad-x"><span class="t-display-xl">Your week,</span><span class="t-display-xl c-accent">picked.</span></div>
         ${U().feedError ? `<div class="pad-x"><div class="notice hot">${icon("x")}<span>${esc(U().feedError)}</span></div></div>` : ""}
         ${body}
       </div>`, { tabbar: attendeeTabs("discover") });
@@ -475,15 +493,18 @@
         <input type="range" class="range" style="--fill:${((value - min) / (max - min)) * 100}%" min="${min}" max="${max}" step="${step}" value="${value}" data-bind="df.${key}" data-format="${format}" data-change="${act}" aria-label="${title}">
         <div class="section-head"><span class="t-data c-secondary">${lo}</span><span class="t-data c-secondary">${hi}</span></div>
       </div>`;
-    const set = (key, list) => list.map(([v, l = v]) => chip(l, f[key] === v, { "data-act": "dfSet", "data-arg": `${key}:${v}` })).join("");
+    // Custom: two pickers under the chips, From and To
+    const pickers = (type, [fromKey, toKey], extra = {}) => `<div class="field-row two">${field("From", `df.${fromKey}`, f[fromKey], type, "", { "data-change": "dfRange", ...extra })}${field("To", `df.${toKey}`, f[toKey], type, "", { "data-change": "dfRange", ...extra })}</div>`;
     const fromSearch = U().history[U().history.length - 1] === "search";
     return screen(`<div class="pad stack" style="gap:20px;padding-top:8px">
-      ${group("Time of day", TODS.map(([l, ic]) => chip(l, f.tod === l, { "data-act": "dfTod", "data-arg": l }, ic)).join(""))}
-      <hr class="divider">${group("Category", chip("Any", !f.cats.length, { "data-act": "dfCats", "data-arg": "" }) + CAT_TILES.map((c) => chip(c, f.cats.includes(c), { "data-act": "dfCat", "data-arg": c })).join(""))}
+      ${group("Category", chip("Any", !f.cats.length, { "data-act": "dfCats", "data-arg": "" }) + CAT_TILES.map((c) => chip(c, f.cats.includes(c), { "data-act": "dfCat", "data-arg": c })).join(""))}
+      <hr class="divider">${group("Date", DATES.map(([v, l = v, ic]) => chip(l, f.date === v, { "data-act": "dfDate", "data-arg": v }, ic)).join(""))}
+      ${f.date === "Custom" ? pickers("date", ["from", "to"], { min: SQ.dayKey(SQ.now()) }) : ""}
+      <hr class="divider">${group("Time of day", TODS.map(([l, ic]) => chip(l, f.tod === l, { "data-act": "dfTod", "data-arg": l }, ic)).join(""))}
+      ${f.tod === "Custom" ? pickers("time", ["todFrom", "todTo"]) : ""}
       <hr class="divider">${slider("Price", "price", priceCap(f) ?? PRICE_MAX, 0, PRICE_MAX, 5, "priceCapLabel", "dfPrice", ["Free", "$100+"])}
       <hr class="divider">${slider("Distance from home", "dist", distCap(f) ?? DIST_MAX, DIST_MIN, DIST_MAX, 1, "distCapLabel", "dfDist", ["1 km", "Within 10 km"], distCap(f) == null ? "Anywhere" : "")}
-      <hr class="divider">${group("Who’s going", chip("Anyone", !f.friends, { "data-act": "dfFriends", "data-arg": "" }) + chip("Friends going", f.friends, { "data-act": "dfFriends", "data-arg": "1" }, "crew"))}
-      <hr class="divider">${group("Starts after", set("after", [["", "Any time"], ...AFTER.map((a) => [a[0]])]))}
+      <hr class="divider">${group("Who’s going", chip("Anyone", !f.friends, { "data-act": "dfFriends", "data-arg": "" }) + chip("Friends", f.friends, { "data-act": "dfFriends", "data-arg": "1" }, "crew"))}
       <hr class="divider">${group("Amenities", AMEN.map(([l, , ic]) => chip(l, f.amen.includes(l), { "data-act": "dfAmen", "data-arg": l }, ic || "")).join(""))}
     </div>`, { title: "Filters", close: true, footer: `<div class="footer-bar row">${btn("Clear", { "data-act": "dfClear", style: "width:110px;flex:none" }, "outline")}${btn(fromSearch ? "Show results" : `Show ${n} sidequest${n === 1 ? "" : "s"}`, { "data-back": "" })}</div>` });
   } };
@@ -539,18 +560,25 @@
           <button class="hit-not" data-act="notForMe" data-arg="${e.id}">${icon("thumbDown")}Not for me</button>
         </div>`;
       };
+      // What the AI couldn't find, as "jazz or cheap eats"
+      const gaps = r.unmet.map((x) => x.interest);
+      const gapText = gaps.length < 2 ? gaps.join("") : `${gaps.slice(0, -1).join(", ")} or ${gaps[gaps.length - 1]}`;
       body = `
-        <div class="stack-sm">${aiTag(r.mode)}<span class="t-caption c-tertiary">${l.fit} of ${l.total} sidequests fit${u.budget != null ? ` your ${u.budget ? `$${u.budget}` : "free-only"} budget` : ""}${u.origin && u.maxMinutes ? ` and ${u.maxMinutes}-min trip` : ""}</span></div>
+        <span class="t-caption c-tertiary">${r.mode === "keywords" ? `${l.fit} keyword matches (no AI)` : `${l.fit} matches with ${esc(SQ.aiLabel(r.mode))}`}</span>
         ${r.error ? `<div class="notice">${icon("sparkle")}<span>The AI didn't answer, so these are keyword matches.</span></div>` : ""}
-        ${shown.length ? `<div class="stack" style="gap:16px">${shown.map(hit).join('<hr class="divider">')}</div>` : empty("search", "Nothing fit that. Hosts can see this gap.")}
+        ${shown.length ? `<div class="stack" style="gap:16px">${shown.map(hit).join('<hr class="divider">')}</div>` : ""}
         ${s.loadingMore ? thinking("Finding more sidequests…") : !done ? '<div class="reveal-more" data-reveal="searchMore" aria-hidden="true"></div>' : ""}
-        ${done && r.unmet.length ? r.unmet.map((x) => `<div class="notice hot">${icon("bulb")}<span>Nothing fit <strong>${esc(x.interest)}</strong>${x.reason === "price" ? ", over your budget" : x.reason === "travel" ? ", too far for your trip time" : ", nothing listed yet"}. Hosts see requests, and you hear first if one puts it on.</span><button class="action" data-act="requestGap" data-arg="${esc(x.interest)}">Request it</button></div>`).join("") : ""}
-        ${done ? `<div class="notice signature">${icon("plus")}<span>Know of an event like this? Add it to Sidequest from its link, a screenshot, or by typing it in.</span><button class="action" data-act="addEvent">Add event</button></div>` : ""}`;
+        ${done ? `<div class="search-end">
+            <h2 class="t-title-l">${shown.length ? "That’s everything for now" : "Nothing fit that yet"}</h2>
+            <p class="t-body-m c-secondary">${gaps.length ? `We might not have found an exact fit for ${esc(gapText)}. ` : shown.length ? "Didn’t see quite the right one? " : ""}Request it and we’ll tell you first if a host puts one on.</p>
+            ${btn("Request this sidequest", { "data-act": "requestGap", "data-arg": s.ran }, "primary m")}
+            <p class="login-line">Know one?<button class="link" data-act="addEvent">Add an event</button></p>
+          </div>` : ""}`;
     }
     return screen(`<div class="pad stack" style="gap:14px;padding-top:4px">
         ${searchBar()}${filterChips()}
         ${body}
-      </div>`, { title: "Search" });
+      </div>`, { title: "Search", tabbar: attendeeTabs("discover") });
   } };
 
   /* ===================== Quest detail and tickets (Figma: 13 Quest detail, 14 Tickets, 19+ check, All-ages, Import ticket) ===================== */
@@ -784,6 +812,7 @@
   const xsFaces = (names) => (names.length ? `<span class="faces xs">${names.slice(0, 4).map((n) => avatar(n, "xs")).join("")}</span>` : "");
   const COVERS = ["cheers", "string-lights", "lanterns", "jazz-band", "beer-garden", "bokeh-2"];
 
+  const SHOW_HIGHLIGHTS = false;
   S.parties = { role: "attendee", label: "Parties", render: () => {
     const p = SQ.d.party;
     const people = crew();
@@ -791,21 +820,22 @@
     const status = p.locked && ev(p.locked) ? SQ.tag(`Locked in · ${ev(p.locked).title}`, "social", "check")
       : SQ.tag(opts ? `Vote open · ${opts} pick${opts === 1 ? "" : "s"} nominated` : "No picks yet", "social", "check");
     const friends = me().friendList;
-    const hl = me().highlights.filter((h) => ev(h.eventId));
+    // Friends' highlights are hidden for now (they may come back): set this to true to show them again
+    const hl = SHOW_HIGHLIGHTS ? me().highlights.filter((h) => ev(h.eventId)) : null;
     return screen(`
-      <div class="page-head"><span class="overline">Plan with friends</span>
+      <div class="page-head">
         <div class="row" style="align-items:flex-end"><h1 class="t-display-xl">Community</h1>${iconBtn("userPlus", { "data-act": "openFriends", "aria-label": "Add friends" })}</div></div>
       <div class="comm-sec"><div class="section-header pad-x"><span>Friends</span>${friends.length ? `<button data-act="openFriends">See all ${friends.length}</button>` : ""}</div>
         ${friends.length ? `<div class="hscroll friend-row">${friends.map((f) => `<button class="friend-chip" data-act="openFriend" data-arg="${esc(f.key)}">${friendAv(f, "fr")}${esc(f.name)}</button>`).join("")}</div>`
           : `<p class="pad-x t-caption c-tertiary">No friends yet. Find people with the add button above.</p>`}</div>
-      <div class="comm-sec"><div class="pad-x"><div class="section-header"><span>Friends’ highlights</span>${hl.length > 2 ? `<button data-act="openFriends">See all</button>` : ""}</div>
+      ${hl ? `<div class="comm-sec"><div class="pad-x"><div class="section-header"><span>Friends’ highlights</span>${hl.length > 2 ? `<button data-act="openFriends">See all</button>` : ""}</div>
           <p class="t-body-m c-secondary">Quests your friends rated 4 stars and up</p></div>
         ${hl.length ? `<div class="hscroll">${hl.map((h) => {
           const e = ev(h.eventId);
           return `<button class="hl-card" data-act="openQuest" data-arg="${e.id}"><span class="hl-img">${poster(e)}${SQ.tag(isPast(e) ? "Rated" : isWeekend(e) ? "This week" : "Coming up", "photo")}</span>
             <span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-data c-secondary ellipsis">${esc(whenLabel(e))} · ${esc(e.neighbourhood || "")}</span>
             <span class="row start" style="gap:6px">${avatar(h.friend, "xs")}<span class="t-caption">${esc(h.friend)}</span><span class="hl-stars">${"★".repeat(h.stars)}</span></span></button>`;
-        }).join("")}</div>` : `<p class="pad-x t-caption c-tertiary">When a friend rates a sidequest 4 stars or more, it shows up here.</p>`}</div>
+        }).join("")}</div>` : `<p class="pad-x t-caption c-tertiary">When a friend rates a sidequest 4 stars or more, it shows up here.</p>`}</div>` : ""}
       <div class="pad-x stack" style="gap:14px;padding-top:28px;padding-bottom:24px">
         <div class="section-header"><span>Parties</span><button data-act="toast" data-arg="One party per person for now. Change who's in it from the party's settings.">New party</button></div>
         <button class="party-card" data-go="party">
@@ -983,7 +1013,7 @@
   S.requests = { role: "attendee", label: "Quest Requests", render: () => {
     const list = [...SQ.d.requests].sort((a, b) => b.votes - a.votes);
     return screen(`
-      <div class="page-head"><span class="overline">Tell hosts what you want</span><h1 class="t-display-xl">Sidequest Requests</h1>
+      <div class="page-head"><h1 class="t-display-xl">Sidequest Requests</h1>
         <p class="t-body-l c-secondary">Back the sidequests you'd go to. Every account counts once, so hosts can trust the number.</p></div>
       <div class="pad-x stack" style="gap:14px;padding-top:22px;padding-bottom:24px">
         ${btn("Request a sidequest", { "data-act": "newRequest" }, "primary", "plus")}
@@ -1096,7 +1126,9 @@
         ${SQ.ticketFor(e.id) ? SQ.tag("Got tickets", "success") : planTag(e)}</span>${icon("chevR")}</button>`;
   const stars5 = (n, cls = "") => `<span class="stars5 ${cls}" aria-label="${n} of 5 stars">${[1, 2, 3, 4, 5].map((i) => icon(i <= n ? "starFill" : "star", i <= n ? "on" : "")).join("")}</span>`;
   const yearCount = () => logEntries().filter(({ e, l }) => l.status === "went" && new Date(e.startsAt).getFullYear() === SQ.now().getFullYear()).length;
-  const wrappedCard = (title) => `<button class="wrapped-card" data-go="wrapped"><span class="overline">Sidequest Wrapped${title.preview ? " · preview" : ""}</span><span class="t-title-l">${esc(title.text)}</span></button>`;
+  // Sidequest Wrapped is hidden for now: set this to true to show its cards in Sidequests again
+  const SHOW_WRAPPED = false;
+  const wrappedCard = (title) => !SHOW_WRAPPED ? "" : `<button class="wrapped-card" data-go="wrapped"><span class="overline">Sidequest Wrapped${title.preview ? " · preview" : ""}</span><span class="t-title-l">${esc(title.text)}</span></button>`;
 
   function calendar(entries) {
     const base = SQ.now();

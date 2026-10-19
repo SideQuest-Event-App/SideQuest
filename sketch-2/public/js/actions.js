@@ -184,10 +184,8 @@
   // Discover filters (UI state; the feed itself stays the taste avatar's picks)
   const DF = () => U().df;
   A.dfTod = (v) => { DF().tod = v; };
-  A.dfSet = (kv) => {
-    const [k, v] = kv.split(/:(.*)/s);
-    DF()[k] = DF()[k] === v ? "" : v;
-  };
+  A.dfDate = (v) => { DF().date = v; };
+  A.dfRange = () => {}; // a custom date or time was picked (data-bind already stored it); this re-renders
   A.dfCat = (c) => toggle(DF().cats, c);
   A.dfCats = (c) => { DF().cats = c ? [c] : []; };
   A.dfFriends = (v) => { DF().friends = !!v; };
@@ -195,7 +193,7 @@
   // Sliders: "" turns the limit off; the price slider's top stop ($100+) and the chip's x do the same
   A.dfPrice = (v) => { DF().price = v === "" || Number(v) >= 100 ? "" : Number(v); };
   A.dfDist = (v) => { DF().dist = v === "" ? "" : Number(v); };
-  A.dfClear = () => { U().df = { tod: "Anytime", cats: [], price: "", dist: "", friends: false, after: "", amen: [] }; };
+  A.dfClear = () => { U().df = SQ.emptyDf(); };
   A.setWeekTab = (t) => { U().weekTab = t; };
   A.openMix = (l) => {
     U().mix = l;
@@ -220,10 +218,12 @@
   // time as you scroll, asking for the next page once they've all been shown. Changing a filter searches again.
   const REVEAL = 5;
   let searchRun = 0; // only the latest search may write its answer
+  // The last search stays until a new one: searching the same words again from For you or Map reopens its results
   A.search = (arg, el, again = false) => {
     const s = U().search;
     const q = again ? s.ran : s.q.trim();
     if (!q) return toast("Say what you're in the mood for, like \"jazz and cheap eats\".");
+    if (!again && q === s.ran && (s.result || s.loading) && SQ.u.screen !== "search") return "search";
     const run = ++searchRun;
     Object.assign(s, { ran: q, loading: true, result: null, error: null, matches: [], shown: REVEAL, more: false, loadingMore: false, sig: SQ.filterSig() });
     if (SQ.u.screen !== "search") SQ.go("search");
@@ -238,6 +238,7 @@
       .finally(() => {
         if (run !== searchRun) return;
         s.loading = false;
+        SQ.saveSearch();
         SQ.render();
       });
   };
@@ -247,6 +248,7 @@
     if (s.loading || s.loadingMore) return;
     if (s.shown < s.matches.length) {
       s.shown += REVEAL;
+      SQ.saveSearch();
       return;
     }
     if (!s.more) return;
@@ -264,7 +266,10 @@
       if (run === searchRun) s.more = false;
       toast(err.message);
     }
-    if (run === searchRun) s.loadingMore = false;
+    if (run === searchRun) {
+      s.loadingMore = false;
+      SQ.saveSearch();
+    }
   };
   A.openQuest = (id) => {
     U().quest = Number(id);
