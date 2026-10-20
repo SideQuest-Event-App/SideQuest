@@ -378,6 +378,7 @@ A.requestCode = async (ctx, { email }) => {
   const { user, host } = accountsFor(e);
   if (!user && !host) throw new Error("No account uses that email. Check it, or create an account.");
   const expires = Date.now() + CODE_MINUTES * 60000;
+  if (isDemo(user)) return { sent: true, expires }; // no email for the demo account: its code is always DEMO_CODE
   if (useSupabaseAuth()) {
     await supabaseAuth("otp", { email: e, create_user: true });
     return { sent: true, expires };
@@ -390,7 +391,11 @@ A.verifyCode = async (ctx, { email, code }) => {
   const e = clean(email, 80).toLowerCase();
   const c = String(code || "").replace(/\D/g, "");
   if (c.length !== 6) throw new Error("Enter all 6 digits.");
-  if (useSupabaseAuth()) {
+  const demo = accountsFor(e).user;
+  if (isDemo(demo)) {
+    if (c !== DEMO_CODE) throw new Error("That code isn't right. The demo account's code is 123456.");
+    demo.demo = true;
+  } else if (useSupabaseAuth()) {
     await supabaseAuth("verify", { type: "email", email: e, token: c }).catch(() => {
       throw new Error("That code isn't right, or it expired.");
     });
@@ -404,8 +409,19 @@ A.verifyCode = async (ctx, { email, code }) => {
   const { user, host } = accountsFor(e);
   return { userId: user ? user.id : undefined, hostId: host ? host.id : undefined, role: user ? "attendee" : "host" };
 };
-A.demoLogin = () => {
-  const user = newUser({ name: "Alex", email: "alex@email.com", registered: true, contactsSynced: true, vibes: ["Live music", "Jazz", "Zines & print", "Comedy"], past: ["Nuit Blanche 2025", "Toronto Zine Fair"], origin: "union", transit: "TTC", budget: 20 });
+// "I want to demo Sidequest" on the landing page: everyone shares one account, username demo, made the first time it's used.
+// Logging in to it by email skips the email: its code is always 123456.
+// The app only opens Discover, Community and Sidequests for it (user.demo), and its community is the sample friends and party.
+const DEMO_CODE = "123456";
+const isDemo = (u) => !!u && handleOf(u.handle || u.username) === "demo";
+A.demoLogin = async () => {
+  let user = Object.values(db.data.users).find(isDemo);
+  if (!user) {
+    user = newUser({ name: "Demo", email: "demo@sidequest.app", handle: "@demo", demo: true, registered: true, contactsSynced: true, vibes: ["Live music", "Jazz", "Zines & print", "Comedy"], past: ["Nuit Blanche 2025", "Toronto Zine Fair"], origin: "union", transit: "TTC", budget: 20 });
+    await db.saveNow();
+    await addAuthUser(user, "attendee").catch((err) => console.error("Auth user not added:", err.message));
+  }
+  user.demo = true;
   return { userId: user.id };
 };
 A.setProfile = (ctx, args) => {
@@ -458,7 +474,7 @@ A.findPeople = (ctx, { q }) => {
   const s = clean(q, 60).toLowerCase().replace(/^@/, "");
   if (!s) return { people: [] };
   const mine = friendKeys(u);
-  const keys = [...Object.keys(db.FRIENDS), ...Object.values(db.data.users).filter((x) => x !== u && x.registered).map((x) => "u:" + x.id)];
+  const keys = [...Object.keys(db.FRIENDS), ...Object.values(db.data.users).filter((x) => x !== u && x.registered && !x.demo && !u.demo).map((x) => "u:" + x.id)];
   const hit = (k) => {
     const p = person(k);
     const x = k.startsWith("u:") && db.data.users[k.slice(2)];
