@@ -213,7 +213,7 @@
     if (scr.role === "host") return SQ.d.host ? id : "host-type";
     if (!SQ.d.user) return "landing";
     if (!SQ.d.user.registered && ROOTS.includes(id)) return "ob-vibes";
-    if (SQ.d.user.demo && ROOTS.includes(id) && !["discover", "questlog"].includes(id)) return "discover"; // the demo account only gets Discover and Sidequests
+    if (SQ.d.user.demo && ROOTS.includes(id) && !["discover", "parties", "questlog"].includes(id)) return "discover"; // the demo account only gets Discover, Community and Sidequests
     return id;
   }
   // Analytics: which screens people reach, and from where (fire and forget)

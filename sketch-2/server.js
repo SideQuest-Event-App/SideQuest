@@ -405,7 +405,7 @@ A.verifyCode = async (ctx, { email, code }) => {
   return { userId: user ? user.id : undefined, hostId: host ? host.id : undefined, role: user ? "attendee" : "host" };
 };
 // "I want to demo Sidequest" on the landing page: everyone shares one account, username demo, made the first time it's used.
-// The app only opens Discover and Sidequests for it (user.demo).
+// The app only opens Discover, Community and Sidequests for it (user.demo), and its community is the sample friends and party.
 A.demoLogin = async () => {
   let user = Object.values(db.data.users).find((u) => u.handle === "@demo");
   if (!user) {
@@ -466,7 +466,7 @@ A.findPeople = (ctx, { q }) => {
   const s = clean(q, 60).toLowerCase().replace(/^@/, "");
   if (!s) return { people: [] };
   const mine = friendKeys(u);
-  const keys = [...Object.keys(db.FRIENDS), ...Object.values(db.data.users).filter((x) => x !== u && x.registered).map((x) => "u:" + x.id)];
+  const keys = [...Object.keys(db.FRIENDS), ...Object.values(db.data.users).filter((x) => x !== u && x.registered && !x.demo && !u.demo).map((x) => "u:" + x.id)];
   const hit = (k) => {
     const p = person(k);
     const x = k.startsWith("u:") && db.data.users[k.slice(2)];

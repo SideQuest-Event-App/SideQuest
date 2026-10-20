@@ -23,7 +23,7 @@
   // ---------- attendee account and onboarding ----------
   A.demoLogin = async () => {
     await SQ.act("demoLogin");
-    toast("You're in the demo account. Discover and Sidequests are open to try.");
+    toast("You're in the demo account. Discover, Community and Sidequests are open to try.");
     return "discover";
   };
   // Sign-up checks, in order: the format of email and phone (red fields), then an email or phone that's
