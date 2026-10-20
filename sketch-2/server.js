@@ -404,8 +404,16 @@ A.verifyCode = async (ctx, { email, code }) => {
   const { user, host } = accountsFor(e);
   return { userId: user ? user.id : undefined, hostId: host ? host.id : undefined, role: user ? "attendee" : "host" };
 };
-A.demoLogin = () => {
-  const user = newUser({ name: "Alex", email: "alex@email.com", registered: true, contactsSynced: true, vibes: ["Live music", "Jazz", "Zines & print", "Comedy"], past: ["Nuit Blanche 2025", "Toronto Zine Fair"], origin: "union", transit: "TTC", budget: 20 });
+// "I want to demo Sidequest" on the landing page: everyone shares one account, username demo, made the first time it's used.
+// The app only opens Discover and Sidequests for it (user.demo).
+A.demoLogin = async () => {
+  let user = Object.values(db.data.users).find((u) => u.handle === "@demo");
+  if (!user) {
+    user = newUser({ name: "Demo", email: "demo@sidequest.app", handle: "@demo", demo: true, registered: true, contactsSynced: true, vibes: ["Live music", "Jazz", "Zines & print", "Comedy"], past: ["Nuit Blanche 2025", "Toronto Zine Fair"], origin: "union", transit: "TTC", budget: 20 });
+    await db.saveNow();
+    await addAuthUser(user, "attendee").catch((err) => console.error("Auth user not added:", err.message));
+  }
+  user.demo = true;
   return { userId: user.id };
 };
 A.setProfile = (ctx, args) => {

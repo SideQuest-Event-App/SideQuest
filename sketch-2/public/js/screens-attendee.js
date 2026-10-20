@@ -18,6 +18,7 @@
     // While a search is open, Discover goes back to its results (until the search is left with its back button)
     const home = U().searchOpen ? "search" : "discover";
     if (active === "discover") active = home;
+    if (u && u.demo) return tabs([[home, "Discover", "home2"], ["questlog", "Sidequests", "ticket"], ["landing", "Exit demo", "out", { act: "signOut" }]], active, { questlog: pending });
     return tabs([[home, "Discover", "home2"], ["parties", "Community", "crew"], ["requests", "Add Event", "plus"], ["questlog", "Sidequests", "ticket"], ["profile", "Profile", "user"]], active, { questlog: pending, requests: unread });
   }
   SQ.attendeeTabs = attendeeTabs;
@@ -109,6 +110,7 @@
       <div class="slider" data-slide="role" role="button" tabindex="0" aria-label="Slide to explore">
         <span class="handle">${icon("arrow")}</span><span class="text">Slide to explore</span>${icon("chevR", "chev")}
       </div>
+      ${btn("I want to demo Sidequest", { "data-act": "demoLogin" }, "secondary")}
       <p class="login-line">Already have an account?<button class="link" data-go="login">Log in</button></p>
     </div>`, { cls: "bleed" }) };
 
