@@ -615,8 +615,11 @@
       e.organizer.rating && rateCard("Host", e.organizer.rating, e.organizer.reviews ? `${e.organizer.reviews} reviews` : "host rating"),
       e.venue && e.venue.rating && rateCard("Venue", e.venue.rating, e.venue.reviews ? `${e.venue.reviews} reviews` : "venue rating"),
     ].filter(Boolean);
+    const ticket = SQ.ticketFor(e.id);
     const others = Math.max(0, (e.going || going.length) - 2);
     const cta = isPast(e) && !logged ? `<span class="t-body-m c-secondary grow">This sidequest has ended.</span>`
+      : logged && !isPast(e) ? (ticket ? btn("View your ticket", { "data-act": "openWalletTicket", "data-arg": ticket.id }, "primary", "ticket")
+        : btn("Import event ticket", { "data-act": "addTicket", "data-arg": e.id }, "danger", "ticket"))
       : logged ? btn("In your Sidequests", { "data-go": "questlog" }, "secondary", "check")
       : ticketsSold(e) ? btn(`Get tickets on ${sourceOf(e)}`, { "data-act": "getTickets", "data-arg": e.id }, "primary", "external")
       : btn("I'm going", { "data-act": "getTickets", "data-arg": e.id }, "primary", "check");
@@ -667,6 +670,7 @@
           <div class="row start" style="gap:10px">${going.length ? faces(going, 3) : ""}<span class="t-body-m c-secondary grow">${going.length ? `${esc(andList(going.slice(0, 2)))}${others > 0 && (e.going || 0) > 2 ? ` and ${others} others` : ""}` : `${e.going} going`}</span></div>
           ${e.guest ? `<span class="row start t-body-m" style="gap:8px">${icon("music")}Guest set: ${esc(e.guest)}</span>` : ""}
         </div>` : ""}
+        ${ticket && !isPast(e) ? `<div class="qd-group"><span class="overline">Event day</span>${dayCards(e)}</div>` : ""}
         ${e.description ? `<div class="qd-group"><span class="overline">About</span><p class="t-body-m c-secondary">${esc(e.description)}</p></div>` : ""}
         ${verifyCard(e)}
         ${flagSection(e)}
@@ -1213,26 +1217,16 @@
 
   // Figma: 22 Event day. Getting there, entrances, the floor plan (tap a spot), live host updates.
   const ZONES = [["bar", "Bar", "Drinks and the bar"], ["stage", "Main room", "Where it's happening"], ["front", "Front", "Up front, by the stage"], ["door", "Door", "Entrance and coat check"]];
-  S.eventday = { role: "attendee", label: "Event day mode", render: () => {
-    const e = ev(U().quest) || SQ.d.events[0];
-    const u = me();
-    const t = trip(e, u.origin);
+  // The event day cards (getting there, entrances, floor plan, live updates): on event day mode and, once you have a ticket, the event page
+  const dayCards = (e) => {
+    const t = trip(e, me().origin);
     const msgs = SQ.d.hostMessages.filter((m) => m.eventId === e.id).slice().reverse();
     const party = [...new Set([...partyGoing(e), ...(SQ.d.party.locked === e.id ? SQ.d.party.members : [])])];
     const zone = U().zone;
     const leave = t ? clock(new Date(Date.parse(e.startsAt) - (t.minutes + 5) * 6e4).toISOString()) : "";
-    const ticket = SQ.ticketFor(e.id);
-    const checked = u.log[e.id] && u.log[e.id].checkedIn;
     const where = (i) => ZONES[[1, 0, 2, 3][i % 4]][0]; // where each friend is standing
     const card = (ic, title, inner) => `<div class="day-card"><span class="row start" style="gap:10px">${icon(ic)}<span class="t-title-m">${title}</span></span>${inner}</div>`;
-    return screen(`
-      <div class="pad-x stack" style="gap:14px;padding-bottom:24px">
-        <div class="stack" style="gap:6px">
-          <div class="row start" style="gap:8px">${isToday(e) ? SQ.tag(hourOf(e) >= 17 ? "Tonight" : "Today", "hot") : SQ.tag(longDate(e))}${SQ.tag(SQ.is19(e) ? "19+" : "All ages")}${checked ? SQ.tag("Checked in", "success", "check") : ""}</div>
-          <h1 class="t-display-m">${esc(e.title)}</h1>
-          <span class="t-data c-secondary">${esc([`Starts ${clock(e.startsAt)}`, e.endsAt ? `Ends ${clock(e.endsAt)}` : "", e.venue ? e.venue.name : e.neighbourhood].filter(Boolean).join(" · "))}</span>
-        </div>
-        ${card("walk", "Getting there", `<p class="t-body-m c-secondary">${esc([distLabel(e), t ? tripLabel(t) : `nearest stop ${e.travel.stop}`].join(" · "))}.${leave ? ` Leave by ${esc(leave)} to make the start.` : ""}${e.dayInfo.transit ? ` ${esc(e.dayInfo.transit)}` : ""}</p>`)}
+    return `${card("walk", "Getting there", `<p class="t-body-m c-secondary">${esc([distLabel(e), t ? tripLabel(t) : `nearest stop ${e.travel.stop}`].join(" · "))}.${leave ? ` Leave by ${esc(leave)} to make the start.` : ""}${e.dayInfo.transit ? ` ${esc(e.dayInfo.transit)}` : ""}</p>`)}
         ${card("door", "Entrances", `<div class="stack" style="gap:8px">
           <span class="row start" style="gap:8px">${SQ.matchPill(90)}<span class="t-body-m">${esc(e.dayInfo.entrance)}</span></span>
           <span class="row start" style="gap:8px">${SQ.matchPill(30)}<span class="t-body-m c-secondary">Coat check · ${esc(e.dayInfo.coat)}</span></span>
@@ -1247,7 +1241,21 @@
           </div>
           <p class="t-caption c-secondary">${zone ? esc(`${ZONES.find((z) => z[0] === zone)[2]}.${party.filter((n, i) => where(i) === zone).length ? ` ${andList(party.filter((n, i) => where(i) === zone))} ${party.filter((n, i) => where(i) === zone).length > 1 ? "are" : "is"} here.` : ""}`) : party.length ? `Tap a spot to see who from your party is there.` : "Tap a spot to see what's there."}</p>`)}
         ${card("megaphone", "Live updates", msgs.length ? msgs.slice(0, 3).map((m) => `<div class="row start top" style="gap:12px"><span class="t-data c-secondary">${clock(m.time)}</span><span class="t-body-m">${esc(m.text)}</span></div>`).join("")
-          : `<p class="t-body-m c-secondary">No updates from ${esc(e.organizer.name)} yet. They'll show up here live.</p>`)}
+          : `<p class="t-body-m c-secondary">No updates from ${esc(e.organizer.name)} yet. They'll show up here live.</p>`)}`;
+  };
+  S.eventday = { role: "attendee", label: "Event day mode", render: () => {
+    const e = ev(U().quest) || SQ.d.events[0];
+    const u = me();
+    const ticket = SQ.ticketFor(e.id);
+    const checked = u.log[e.id] && u.log[e.id].checkedIn;
+    return screen(`
+      <div class="pad-x stack" style="gap:14px;padding-bottom:24px">
+        <div class="stack" style="gap:6px">
+          <div class="row start" style="gap:8px">${isToday(e) ? SQ.tag(hourOf(e) >= 17 ? "Tonight" : "Today", "hot") : SQ.tag(longDate(e))}${SQ.tag(SQ.is19(e) ? "19+" : "All ages")}${checked ? SQ.tag("Checked in", "success", "check") : ""}</div>
+          <h1 class="t-display-m">${esc(e.title)}</h1>
+          <span class="t-data c-secondary">${esc([`Starts ${clock(e.startsAt)}`, e.endsAt ? `Ends ${clock(e.endsAt)}` : "", e.venue ? e.venue.name : e.neighbourhood].filter(Boolean).join(" · "))}</span>
+        </div>
+        ${dayCards(e)}
         ${isPast(e) ? "" : `<button class="btn btn-ghost m" data-act="skipToAfter" data-arg="${e.id}">Demo: skip to after the event</button>`}
       </div>`, { title: "Event day", right: iconBtn("share", { "data-act": "share", "data-arg": e.id, "aria-label": "Share" }),
       footer: `<div class="footer-bar row" style="gap:10px">${checked ? btn("You're checked in", { "data-go": "checkin-done" }, "secondary", "check") : btn("Check in at the door", { "data-go": "checkin" }, "primary", "qr")}
