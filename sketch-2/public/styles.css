@@ -162,7 +162,8 @@ svg.ic.xl { width: 24px; height: 24px; }
 [data-layout="tablet"] .side { bottom: 164px; max-height: calc(100vh - 184px); }
 
 /* ---------- Tablet and desktop: each screen's content sits in a centred column ---------- */
-:is([data-layout="tablet"], [data-layout="desktop"]) .screen { --col: 680px; }
+/* The column fills the window, less a gutter that grows with the window, so every screen reaches the margins */
+:is([data-layout="tablet"], [data-layout="desktop"]) .screen { --col: calc(100% - 2 * clamp(0px, 5vw - 24px, 96px)); }
 :is([data-layout="tablet"], [data-layout="desktop"]) .scroll > *, :is([data-layout="tablet"], [data-layout="desktop"]) .bar { width: 100%; max-width: var(--col); margin-inline: auto; }
 :is([data-layout="tablet"], [data-layout="desktop"]) .footer-bar, :is([data-layout="tablet"], [data-layout="desktop"]) .action-bar { padding-inline: max(var(--sp-xl), calc((100% - min(var(--col), 600px)) / 2)); padding-bottom: var(--sp-xl); }
 :is([data-layout="tablet"], [data-layout="desktop"]) .pop { max-width: 420px; }
@@ -174,8 +175,10 @@ svg.ic.xl { width: 24px; height: 24px; }
 [data-layout="tablet"] .disc-map .sheet { max-width: 600px; margin-inline: auto; }
 
 /* ---------- Desktop: the tab bar becomes a sidebar, and screens with it get a wider column ---------- */
-[data-layout="desktop"] .screen:has(> .tabs) { --col: 1040px; padding-left: 240px; }
-[data-layout="desktop"] .screen:has(> .tabs) .scroll .btn { max-width: 420px; } /* buttons don't stretch across the wide column */
+[data-layout="desktop"] .screen:has(> .tabs) { padding-left: 240px; }
+:is([data-layout="tablet"], [data-layout="desktop"]) .scroll .btn:not(.btn-ghost) { max-width: 420px; } /* buttons don't stretch across the wide column */
+/* Two-up grids drawn for a phone show more per row instead of stretching each tile */
+:is([data-layout="tablet"], [data-layout="desktop"]) :is(.tiles, .grid2, .when-grid) { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 [data-layout="desktop"] .tabs { position: absolute; left: 0; top: 0; bottom: 0; width: 240px; height: auto; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: var(--sp-xs); padding: 36px var(--sp-lg); border-top: 0; border-right: 1px solid var(--border-subtle); }
 [data-layout="desktop"] .tabs-logo { display: block; padding: 0 14px 28px; }
 [data-layout="desktop"] .tabs-logo .logo { font-size: 24px; line-height: 28px; }
