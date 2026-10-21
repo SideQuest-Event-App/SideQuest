@@ -904,7 +904,9 @@
         <div class="who-in">${people.map((n, i) => `<span class="who"><span class="av ${i ? SQ.avTone(n) : ""}">${esc(n[0])}</span><span class="t-caption">${i ? esc(n) : "You"}</span></span>`).join("")}</div>
         ${editing ? `<div class="chips wrap">${Object.keys(SQ.d.friends).map((f) => chip(f, p.members.includes(f), { "data-act": "toggleMember", "data-arg": f }, p.members.includes(f) ? "check" : "plus")).join("")}</div>` : ""}
       </div>`;
-    const themes = sharedTiles().slice(0, 4);
+    // Every shared theme the blend has at least one pick for
+    const hasPick = (t) => ((b && b.matches) || []).some((m) => ((ev(m.id) || {}).vibes || []).some((v) => t[2].includes(v)));
+    const themes = sharedTiles().filter((name) => hasPick(TILES.find((t) => t[0] === name)));
     // A shared theme narrows the picks to events with one of its vibes; tapping it again shows the best overall
     const theme = TILES.find((x) => x[0] === U().partyTheme && themes.includes(x[0]));
     const inTheme = (m) => !theme || ((ev(m.id) || {}).vibes || []).some((v) => theme[2].includes(v));
