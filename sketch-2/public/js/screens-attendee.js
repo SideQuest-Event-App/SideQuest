@@ -574,7 +574,7 @@
         ${done ? `<div class="search-end">
             <h2 class="t-title-l">${shown.length ? "That’s everything for now" : "Nothing fit that yet"}</h2>
             <p class="t-body-m c-secondary">${gaps.length ? `We might not have found an exact fit for ${esc(gapText)}. ` : shown.length ? "Didn’t see quite the right one? " : ""}Request it and we’ll tell you first if a host puts one on.</p>
-            ${btn("Request this sidequest", { "data-act": "requestGap", "data-arg": s.ran }, "primary m")}
+            ${me().demo ? "" : btn("Request this sidequest", { "data-act": "requestGap", "data-arg": s.ran }, "primary m")}
             <p class="login-line">Know one?<button class="link" data-act="addEvent">Add an event</button></p>
           </div>` : ""}`;
     }
@@ -905,18 +905,21 @@
         ${editing ? `<div class="chips wrap">${Object.keys(SQ.d.friends).map((f) => chip(f, p.members.includes(f), { "data-act": "toggleMember", "data-arg": f }, p.members.includes(f) ? "check" : "plus")).join("")}</div>` : ""}
       </div>`;
     const themes = sharedTiles().slice(0, 4);
+    // A shared theme narrows the picks to events with one of its vibes; tapping it again shows the best overall
+    const theme = TILES.find((x) => x[0] === U().partyTheme && themes.includes(x[0]));
+    const inTheme = (m) => !theme || ((ev(m.id) || {}).vibes || []).some((v) => theme[2].includes(v));
     let picks;
     if (!p.members.length) picks = `<p class="t-body-m c-secondary">Add friends to get group picks.</p>`;
     else if (!b) picks = thinking(`Blending ${people.length} tastes…`);
     else picks = `${U().blendLoading ? thinking("Re-blending for the new line-up…") : ""}
-      ${b.matches.length ? b.matches.slice(0, 3).map((m, i) => {
+      ${b.matches.filter(inTheme).length ? b.matches.filter(inTheme).slice(0, 3).map((m, i) => {
         const e = ev(m.id);
         if (!e) return "";
         return `<button class="ranked${i ? "" : " first"}" data-act="openQuest" data-arg="${e.id}"><span class="rank t-display-m">${i + 1}</span>${poster(e)}
           <span class="text"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-body-m c-secondary ellipsis">${tierWord(m.match)}${i ? "" : ` for all ${people.length}`}${e.price == null ? "" : ` · ${esc(priceLabel(e))}`}</span></span></button>
           ${i === 0 && m.reason ? `<div class="reason-box t-body-m">${esc(m.reason)}</div>` : ""}`;
-      }).join("") : `<p class="t-body-m c-secondary">Nothing suits everyone within these limits.</p>`}
-      ${b.unmet && b.unmet.length ? `<div class="notice hot">${icon("bulb")}<span>Nothing fit ${esc(b.unmet[0].person)}'s ${esc(b.unmet[0].interest)}.</span><button class="action" data-act="requestGap" data-arg="${esc(b.unmet[0].interest)}">Request it</button></div>` : ""}`;
+      }).join("") : `<p class="t-body-m c-secondary">${theme ? `No ${esc(theme[0].toLowerCase())} in this blend yet.` : "Nothing suits everyone within these limits."}</p>`}
+      ${b.unmet && b.unmet.length ? `<div class="notice hot">${icon("bulb")}<span>Nothing fit ${esc(b.unmet[0].person)}'s ${esc(b.unmet[0].interest)}.</span>${u.demo ? "" : `<button class="action" data-act="requestGap" data-arg="${esc(b.unmet[0].interest)}">Request it</button>`}</div>` : ""}`;
     const voteRow = (e) => {
       const mine = myVote === e.id;
       return `<div class="vote-row">
@@ -945,8 +948,8 @@
     const body = `<div class="pad-x stack" style="gap:20px;padding-top:20px;padding-bottom:24px">
         ${who}
         ${big ? vote : `<div class="stack" style="gap:10px"><div class="section-head"><span class="t-title-l">Shared themes</span></div>
-          <div class="chips wrap">${themes.map((x, i) => `<span class="chip${i ? "" : " on"}">${i ? "" : icon("trophy")}${esc(x)}</span>`).join("")}</div></div>
-        <div class="stack" style="gap:10px"><div class="section-head"><span class="t-title-l">Group picks</span>${b && !U().blendLoading ? `<button class="t-caption c-secondary" data-act="reblend">Crew Blend</button>` : '<span class="t-caption c-secondary">Crew Blend</span>'}</div>${picks}</div>
+          <div class="chips wrap">${themes.map((x, i) => chip(x, theme && theme[0] === x, { "data-act": "partyTheme", "data-arg": x }, i ? "" : "trophy")).join("")}</div></div>
+        <div class="stack" style="gap:10px"><div class="section-head"><span class="t-title-l">Best Match</span>${b && !U().blendLoading ? `<button class="t-caption c-secondary" data-act="reblend">Crew Blend</button>` : '<span class="t-caption c-secondary">Crew Blend</span>'}</div>${picks}</div>
         ${vote}`}
         ${chat}
       </div>`;

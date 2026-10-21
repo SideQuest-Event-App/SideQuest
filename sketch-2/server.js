@@ -1484,7 +1484,8 @@ async function apiBlend({ userId, force }) {
   for (let i = 0; picked.size < 35 && byTheme.some((l) => l.length > i); i++) for (const l of byTheme) if (l[i] && picked.size < 35) picked.add(l[i]);
   for (const e of ranked) if (picked.size < 35) picked.add(e);
   const candidates = [...picked];
-  const result = candidates.length ? await ai.match(people, candidates) : { mode: ai.mode(), matches: [], unmet: [] };
+  // 12 picks, so each shared theme on Community has some to show
+  const result = candidates.length ? await ai.match(people, candidates, 12) : { mode: ai.mode(), matches: [], unmet: [] };
   const unmet = result.unmet.map((u) => ({ ...u, reason: unmetReason(u.interest, excluded) }));
   db.data.logs.searches.push({ time: new Date().toISOString(), mode: result.mode, userId, crew: people.length, interests: people.map((p) => p.interests).join(" | "), budget, origins, maxMinutes: user.maxMinutes, matchedIds: result.matches.map((m) => m.id), unmet });
   party.blend = { key, time: new Date().toISOString(), ...result, unmet, limits: { ...limitsSummary(budget, pool, excluded), budgetSetBy } };
