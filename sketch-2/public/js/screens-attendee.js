@@ -221,9 +221,10 @@
   S["ob-areas"] = { role: "attendee", label: "Onboarding: areas you frequent", render: () => {
     const u = me() || {};
     const mine = u.areas || [];
-    const shown = [...new Set([...mine, ...SQ.HOODS.map((h) => h[0])])].slice(0, Math.max(6, mine.length + 3));
+    // Every area, A to Z (plus any older pick that's no longer on the list)
+    const shown = [...new Set([...mine, ...SQ.HOODS.map((h) => h[0])])].sort((a, b) => a.localeCompare(b));
     const q = U().areaText.trim().toLowerCase();
-    const found = q ? SQ.HOODS.filter((h) => h[0].toLowerCase().includes(q)).slice(0, 4) : [];
+    const found = q ? SQ.HOODS.filter((h) => h[0].toLowerCase().includes(q)).sort((a, b) => a[0].localeCompare(b[0])).slice(0, 4) : [];
     return screen(`
       ${obHead(5, "Which areas do you frequent?")}
       <div class="ob-body" style="gap:14px;padding-top:16px">
