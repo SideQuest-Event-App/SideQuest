@@ -919,7 +919,7 @@
           <span class="text"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-body-m c-secondary ellipsis">${tierWord(m.match)}${i ? "" : ` for all ${people.length}`}${e.price == null ? "" : ` · ${esc(priceLabel(e))}`}</span></span></button>
           ${i === 0 && m.reason ? `<div class="reason-box t-body-m">${esc(m.reason)}</div>` : ""}`;
       }).join("") : `<p class="t-body-m c-secondary">${theme ? `No ${esc(theme[0].toLowerCase())} in this blend yet.` : "Nothing suits everyone within these limits."}</p>`}
-      ${b.unmet && b.unmet.length ? `<div class="notice hot">${icon("bulb")}<span>Nothing fit ${esc(b.unmet[0].person)}'s ${esc(b.unmet[0].interest)}.</span>${u.demo ? "" : `<button class="action" data-act="requestGap" data-arg="${esc(b.unmet[0].interest)}">Request it</button>`}</div>` : ""}`;
+      ${!u.demo && b.unmet && b.unmet.length ? `<div class="notice hot">${icon("bulb")}<span>Nothing fit ${esc(b.unmet[0].person)}'s ${esc(b.unmet[0].interest)}.</span><button class="action" data-act="requestGap" data-arg="${esc(b.unmet[0].interest)}">Request it</button></div>` : ""}`;
     const voteRow = (e) => {
       const mine = myVote === e.id;
       return `<div class="vote-row">
