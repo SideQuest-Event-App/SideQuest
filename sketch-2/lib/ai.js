@@ -238,7 +238,7 @@ ${who}
 Here are the upcoming events that already fit ${crew ? "the group's" : "their"} budget and travel limits (JSON). "price" is in Canadian dollars; 0 means free.
 ${JSON.stringify(pool.map((e) => compact(e, origins)))}
 
-Pick up to ${n} events that best match${crew ? " the whole group. Prefer events every person would enjoy over ones that suit only one person" : " what they asked for"}. For each, write one short, specific sentence explaining why it's a good pick, and a "match" score from 0 to 100.
+Pick up to ${n} events that best match${crew ? " the whole group. Prefer events every person would enjoy over ones that suit only one person, and spread the picks over different interests rather than picking the same kind of event every time" : " what they asked for"}. For each, write one short, specific sentence explaining why it's a good pick, and a "match" score from 0 to 100.
 Each event's "friends" field lists friends who are going, and "organizer" has the organizer's rating and a review.
 Where it helps, work in a detail from the reviews, the price, the trip, or who's going (e.g. "it's free, and your friend Maya is going").${crew && origins.length > 1 ? `
 Friends start from different places. Prefer events that are an easy trip for everyone, not a short trip for one and a long one for another.` : ""}
@@ -270,7 +270,7 @@ Respond with JSON only, no other text, in this shape:
 // Plain keyword overlap (NOT AI). For a crew, events that match more people rank first.
 function matchKeywords(people, pool, n = 5) {
   const crew = people.length > 1;
-  const matches = pool
+  const ranked = pool
     .map((e) => {
       const hay = haystack(e);
       const fits = {};
@@ -290,9 +290,18 @@ function matchKeywords(people, pool, n = 5) {
     })
     .filter((m) => m.fitCount > 0)
     // Ties go to events with friends going, then cheaper, then better-reviewed, then busier ones
-    .sort((a, b) => b.fitCount - a.fitCount || b.hitTotal - a.hitTotal || (b.e.friends || []).length - (a.e.friends || []).length || a.e.price - b.e.price || (b.e.rating || 0) - (a.e.rating || 0) || (b.e.going || 0) - (a.e.going || 0))
-    .slice(0, n)
-    .map(({ fitCount, hitTotal, e, ...m }) => m);
+    .sort((a, b) => b.fitCount - a.fitCount || b.hitTotal - a.hitTotal || (b.e.friends || []).length - (a.e.friends || []).length || a.e.price - b.e.price || (b.e.rating || 0) - (a.e.rating || 0) || (b.e.going || 0) - (a.e.going || 0));
+  // A crew's picks are each a different kind of event (by its main vibe), so it isn't five gigs in a row
+  const picks = [];
+  if (crew) {
+    const kinds = new Set();
+    for (const m of ranked) {
+      const kind = (m.e.vibes || [])[0] || m.e.scene;
+      if (picks.length < n && !kinds.has(kind)) picks.push(m) && kinds.add(kind);
+    }
+  }
+  for (const m of ranked) if (picks.length < n && !picks.includes(m)) picks.push(m);
+  const matches = picks.map(({ fitCount, hitTotal, e, ...m }) => m);
 
   // An interest is unmet when none of its words appear in any event that fits the limits
   const unmet = [];

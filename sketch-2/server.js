@@ -1475,8 +1475,17 @@ async function apiBlend({ userId, force }) {
   const origins = [...new Set(people.map((p) => p.origin).filter(Boolean))];
   const { pool, excluded } = applyLimits({ budget, origins, maxMinutes: user.maxMinutes });
   const crewVibes = people.map((p) => ai.wordsOf(p.interests));
-  const candidates = shortlist(pool, (e) => crewVibes.filter((w) => wordHits(e, w) > 0).length * 3 + crewVibes.reduce((a, w) => a + wordHits(e, w), 0) * 0.3 + soonness(e) * 0.2, 35);
-  const result = candidates.length ? await ai.match(people, candidates) : { mode: ai.mode(), matches: [], unmet: [] };
+  const ranked = shortlist(pool, (e) => crewVibes.filter((w) => wordHits(e, w) > 0).length * 3 + crewVibes.reduce((a, w) => a + wordHits(e, w), 0) * 0.3 + soonness(e) * 0.2, pool.length);
+  // Each vibe gets its turn at the shortlist. Ranking by word hits alone filled it with music
+  // (Live music, Jazz, Indie gigs share words), so the AI never saw the art, comedy or climbing events.
+  const themes = [...new Set(people.flatMap((p) => p.interests.split(",").map((v) => v.trim())))].map(ai.wordsOf).filter((w) => w.length);
+  const byTheme = themes.map((w) => ranked.filter((e) => wordHits(e, w) > 0));
+  const picked = new Set();
+  for (let i = 0; picked.size < 35 && byTheme.some((l) => l.length > i); i++) for (const l of byTheme) if (l[i] && picked.size < 35) picked.add(l[i]);
+  for (const e of ranked) if (picked.size < 35) picked.add(e);
+  const candidates = [...picked];
+  // 12 picks, so each shared theme on Community has some to show
+  const result = candidates.length ? await ai.match(people, candidates, 12) : { mode: ai.mode(), matches: [], unmet: [] };
   const unmet = result.unmet.map((u) => ({ ...u, reason: unmetReason(u.interest, excluded) }));
   db.data.logs.searches.push({ time: new Date().toISOString(), mode: result.mode, userId, crew: people.length, interests: people.map((p) => p.interests).join(" | "), budget, origins, maxMinutes: user.maxMinutes, matchedIds: result.matches.map((m) => m.id), unmet });
   party.blend = { key, time: new Date().toISOString(), ...result, unmet, limits: { ...limitsSummary(budget, pool, excluded), budgetSetBy } };

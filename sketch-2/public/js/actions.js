@@ -517,6 +517,9 @@
     U().editMembers = !U().editMembers;
   };
   A.reblend = () => SQ.loadBlend(true);
+  A.partyTheme = (name) => {
+    U().partyTheme = U().partyTheme === name ? null : name;
+  };
 
   // ---------- Quest Requests ----------
   A.upvote = (id) => SQ.act("upvote", { requestId: Number(id) });
@@ -525,6 +528,7 @@
     return "request-new";
   };
   A.requestGap = (interest) => {
+    if (SQ.d.user.demo) return toast("Requests aren't open in the demo account.");
     U().reqDraft = { ...SQ.defaultReqDraft(), text: interest, source: "gap" };
     return "request-new";
   };
