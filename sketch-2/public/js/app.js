@@ -584,6 +584,20 @@
 
   // ---------- Start ----------
   (async function start() {
+    // A Supabase login link lands here with #access_token=… (or #error_description=… if it expired): log in with it
+    const hash = new URLSearchParams(location.hash.slice(1));
+    let linkedRole = null;
+    if (hash.has("access_token") || hash.has("error_description")) {
+      history.replaceState(null, "", location.pathname + location.search);
+      try {
+        if (!hash.has("access_token")) throw new Error(hash.get("error_description"));
+        const r = (await SQ.post("/api/act", { type: "linkLogin", args: { token: hash.get("access_token") } })).result;
+        SQ.setIds({ user: r.userId, host: r.hostId });
+        linkedRole = r.role;
+      } catch (err) {
+        setTimeout(() => toast(err.message), 500);
+      }
+    }
     try {
       await SQ.refresh();
     } catch (err) {
@@ -603,6 +617,7 @@
     } catch {}
     const fallback = u ? (u.registered ? "discover" : "ob-vibes") : "landing";
     SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", ...(SQ.u.search.result ? [] : ["search"]), "host-request", "host-checkin", "host-recap", "host-published", "host-create", "host-create-dayinfo", "host-draft-test", "spot", "add-event"].includes(last) ? last : fallback);
+    if (linkedRole) SQ.u.screen = guard(linkedRole === "host" ? "host-demand" : u && u.registered ? "discover" : "ob-vibes");
     // A shared link to one sidequest (?quest=id) opens it
     const linked = Number(new URLSearchParams(location.search).get("quest"));
     if (linked && SQ.ev(linked)) {
