@@ -140,6 +140,26 @@ async function fetchAccount(email) {
   }
 }
 
+// Render starts the new server before stopping the old one on every deploy, and a teammate's server can share the
+// same Supabase, so another server may have changed an account or added events since this one loaded them.
+// The server calls this before each request, so it never answers from (or later writes back) a stale copy.
+async function refresh(userId, hostId) {
+  if (!useSupabase || !data) return;
+  const max = data.events.reduce((m, e) => Math.max(m, e.id), 0);
+  for (const r of await sb(`sketch2_events?select=data&id=gt.${max}&order=id`)) {
+    data.events.push(r.data);
+    savedEvents.set(r.data.id, JSON.stringify(r.data));
+  }
+  if (!accountsTable) return;
+  for (const [id, list] of [[userId, data.users], [hostId, data.hosts]]) {
+    if (!id || (list[id] && JSON.stringify(list[id]) !== savedAccounts.get(id))) continue; // changes not written yet win
+    const [r] = await sb(`sketch2_accounts?select=data&id=eq.${encodeURIComponent(id)}`);
+    if (!r || JSON.stringify(r.data) === savedAccounts.get(id)) continue;
+    list[id] = r.data;
+    savedAccounts.set(id, JSON.stringify(r.data));
+  }
+}
+
 // A fresh import replaces the listings but keeps accounts, logs, requests, the quests hosts published or claimed,
 // and the events attendees added; where one of those is also in the import, it's kept as one listing
 async function takeImport(fresh) {
@@ -237,5 +257,6 @@ module.exports = {
   saveNow,
   reset,
   fetchAccount,
+  refresh,
   FRIENDS,
 };
