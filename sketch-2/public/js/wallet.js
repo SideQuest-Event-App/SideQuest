@@ -228,6 +228,20 @@
       SQ.u.ticket = id;
       return "wallet-ticket";
     },
+    // A ticket saved without a sidequest: link it to one that's on Sidequest, or make the event from the ticket
+    linkTicket: async (eventId) => {
+      await SQ.act("linkTicket", { id: SQ.u.ticket, eventId: Number(eventId) });
+      SQ.toast("Linked. It's in your Sidequests.");
+      SQ.back(); // to the ticket
+    },
+    createTicketEvent: () => {
+      const t = findTicket(SQ.u.ticket);
+      const [date = "", time = ""] = (t.startsAt || "").split("T");
+      SQ.u.shot = SQ.emptyShot();
+      Object.assign(SQ.u.shot, { open: true, ticketId: t.id });
+      Object.assign(SQ.u.shot.draft, { title: t.title, venue: t.venue, date, time });
+      return "add-event";
+    },
     unlinkTicketQuest: () => {
       W().eventId = null;
     },
@@ -261,9 +275,10 @@
   // "Today · 6:30 PM · Blue Room"
   const ticketMeta = (t) => [isTodayTicket(t) ? `Today · ${ticketWhen(t).split(" · ")[1] || ""}` : ticketWhen(t), t.venue].filter(Boolean).join(" · ");
   // Figma: New Ticket wallet. The ticket: gradient head, then the code on white with Entry and Ticket beside it.
-  const ticketCard = (t, tag = "div") => `<${tag} class="wallet-ticket" ${tag === "button" ? `data-act="openWalletTicket" data-arg="${esc(t.id)}"` : ""}>
+  const isTonight = (t) => isTodayTicket(t) && Number((t.startsAt.split("T")[1] || "00").slice(0, 2)) >= 17;
+  const ticketCard = (t, tag = "div") => `<${tag} class="wallet-ticket${isTonight(t) ? " tonight" : ""}" ${tag === "button" ? `data-act="openWalletTicket" data-arg="${esc(t.id)}"` : ""}>
       <span class="head"><span class="text"><span class="t-title-l">${esc(t.title)}</span><span class="t-data">${esc(ticketMeta(t))}</span></span>
-        ${isTodayTicket(t) ? `<span class="door">${SQ.tag(Number((t.startsAt.split("T")[1] || "00").slice(0, 2)) >= 17 ? "Tonight" : "Today", "hot")}<span class="t-caption">Show this at the door</span></span>` : ""}</span>
+        ${isTodayTicket(t) ? `<span class="door">${SQ.tag(isTonight(t) ? "Tonight" : "Today", "hot")}<span class="t-caption">Show this at the door</span></span>` : ""}</span>
       <span class="body">
         <span class="qr">${t.code ? `<img src="${esc(t.code.image)}" alt="${esc(`${t.code.format} code`)}">` : icon("ticket")}</span>
         <span class="facts">
@@ -282,7 +297,7 @@
     const soon = Object.entries(u.log).filter(([id, l]) => l.status === "going" && ev(id) && !SQ.isPast(ev(id)) && !SQ.ticketFor(id)).map(([id]) => ev(id))
       .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
     const body = !list.length && !soon.length ? empty("ticket", "No tickets yet. Add a screenshot, PDF or Apple Wallet pass and it lives here with all your others.")
-      : `<div class="pad-x stack" style="gap:16px;padding-bottom:24px">
+      : `<div class="pad-x stack" style="gap:16px;padding-top:16px;padding-bottom:24px">
         ${up.map((t) => ticketCard(t, "button")).join("")}
         ${soon.length ? `<span class="overline" style="margin-top:8px">Coming up</span>
           ${soon.map((e) => `<div class="wallet-soon">
@@ -336,10 +351,33 @@
     return screen(`
       <div class="pad-x stack" style="gap:16px;padding-bottom:24px">
         ${ticketCard(t)}
+        ${t.eventId ? "" : `<div class="notice">${icon("info")}<span>User generated event. Link it to a sidequest so its event page and day info show up.</span></div>
+          ${btn("Link to a sidequest", { "data-go": "ticket-link" }, "primary", "link")}
+          ${btn("Create a new event", { "data-act": "createTicketEvent" }, "outline", "plus")}`}
         <p class="t-caption c-tertiary center">${t.code ? "Turn your brightness up at the door. The screen stays on while this is open. " : "This ticket has no scannable code. Show the original at the door. "}${esc(sourceLabel[t.source] || "")}</p>
         ${btn("Remove from wallet", { "data-act": "removeTicket", "data-arg": t.id }, "ghost m")}
       </div>`, { title: "Ticket" });
   } };
+
+  // Pick the sidequest an unlinked ticket is for: same-day ones first, or search by name
+  S["ticket-link"] = { role: "attendee", label: "Ticket wallet: link a sidequest", render: () => {
+    const t = findTicket(SQ.u.ticket);
+    if (!t) return screen(empty("ticket", "That ticket isn't in your wallet."), { title: "Link a sidequest" });
+    const q = (SQ.u.ticketLinkQ || "").trim().toLowerCase();
+    const day = (t.startsAt || "").slice(0, 10);
+    const found = SQ.d.events.filter((e) => !SQ.isPast(e) && (q ? e.title.toLowerCase().includes(q) : day && localOf(e.startsAt).startsWith(day))).slice(0, 20);
+    return screen(`
+      <div class="pad-x stack" style="gap:12px;padding-top:8px;padding-bottom:24px">
+        <div class="search">${icon("search")}<input data-bind="ticketLinkQ" data-live value="${esc(SQ.u.ticketLinkQ || "")}" placeholder="Search sidequests" aria-label="Search sidequests"></div>
+        <span class="overline">${q ? "Matches" : day ? "Same day as your ticket" : "Search for the event"}</span>
+        ${found.map((e) => SQ.questRow(e).replace('data-act="openQuest"', 'data-act="linkTicket"')).join("") || '<p class="t-body-m c-secondary">Nothing found. Try another name, or create the event.</p>'}
+        ${btn("Create a new event", { "data-act": "createTicketEvent" }, "outline", "plus")}
+      </div>`, { title: "Link a sidequest" });
+  } };
+
+  // Upcoming tickets not linked to a sidequest, as rows for the Sidequests page
+  SQ.unlinkedTickets = () => tickets().filter((t) => !t.eventId && !isPastTicket(t)).sort((a, b) => (a.startsAt || "9").localeCompare(b.startsAt || "9"));
+  SQ.unlinkedRow = (t) => `<button class="list-row divided" data-act="openWalletTicket" data-arg="${esc(t.id)}"><span class="lead-ic">${icon("ticket")}</span><span class="text"><span>${esc(t.title)}</span><span>${esc(ticketMeta(t))}</span>${SQ.tag("User generated event")}</span>${icon("chevR")}</button>`;
 
   // The ticket for a quest, if one's in the wallet (Event day mode shows it)
   SQ.ticketFor = (eventId) => tickets().find((t) => t.eventId === Number(eventId));

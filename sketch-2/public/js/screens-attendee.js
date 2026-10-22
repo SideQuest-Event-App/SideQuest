@@ -1174,12 +1174,14 @@
     let body = "";
     if (tab === "Upcoming") {
       const up = entries.filter((x) => x.l.status === "going" && !isPast(x.e)).map((x) => x.e).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+      const mine = SQ.unlinkedTickets();
       if (cal) body = calendar([...up, ...u.saved.map(ev).filter((e) => e && !isPast(e))]);
-      else if (!up.length) body = `<div class="empty-state"><span class="illo">${icon("ticket")}</span><p class="t-body-l c-secondary">No sidequests coming up yet.</p>${btn("Find a sidequest", { "data-go": "discover" }, "secondary m", "search")}</div>`;
+      else if (!up.length && !mine.length) body = `<div class="empty-state"><span class="illo">${icon("ticket")}</span><p class="t-body-l c-secondary">No sidequests coming up yet.</p>${btn("Find a sidequest", { "data-go": "discover" }, "secondary m", "search")}</div>`;
       else {
         const [next, ...rest] = up;
-        body = `${questCard(next).replace('class="qcard"', 'class="qcard log-hero"')}
-          ${rest.length ? `<span class="overline">This week</span>${rest.map((e) => logRow(e)).join("")}` : ""}`;
+        body = `${next ? questCard(next).replace('class="qcard"', 'class="qcard log-hero"') : ""}
+          ${rest.length ? `<span class="overline">This week</span>${rest.map((e) => logRow(e)).join("")}` : ""}
+          ${mine.length ? `<span class="overline">Your tickets</span>${mine.map(SQ.unlinkedRow).join("")}` : ""}`;
       }
       if (!cal) body += wrappedCard({ preview: true, text: `${yearCount()} sidequest${yearCount() === 1 ? "" : "s"} so far this year` });
     }

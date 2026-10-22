@@ -1139,6 +1139,15 @@ A.addTickets = (ctx, { tickets }) => {
   }
   return { added: tickets.length };
 };
+// Link a ticket saved without a sidequest to one, and put that sidequest in your Sidequests
+A.linkTicket = (ctx, { id, eventId }) => {
+  const u = needUser(ctx);
+  const t = (u.tickets || []).find((x) => x.id === id);
+  const e = findEvent(eventId);
+  if (!t || !e) throw new Error("That ticket or sidequest isn't there anymore.");
+  t.eventId = e.id;
+  A.accept(ctx, { eventId: e.id });
+};
 A.removeTicket = (ctx, { id }) => {
   const u = needUser(ctx);
   u.tickets = (u.tickets || []).filter((t) => t.id !== id);

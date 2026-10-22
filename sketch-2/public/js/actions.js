@@ -443,7 +443,13 @@
   A.importEvent = async () => {
     if (!checkFilled(SHOT_FIELDS)) return;
     const r = await SQ.act("importEvent", { draft: U().shot.draft, screenshot: U().shot.preview || null });
+    const ticketId = U().shot.ticketId; // made from an unlinked ticket: link it and go back to the ticket
     U().shot = null;
+    if (ticketId) {
+      await SQ.act("linkTicket", { id: ticketId, eventId: r.eventId });
+      toast(r.existing ? "That event is already on Sidequest. Your ticket is linked to it." : "Event added and your ticket is linked to it.");
+      return SQ.back();
+    }
     U().quest = r.eventId;
     toast(r.existing ? "That event is already on Sidequest. Here it is." : "Added as unverified. It's verified once someone else checks the listing.");
     return "quest";
