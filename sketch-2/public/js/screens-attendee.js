@@ -1179,7 +1179,6 @@
       else {
         const [next, ...rest] = up;
         body = `${questCard(next).replace('class="qcard"', 'class="qcard log-hero"')}
-          ${btn("Open event day", { "data-act": "openEventDay", "data-arg": next.id }, "primary m", "ticket")}
           ${rest.length ? `<span class="overline">This week</span>${rest.map((e) => logRow(e)).join("")}` : ""}`;
       }
       if (!cal) body += wrappedCard({ preview: true, text: `${yearCount()} sidequest${yearCount() === 1 ? "" : "s"} so far this year` });
