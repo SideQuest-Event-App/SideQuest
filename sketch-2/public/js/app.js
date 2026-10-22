@@ -256,6 +256,7 @@
   // ---------- Rendering ----------
   function render(resetScroll) {
     if (!SQ.d) return;
+    document.documentElement.dataset.demo = SQ.d.user && SQ.d.user.demo ? "1" : ""; // the demo account hides the sketch controls
     const scr = SQ.screens[SQ.u.screen];
     const oldScroll = screenEl.querySelector(".scroll");
     const top = oldScroll ? oldScroll.scrollTop : 0;

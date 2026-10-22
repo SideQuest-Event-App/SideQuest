@@ -384,15 +384,15 @@
   };
 
   // Figma: Quest card (250 x 340, photo, scrim, match, save, info)
-  // hero: the Sidequests tab's next-up card, with "Happening Today" in place of the match pill and no bookmark
+  // hero: the Sidequests tab's next-up card, with "Happening Tonight/Tomorrow/…" in place of the match pill and no bookmark
   function questCard(e, { hero = false } = {}) {
     const saved = me().saved.includes(e.id);
     return `<div class="qcard${hero ? " log-hero" : ""}" role="button" tabindex="0" data-act="openQuest" data-arg="${e.id}" aria-label="${esc(e.title)}">
       ${poster(e)}<span class="scrim"></span>
-      <div class="qcard-top">${hero ? (isToday(e) ? SQ.tag("Happening Today", "success") : "") : `${pillFor(e).replace('class="match', 'class="match on-photo')}
+      <div class="qcard-top">${hero ? SQ.tag(`Happening ${isToday(e) ? (hourOf(e) >= 17 ? "Tonight" : "Today") : SQ.whenLabel(e).split(" · ")[0]}`, "success") : `${pillFor(e).replace('class="match', 'class="match on-photo')}
         <button class="icon-btn glass qsave" data-act="save" data-arg="${e.id}" aria-label="${saved ? "Saved" : "Save"}" aria-pressed="${saved}">${icon(saved ? "bookmarkFill" : "bookmark")}</button>`}</div>
       <div class="qcard-info">
-        ${isToday(e) ? SQ.tag(hourOf(e) >= 17 ? "Tonight" : "Today", "hot") : ""}
+        ${isToday(e) && !hero ? SQ.tag(hourOf(e) >= 17 ? "Tonight" : "Today", "hot") : ""}
         <span class="t-title-l ellipsis">${esc(e.title)}</span>
         <span class="t-data">${esc(qMeta(e))}</span>
       </div>

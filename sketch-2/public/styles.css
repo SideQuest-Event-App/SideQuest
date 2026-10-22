@@ -150,6 +150,7 @@ svg.ic.xl { width: 24px; height: 24px; }
 .ai-pill.off i { background: var(--text-tertiary); }
 .side-toggle, .tabs-logo { display: none; }
 .side-toggle { align-items: center; gap: 8px; position: fixed; left: 20px; bottom: 20px; z-index: 60; height: 40px; padding: 0 16px; border-radius: var(--r-full); background: var(--bg-raised); border: 1px solid var(--border-default); font-weight: 600; font-size: 13px; color: var(--text-secondary); box-shadow: var(--shadow-float); }
+[data-demo="1"] :is(.side-toggle, .side) { display: none !important; }
 .side-toggle[aria-expanded="true"] { color: var(--text-primary); border-color: var(--action-primary); }
 :is([data-layout="tablet"], [data-layout="desktop"]) .side-toggle { display: inline-flex; }
 :is([data-layout="tablet"], [data-layout="desktop"]) .side.open { display: flex; }
