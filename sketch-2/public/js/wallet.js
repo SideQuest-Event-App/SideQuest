@@ -240,9 +240,8 @@
       await SQ.act("addTickets", { tickets: list });
       SQ.u.wallet = null;
       SQ.toast(list.length > 1 ? `${list.length} tickets added to your wallet.` : "Ticket added to your wallet.");
-      SQ.go("wallet");
-      SQ.u.history = ["questlog"]; // back from the wallet goes to your Sidequests, not the import
       SQ.u.logTab = "Upcoming";
+      return "wallet";
     },
     removeTicket: async (id) => {
       if (!confirm("Remove this ticket from your wallet?")) return;
@@ -293,7 +292,7 @@
         ${past.length ? `<span class="overline" style="margin-top:8px">Past</span>
           ${past.map((t) => `<button class="list-row divided" data-act="openWalletTicket" data-arg="${esc(t.id)}"><span class="lead-ic">${icon("ticket")}</span><span class="text"><span>${esc(t.title)}</span><span>${esc(ticketMeta(t))}</span></span>${icon("chevR")}</button>`).join("")}` : ""}
       </div>`;
-    return screen(body, { title: "Ticket wallet", back: true, right: SQ.iconBtn("plus", { "data-act": "addTicket", "aria-label": "Add a ticket" }) });
+    return screen(body, { title: "Ticket wallet", back: "questlog", right: SQ.iconBtn("plus", { "data-act": "addTicket", "aria-label": "Add a ticket" }) });
   } };
 
   S["wallet-add"] = { role: "attendee", label: "Ticket wallet: add", render: () => {
