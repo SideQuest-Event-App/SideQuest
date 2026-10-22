@@ -1175,6 +1175,8 @@
     const tab = U().logTab;
     const cal = U().logCal && tab === "Upcoming";
     const entries = logEntries();
+    // Past sidequests waiting on "Did you go?" or a rating: counted on the Past tab
+    const toRate = entries.filter(({ e, l }) => (l.status === "going" && isPast(e)) || (l.status === "went" && !l.rating)).length;
     let body = "";
     if (tab === "Upcoming") {
       const up = entries.filter((x) => x.l.status === "going" && !isPast(x.e)).map((x) => x.e).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
@@ -1215,7 +1217,7 @@
         <div class="row start" style="gap:8px"><h1 class="t-display-xl grow">Sidequests</h1>
           ${iconBtn("wallet", { "data-act": "openWallet", "aria-label": "Ticket wallet" })}
           ${iconBtn(cal ? "list" : "cal", { "data-act": "toggleLogCal", "aria-label": cal ? "Show as a list" : "Show a calendar" })}</div>
-        <div class="seg surface">${LOG_TABS.map(([k, label]) => `<button class="${tab === k ? "on" : ""}" data-act="setLogTab" data-arg="${k}" aria-pressed="${tab === k}">${label}</button>`).join("")}</div>
+        <div class="seg surface">${LOG_TABS.map(([k, label]) => `<button class="${tab === k ? "on" : ""}" data-act="setLogTab" data-arg="${k}" aria-pressed="${tab === k}">${label}${k === "Completed" && toRate ? `<span class="dot" aria-label="${toRate} to rate">${toRate}</span>` : ""}</button>`).join("")}</div>
       </div>
       <div class="pad-x stack" style="gap:14px;padding-top:18px;padding-bottom:24px">${body}</div>`, { tabbar: attendeeTabs("questlog") });
   } };
