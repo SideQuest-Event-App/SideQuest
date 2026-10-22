@@ -624,7 +624,7 @@
       : ticketsSold(e) ? btn(`Get tickets on ${sourceOf(e)}`, { "data-act": "getTickets", "data-arg": e.id }, "primary", "external")
       : btn("I'm going", { "data-act": "getTickets", "data-arg": e.id }, "primary", "check");
     const footer = `<div class="footer-bar row qd-buy">
-        ${isPast(e) && !logged ? "" : `<span class="qd-price"><span class="t-title-l">${esc(priceLabel(e))}</span><span class="t-caption c-tertiary">${e.price === 0 ? "no ticket needed" : e.price == null ? "see listing" : "per ticket"}</span></span>`}
+        ${isPast(e) || logged ? "" : `<span class="qd-price"><span class="t-title-l">${esc(priceLabel(e))}</span><span class="t-caption c-tertiary">${e.price === 0 ? "no ticket needed" : e.price == null ? "see listing" : "per ticket"}</span></span>`}
         ${cta}
       </div>`;
     return screen(`
@@ -670,7 +670,7 @@
           <div class="row start" style="gap:10px">${going.length ? faces(going, 3) : ""}<span class="t-body-m c-secondary grow">${going.length ? `${esc(andList(going.slice(0, 2)))}${others > 0 && (e.going || 0) > 2 ? ` and ${others} others` : ""}` : `${e.going} going`}</span></div>
           ${e.guest ? `<span class="row start t-body-m" style="gap:8px">${icon("music")}Guest set: ${esc(e.guest)}</span>` : ""}
         </div>` : ""}
-        ${ticket && !isPast(e) ? `<div class="qd-group"><span class="overline">Event day</span>${dayCards(e)}</div>` : ""}
+        ${logged && !isPast(e) ? `<div class="qd-group"><span class="overline">Event day</span>${dayCards(e)}</div>` : ""}
         ${e.description ? `<div class="qd-group"><span class="overline">About</span><p class="t-body-m c-secondary">${esc(e.description)}</p></div>` : ""}
         ${verifyCard(e)}
         ${flagSection(e)}
