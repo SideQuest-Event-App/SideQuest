@@ -1228,7 +1228,8 @@ A.importEvent = (ctx, { draft, screenshot }) => {
     flags: [],
   };
   db.data.events.push(e);
-  const shot = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(String(screenshot || ""));
+  A.accept(ctx, { eventId: e.id }); // so it's in your Sidequests, not only on Discover
+  const shot =/^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(String(screenshot || ""));
   photoFromLink(e, sourceUrl, shot && Buffer.from(shot[1], "base64"));
   return { eventId: e.id };
 };
@@ -1769,10 +1770,12 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   try {
     if (req.method === "GET" && url.pathname === "/api/state") {
+      await db.refresh(url.searchParams.get("user"), url.searchParams.get("host")).catch((err) => console.error("Refresh failed:", err.message));
       return sendJSON(res, 200, view(url.searchParams.get("user"), url.searchParams.get("host")));
     }
     if (req.method === "POST" && url.pathname === "/api/act") {
       const { user: userId, host: hostId, sessionId, type, args } = await readBody(req);
+      await db.refresh(userId, hostId).catch((err) => console.error("Refresh failed:", err.message));
       const fn = Object.prototype.hasOwnProperty.call(A, type) && A[type];
       if (!fn) return sendJSON(res, 400, { error: `Unknown action: ${type}` });
       const user = db.data.users[userId] || null;
@@ -1883,7 +1886,7 @@ db.load().then(() => server.listen(PORT, () => {
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
     const done = () => process.exit(0);
-    flushAnalytics().then(done, done);
+    Promise.allSettled([flushAnalytics(), db.saveNow()]).then(done); // a change made in the last half second isn't lost
     setTimeout(done, 3000).unref();
   });
 }

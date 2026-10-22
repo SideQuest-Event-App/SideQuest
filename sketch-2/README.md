@@ -28,7 +28,7 @@ Sketch 2 runs on Render the same way as Sketch 1, as a second web service from t
 
 Render has no Claude Code, so online the AI runs on the API key, and every feed, search page, Crew Blend and poster read is billed. Search asks for 10 picks at a time and only asks for the next 10 once you've scrolled through them. Without `ANTHROPIC_API_KEY` the online app falls back to keyword matching. On your own computer, leave the key out of `.env` to run the AI on your Claude subscription instead.
 
-Run one Sketch 2 server per Supabase project at a time. Each server keeps the app's shared state (parties, requests, notifications) in memory and writes the whole thing to `app_state` row 2, so a local server and the Render one would overwrite each other's changes. Accounts are safe either way, because each account is its own row in `sketch2_accounts`.
+Run one Sketch 2 server per Supabase project at a time. Each server keeps the app's shared state (parties, requests, notifications) in memory and writes the whole thing to `app_state` row 2, so a local server and the Render one would overwrite each other's changes. Accounts and added events are safe either way: each account is its own row in `sketch2_accounts`, and before each request the server re-reads the account making it and any events added elsewhere, so Render's deploy overlap (old and new server both running for a moment) doesn't lose them.
 
 ## Log in and sign up
 
