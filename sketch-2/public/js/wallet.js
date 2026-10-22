@@ -240,8 +240,9 @@
       await SQ.act("addTickets", { tickets: list });
       SQ.u.wallet = null;
       SQ.toast(list.length > 1 ? `${list.length} tickets added to your wallet.` : "Ticket added to your wallet.");
-      SQ.u.history = SQ.u.history.filter((s) => s !== "wallet-add" && s !== "wallet"); // back from the wallet skips the import
-      return "wallet";
+      SQ.go("wallet");
+      SQ.u.history = ["questlog"]; // back from the wallet goes to your Sidequests, not the import
+      SQ.u.logTab = "Upcoming";
     },
     removeTicket: async (id) => {
       if (!confirm("Remove this ticket from your wallet?")) return;
