@@ -167,7 +167,7 @@ window.SQ = window.SQ || {};
   const bar = (title, { back = true, right = "", large = false, close = false } = {}) => large
     ? `<header class="bar large"><h1>${esc(title)}</h1><div class="actions">${right}</div></header>`
     : `<header class="bar"><div class="lead">${back ? `<button class="icon-btn" ${back === true ? "data-back" : `data-go="${esc(back)}"`} aria-label="${close ? "Close" : "Back"}">${icon(close ? "x" : "back")}</button>` : ""}</div><h1>${esc(title)}</h1><div class="actions">${right}</div></header>`;
-  // kind: primary | secondary | social | hot | outline | ghost, plus a size: "outline m", "secondary s"
+  // kind: primary | secondary | social | hot | danger | outline | ghost, plus a size: "outline m", "secondary s"
   const btn = (label, a = {}, kind = "primary", ic = "") => {
     const [k, ...size] = kind.split(" ");
     return `<button class="btn btn-${k} ${size.join(" ")}" ${attr(a)}>${ic ? icon(ic) : ""}${esc(label)}</button>`;
