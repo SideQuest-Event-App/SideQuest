@@ -262,7 +262,8 @@
   const ticketMeta = (t) => [isTodayTicket(t) ? `Today · ${ticketWhen(t).split(" · ")[1] || ""}` : ticketWhen(t), t.venue].filter(Boolean).join(" · ");
   // Figma: New Ticket wallet. The ticket: gradient head, then the code on white with Entry and Ticket beside it.
   const ticketCard = (t, tag = "div") => `<${tag} class="wallet-ticket" ${tag === "button" ? `data-act="openWalletTicket" data-arg="${esc(t.id)}"` : ""}>
-      <span class="head"><span class="t-title-l">${esc(t.title)}</span><span class="t-data">${esc(ticketMeta(t))}</span></span>
+      <span class="head"><span class="text"><span class="t-title-l">${esc(t.title)}</span><span class="t-data">${esc(ticketMeta(t))}</span></span>
+        ${isTodayTicket(t) ? `<span class="door">${SQ.tag(Number((t.startsAt.split("T")[1] || "00").slice(0, 2)) >= 17 ? "Tonight" : "Today", "hot")}<span class="t-caption">Show this at the door</span></span>` : ""}</span>
       <span class="body">
         <span class="qr">${t.code ? `<img src="${esc(t.code.image)}" alt="${esc(`${t.code.format} code`)}">` : icon("ticket")}</span>
         <span class="facts">
@@ -282,7 +283,6 @@
       .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
     const body = !list.length && !soon.length ? empty("ticket", "No tickets yet. Add a screenshot, PDF or Apple Wallet pass and it lives here with all your others.")
       : `<div class="pad-x stack" style="gap:16px;padding-bottom:24px">
-        ${up.length && isTodayTicket(up[0]) ? `<div class="row start" style="gap:8px">${SQ.tag(Number((up[0].startsAt.split("T")[1] || "00").slice(0, 2)) >= 17 ? "Tonight" : "Today", "hot")}<span class="t-caption c-secondary">Show this at the door</span></div>` : ""}
         ${up.map((t) => ticketCard(t, "button")).join("")}
         ${soon.length ? `<span class="overline" style="margin-top:8px">Coming up</span>
           ${soon.map((e) => `<div class="wallet-soon">
@@ -333,12 +333,10 @@
     const t = findTicket(SQ.u.ticket);
     keepAwake(!!(t && t.code));
     if (!t) return screen(empty("ticket", "That ticket isn't in your wallet."), { title: "Ticket" });
-    const e = ev(t.eventId);
     return screen(`
       <div class="pad-x stack" style="gap:16px;padding-bottom:24px">
         ${ticketCard(t)}
         <p class="t-caption c-tertiary center">${t.code ? "Turn your brightness up at the door. The screen stays on while this is open. " : "This ticket has no scannable code. Show the original at the door. "}${esc(sourceLabel[t.source] || "")}</p>
-        ${e ? btn("Open the sidequest", { "data-act": "openQuest", "data-arg": e.id }, "secondary", "arrow") : ""}
         ${btn("Remove from wallet", { "data-act": "removeTicket", "data-arg": t.id }, "ghost m")}
       </div>`, { title: "Ticket" });
   } };
