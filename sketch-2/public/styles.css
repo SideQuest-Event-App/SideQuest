@@ -925,6 +925,7 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .composer .icon-btn { width: 40px; height: 40px; background: var(--gradient); color: var(--text-on-action); }
 
 /* ---------- Sidequests: quest log, calendar, event day, chat, check-in, rate, memories, Wrapped (Figma: 20 to 27) ---------- */
+.seg > button .dot { margin-left: 6px; vertical-align: 1px; }
 .seg.surface > button.on, .seg.surface > button[aria-pressed="true"] { background: var(--bg-surface); }
 .qcard.log-hero { width: 100%; height: 210px; }
 .log-row { width: 100%; text-align: left; display: flex; gap: 14px; align-items: center; padding: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--r-xl); }
