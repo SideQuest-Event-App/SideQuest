@@ -380,7 +380,7 @@ A.requestCode = async (ctx, { email }) => {
   const { user, host } = accountsFor(e);
   if (!user && !host) throw new Error("No account uses that email. Check it, or create an account.");
   const expires = Date.now() + CODE_MINUTES * 60000;
-  if (isDemo(user)) return { sent: true, expires }; // no email for the demo account: its code is always DEMO_CODE
+  if (isDemo(user) || e === TEST_EMAIL) return { sent: true, expires }; // no email for the demo and test accounts: their code is always DEMO_CODE
   if (useSupabaseAuth()) {
     await supabaseAuth("otp", { email: e, create_user: true });
     return { sent: true, expires };
@@ -397,6 +397,8 @@ A.verifyCode = async (ctx, { email, code }) => {
   if (isDemo(demo)) {
     if (c !== DEMO_CODE) throw new Error("That code isn't right. The demo account's code is 123456.");
     demo.demo = true;
+  } else if (e === TEST_EMAIL) {
+    if (c !== DEMO_CODE) throw new Error("That code isn't right. The test account's code is 123456.");
   } else if (useSupabaseAuth()) {
     await supabaseAuth("verify", { type: "email", email: e, token: c }).catch(() => {
       throw new Error("That code isn't right, or it expired.");
@@ -415,6 +417,8 @@ A.verifyCode = async (ctx, { email, code }) => {
 // Logging in to it by email skips the email: its code is always 123456.
 // The app only opens Discover, Community and Sidequests for it (user.demo), and its community is the sample friends and party.
 const DEMO_CODE = "123456";
+// ponytail: a test login while Supabase's email template isn't set up; anyone who knows this email can log in to it
+const TEST_EMAIL = "testing@email.com";
 const isDemo = (u) => !!u && handleOf(u.handle || u.username) === "demo";
 A.demoLogin = async () => {
   let user = Object.values(db.data.users).find(isDemo);
