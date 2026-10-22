@@ -1180,8 +1180,8 @@
       else {
         const [next, ...rest] = up;
         body = `${next ? questCard(next).replace('class="qcard"', 'class="qcard log-hero"') : ""}
-          ${rest.length ? `<span class="overline">This week</span>${rest.map((e) => logRow(e)).join("")}` : ""}
-          ${mine.length ? `<span class="overline">Your tickets</span>${mine.map(SQ.unlinkedRow).join("")}` : ""}`;
+          ${rest.length || mine.length ? `<span class="overline">This week</span>${[...rest.map((e) => [SQ.localOf(e.startsAt), logRow(e)]), ...mine.map((t) => [t.startsAt || "9", SQ.unlinkedRow(t)])]
+            .sort((a, b) => a[0].localeCompare(b[0])).map((x) => x[1]).join("")}` : ""}`;
       }
       if (!cal) body += wrappedCard({ preview: true, text: `${yearCount()} sidequest${yearCount() === 1 ? "" : "s"} so far this year` });
     }

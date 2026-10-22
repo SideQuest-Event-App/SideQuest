@@ -278,7 +278,7 @@
   const isTonight = (t) => isTodayTicket(t) && Number((t.startsAt.split("T")[1] || "00").slice(0, 2)) >= 17;
   const ticketCard = (t, tag = "div") => `<${tag} class="wallet-ticket${isTonight(t) ? " tonight" : ""}" ${tag === "button" ? `data-act="openWalletTicket" data-arg="${esc(t.id)}"` : ""}>
       <span class="head"><span class="text"><span class="t-title-l">${esc(t.title)}</span><span class="t-data">${esc(ticketMeta(t))}</span></span>
-        ${isTodayTicket(t) ? `<span class="door">${SQ.tag(isTonight(t) ? "Tonight" : "Today", "hot")}<span class="t-caption">Show this at the door</span></span>` : ""}</span>
+        ${isTodayTicket(t) ? `<span class="door">${SQ.tag(isTonight(t) ? "Tonight" : "Today", "success")}<span class="t-caption">Show this at the door</span></span>` : ""}</span>
       <span class="body">
         <span class="qr">${t.code ? `<img src="${esc(t.code.image)}" alt="${esc(`${t.code.format} code`)}">` : icon("ticket")}</span>
         <span class="facts">
@@ -352,8 +352,8 @@
       <div class="pad-x stack" style="gap:16px;padding-bottom:24px">
         ${ticketCard(t)}
         ${t.eventId ? "" : `<div class="notice">${icon("info")}<span>User generated event. Link it to a sidequest so its event page and day info show up.</span></div>
-          ${btn("Link to a sidequest", { "data-go": "ticket-link" }, "primary", "link")}
-          ${btn("Create a new event", { "data-act": "createTicketEvent" }, "outline", "plus")}`}
+          <div class="ticket-actions">${btn("Link to a sidequest", { "data-go": "ticket-link" }, "primary", "link")}
+          ${btn("Create a new event", { "data-act": "createTicketEvent" }, "outline", "plus")}</div>`}
         <p class="t-caption c-tertiary center">${t.code ? "Turn your brightness up at the door. The screen stays on while this is open. " : "This ticket has no scannable code. Show the original at the door. "}${esc(sourceLabel[t.source] || "")}</p>
         ${btn("Remove from wallet", { "data-act": "removeTicket", "data-arg": t.id }, "ghost m")}
       </div>`, { title: "Ticket" });
@@ -377,7 +377,9 @@
 
   // Upcoming tickets not linked to a sidequest, as rows for the Sidequests page
   SQ.unlinkedTickets = () => tickets().filter((t) => !t.eventId && !isPastTicket(t)).sort((a, b) => (a.startsAt || "9").localeCompare(b.startsAt || "9"));
-  SQ.unlinkedRow = (t) => `<button class="list-row divided" data-act="openWalletTicket" data-arg="${esc(t.id)}"><span class="lead-ic">${icon("ticket")}</span><span class="text"><span>${esc(t.title)}</span><span>${esc(ticketMeta(t))}</span>${SQ.tag("User generated event")}</span>${icon("chevR")}</button>`;
+  SQ.unlinkedRow = (t) => `<button class="log-row" data-act="openWalletTicket" data-arg="${esc(t.id)}"><span class="poster ticket-ph">${icon("ticket")}</span>
+      <span class="text"><span class="t-title-m ellipsis">${esc(t.title)}</span><span class="t-data c-secondary ellipsis">${esc(ticketMeta(t))}</span>${SQ.tag("User generated event", "warning")}</span>${icon("chevR")}</button>`;
+  SQ.localOf = localOf;
 
   // The ticket for a quest, if one's in the wallet (Event day mode shows it)
   SQ.ticketFor = (eventId) => tickets().find((t) => t.eventId === Number(eventId));
