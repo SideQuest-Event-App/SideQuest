@@ -384,12 +384,13 @@
   };
 
   // Figma: Quest card (250 x 340, photo, scrim, match, save, info)
-  function questCard(e) {
+  // hero: the Sidequests tab's next-up card, with "Happening Today" in place of the match pill and no bookmark
+  function questCard(e, { hero = false } = {}) {
     const saved = me().saved.includes(e.id);
-    return `<div class="qcard" role="button" tabindex="0" data-act="openQuest" data-arg="${e.id}" aria-label="${esc(e.title)}">
+    return `<div class="qcard${hero ? " log-hero" : ""}" role="button" tabindex="0" data-act="openQuest" data-arg="${e.id}" aria-label="${esc(e.title)}">
       ${poster(e)}<span class="scrim"></span>
-      <div class="qcard-top">${pillFor(e).replace('class="match', 'class="match on-photo')}
-        <button class="icon-btn glass qsave" data-act="save" data-arg="${e.id}" aria-label="${saved ? "Saved" : "Save"}" aria-pressed="${saved}">${icon(saved ? "bookmarkFill" : "bookmark")}</button></div>
+      <div class="qcard-top">${hero ? (isToday(e) ? SQ.tag("Happening Today", "success") : "") : `${pillFor(e).replace('class="match', 'class="match on-photo')}
+        <button class="icon-btn glass qsave" data-act="save" data-arg="${e.id}" aria-label="${saved ? "Saved" : "Save"}" aria-pressed="${saved}">${icon(saved ? "bookmarkFill" : "bookmark")}</button>`}</div>
       <div class="qcard-info">
         ${isToday(e) ? SQ.tag(hourOf(e) >= 17 ? "Tonight" : "Today", "hot") : ""}
         <span class="t-title-l ellipsis">${esc(e.title)}</span>
@@ -1179,7 +1180,7 @@
       else if (!up.length && !mine.length) body = `<div class="empty-state"><span class="illo">${icon("ticket")}</span><p class="t-body-l c-secondary">No sidequests coming up yet.</p>${btn("Find a sidequest", { "data-go": "discover" }, "secondary m", "search")}</div>`;
       else {
         const [next, ...rest] = up;
-        body = `${next ? questCard(next).replace('class="qcard"', 'class="qcard log-hero"') : ""}
+        body = `${next ? questCard(next, { hero: true }) : ""}
           ${rest.length || mine.length ? `<span class="overline">This week</span>${[...rest.map((e) => [SQ.localOf(e.startsAt), logRow(e)]), ...mine.map((t) => [t.startsAt || "9", SQ.unlinkedRow(t)])]
             .sort((a, b) => a[0].localeCompare(b[0])).map((x) => x[1]).join("")}` : ""}`;
       }
