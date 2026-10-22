@@ -34,6 +34,7 @@ Run one Sketch 2 server per Supabase project at a time. Each server keeps the ap
 
 - **Log in:** enter your email. If an account (attendee or host) uses it, a 6-digit code is sent and you go to the code screen. The right code takes you into that account.
   - With Supabase, Supabase Auth emails the code. Its "Magic Link" email template needs `{{ .Token }}` so the code is in the email.
+    If the template still sends a link (`{{ .ConfirmationURL }}`), the link logs you in too, as long as the app's address is in Supabase's **Authentication > URL Configuration > Redirect URLs** (for example `http://localhost:3001/**` and the Render address).
   - Without Supabase there's no email service, so the code is shown in the side panel.
 - **Create an account:** pick "I'm going out" (attendee onboarding, 7 steps) or "I host events" (host onboarding, 8 steps). Usernames are unique. They're checked when you leave the field (at sign-up and in Edit profile), and a taken one gets three free suggestions.
 - **Nothing is stored until onboarding is done.** An account still in onboarding lives only in the server's memory, so nothing is kept about people who give up partway. It's written to the database when the attendee finishes onboarding, or when a host's account is approved.

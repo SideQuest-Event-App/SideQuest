@@ -72,7 +72,7 @@
     const l = U().login;
     l.error = null;
     try {
-      const r = await SQ.post("/api/act", { type: "requestCode", args: { email: l.email } }).then((x) => x.result);
+      const r = await SQ.post("/api/act", { type: "requestCode", args: { email: l.email, redirectTo: location.origin + location.pathname } }).then((x) => x.result);
       Object.assign(l, { code: "", demoCode: r.demoCode || null, resendAt: Date.now() + 60000 });
       SQ.render();
       return "login-code";

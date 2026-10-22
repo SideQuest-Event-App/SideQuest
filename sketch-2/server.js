@@ -373,7 +373,7 @@ async function addAuthUser(a, role) {
     body: JSON.stringify({ email: a.email, email_confirm: true, user_metadata: { sidequest_id: a.id, role, name: a.name, username: a.handle || "", phone: a.phone || "" } }) });
   if (!res.ok && res.status !== 422) throw new Error(`Supabase Auth ${res.status}: ${await res.text()}`);
 }
-A.requestCode = async (ctx, { email }) => {
+A.requestCode = async (ctx, { email, redirectTo }) => {
   const e = clean(email, 80).toLowerCase();
   if (!EMAIL.test(e)) throw new Error("Enter the email on your account.");
   if (!accountsFor(e).user && !accountsFor(e).host) await db.fetchAccount(e);
@@ -382,7 +382,9 @@ A.requestCode = async (ctx, { email }) => {
   const expires = Date.now() + CODE_MINUTES * 60000;
   if (isDemo(user)) return { sent: true, expires }; // no email for the demo account: its code is always DEMO_CODE
   if (useSupabaseAuth()) {
-    await supabaseAuth("otp", { email: e, create_user: true });
+    // If the email still has a link instead of the code, the link comes back to this page (see linkLogin)
+    const back = /^https?:\/\/\S+$/.test(redirectTo || "") ? `?redirect_to=${encodeURIComponent(redirectTo)}` : "";
+    await supabaseAuth(`otp${back}`, { email: e, create_user: true });
     return { sent: true, expires };
   }
   const code = String(crypto.randomInt(0, 1e6)).padStart(6, "0");
@@ -408,8 +410,22 @@ A.verifyCode = async (ctx, { email, code }) => {
     if (!crypto.timingSafeEqual(Buffer.from(sent.code), Buffer.from(c))) throw new Error("That code isn't right. Check the email and try again.");
     codes.delete(e);
   }
+  return loggedIn(e);
+};
+const loggedIn = (e) => {
   const { user, host } = accountsFor(e);
   return { userId: user ? user.id : undefined, hostId: host ? host.id : undefined, role: user ? "attendee" : "host" };
+};
+// A Supabase login link (sent when its email template has {{ .ConfirmationURL }} instead of {{ .Token }}) opens the app
+// with #access_token=…; Supabase says whose email that token is.
+A.linkLogin = async (ctx, { token }) => {
+  if (!useSupabaseAuth() || typeof token !== "string") throw new Error("That login link didn't work. Log in with a code instead.");
+  const res = await fetch(`${process.env.SUPABASE_URL}/auth/v1/user`, { headers: { apikey: process.env.SUPABASE_SECRET_KEY, Authorization: `Bearer ${token}` } });
+  const e = res.ok ? String((await res.json()).email || "").toLowerCase() : "";
+  if (!e) throw new Error("That login link expired. Log in again to get a new one.");
+  if (!accountsFor(e).user && !accountsFor(e).host) await db.fetchAccount(e);
+  if (!accountsFor(e).user && !accountsFor(e).host) throw new Error("No account uses that email. Check it, or create an account.");
+  return loggedIn(e);
 };
 // "I want to demo Sidequest" on the landing page: everyone shares one account, username demo, made the first time it's used.
 // Logging in to it by email skips the email: its code is always 123456.
