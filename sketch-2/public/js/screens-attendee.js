@@ -110,10 +110,9 @@
       <p class="t-body-l c-secondary">Events picked for your taste, friends to go with, and a guide for the night itself.</p>
     </div>
     <div class="landing-actions">
-      <div class="slider" data-slide="role" role="button" tabindex="0" aria-label="Slide to explore">
-        <span class="handle">${icon("arrow")}</span><span class="text">Slide to explore</span>${icon("chevR", "chev")}
+      <div class="slider" data-slide data-slide-act="demoLogin" role="button" tabindex="0" aria-label="Slide to demo Sidequest">
+        <span class="handle">${icon("arrow")}</span><span class="text">Slide to demo Sidequest</span>${icon("chevR", "chev")}
       </div>
-      ${btn("I want to demo Sidequest", { "data-act": "demoLogin" }, "secondary")}
       <p class="login-line">Already have an account?<button class="link" data-go="login">Log in</button></p>
     </div>`, { cls: "bleed" }) };
 

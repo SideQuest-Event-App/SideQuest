@@ -356,7 +356,8 @@
     }
   }, true);
 
-  // "Slide to explore": drag the handle to the end (or tap, or press Enter) to go on
+  // Sliders: drag the handle to the end (or tap, or press Enter) to go to data-slide, or run data-slide-act
+  const slideDone = (slider) => slider.dataset.slideAct ? run(slider, slider.dataset.slideAct) : SQ.go(slider.dataset.slide);
   screenEl.addEventListener("pointerdown", (e) => {
     const slider = e.target.closest("[data-slide]");
     if (!slider) return;
@@ -371,7 +372,7 @@
     };
     const up = () => {
       slider.removeEventListener("pointermove", move);
-      if (dx > max * 0.7 || dx < 4) SQ.go(slider.dataset.slide);
+      if (dx > max * 0.7 || dx < 4) slideDone(slider);
       else handle.style.transform = "";
     };
     slider.addEventListener("pointermove", move);
@@ -379,7 +380,7 @@
   });
   screenEl.addEventListener("keydown", (e) => {
     const slider = e.target.closest && e.target.closest("[data-slide]");
-    if (slider && (e.key === "Enter" || e.key === " ")) SQ.go(slider.dataset.slide);
+    if (slider && (e.key === "Enter" || e.key === " ")) slideDone(slider);
   });
 
   let toastTimer;
@@ -394,9 +395,9 @@
 
   // ---------- Events ----------
   let busy = false;
-  async function run(el) {
+  async function run(el, act) {
     if (el.hasAttribute("data-back")) return SQ.back();
-    const name = el.getAttribute("data-act");
+    const name = act || el.getAttribute("data-act");
     if (name) {
       const fn = SQ.actions[name];
       if (!fn) return console.warn("Unknown action:", name);
