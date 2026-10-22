@@ -847,6 +847,8 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .tk-why { padding: 10px 0; }
 .wallet-ticket { width: 100%; border-radius: 20px; border: 1px solid var(--border-subtle); background: var(--bg-surface); overflow: hidden; text-align: left; display: block; }
 .wallet-ticket .head { background: var(--gradient); color: var(--text-on-action); padding: 20px 20px 16px; display: flex; align-items: center; gap: 12px; }
+.list-row .text .tag { align-self: flex-start; }
+.wallet-ticket.tonight .head { background: linear-gradient(96deg, #f28dc8 0%, #f7a072 100%); }
 .wallet-ticket .head .text { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
 .wallet-ticket .head .door { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: none; text-align: center; }
 .wallet-ticket .body { padding: 20px; display: flex; gap: 18px; align-items: center; border-top: 1px solid var(--border-subtle); }
