@@ -13,7 +13,10 @@
 
   function attendeeTabs(active) {
     const u = me();
-    const pending = u ? Object.entries(u.log).filter(([id, l]) => l.status === "going" && ev(id) && isPast(ev(id))).length : 0;
+    // Sidequests badge: what's happening today, user generated events included
+    const today = SQ.localOf(SQ.now().toISOString()).slice(0, 10);
+    const pending = u ? Object.entries(u.log).filter(([id, l]) => l.status === "going" && ev(id) && !isPast(ev(id)) && isToday(ev(id))).length
+      + SQ.unlinkedTickets().filter((t) => t.startsAt.startsWith(today)).length : 0;
     const unread = u ? u.notifications.filter((n) => !n.read && n.requestId).length : 0;
     // While a search is open, Discover goes back to its results (until the search is left with its back button)
     const home = U().searchOpen ? "search" : "discover";
