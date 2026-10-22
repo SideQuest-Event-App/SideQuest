@@ -127,6 +127,19 @@ async function load() {
   return data;
 }
 
+// Accounts are read once at startup, so one made on another server (Render, or a teammate's computer) since then isn't
+// in memory yet. Log in and sign up call this on a miss to pull that email's accounts in from sketch2_accounts.
+async function fetchAccount(email) {
+  if (!useSupabase || !accountsTable || !email) return;
+  const rows = await sb(`sketch2_accounts?select=id,role,data&email=ilike.${encodeURIComponent(email.trim())}`);
+  for (const r of rows) {
+    const list = r.role === "host" ? data.hosts : data.users;
+    if (list[r.id]) continue; // this server's copy is the one it's been changing
+    list[r.id] = r.data;
+    savedAccounts.set(r.id, JSON.stringify(r.data));
+  }
+}
+
 // A fresh import replaces the listings but keeps accounts, logs, requests, the quests hosts published or claimed,
 // and the events attendees added; where one of those is also in the import, it's kept as one listing
 async function takeImport(fresh) {
@@ -223,5 +236,6 @@ module.exports = {
   save,
   saveNow,
   reset,
+  fetchAccount,
   FRIENDS,
 };

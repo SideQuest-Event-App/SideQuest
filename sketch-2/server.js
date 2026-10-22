@@ -332,8 +332,9 @@ A.checkSignup = (ctx, { username, name, email, phone }) => {
   const h = handleOf(username);
   return { linked: linkedTo(ctx, clean(email, 80), clean(phone, 30)), suggestions: handleTaken(h, ctx.user) ? handleIdeas(h, name, ctx.user) : null };
 };
-A.signup = (ctx, { name, email, username, phone }) => {
+A.signup = async (ctx, { name, email, username, phone }) => {
   const e = clean(email, 80);
+  await db.fetchAccount(e).catch(() => {});
   if (!clean(name, 30)) throw new Error("Add your name to continue.");
   if (!EMAIL.test(e)) throw new Error("Invalid email format.");
   if (clean(phone, 30) && !PHONE_OK(phone)) throw new Error("Invalid phone number.");
@@ -375,6 +376,7 @@ async function addAuthUser(a, role) {
 A.requestCode = async (ctx, { email }) => {
   const e = clean(email, 80).toLowerCase();
   if (!EMAIL.test(e)) throw new Error("Enter the email on your account.");
+  if (!accountsFor(e).user && !accountsFor(e).host) await db.fetchAccount(e);
   const { user, host } = accountsFor(e);
   if (!user && !host) throw new Error("No account uses that email. Check it, or create an account.");
   const expires = Date.now() + CODE_MINUTES * 60000;
