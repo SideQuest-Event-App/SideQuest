@@ -29,3 +29,49 @@
 - Systemic reflection: I think we need to carefully consider how we pull event data and where we are pulling it from, because, from our discussion, aside from major events such as concerts and festivals, smaller, more niche events are advertised in a very low-key manner (e.g., using Instagram as a bridge). If hosts find Instagram affordable (no cost unless they sign up for a badge or it's explicitly stated as sponsored) and attendees also find it easy to find and share with friends, what can our product do differently to enhance their experience even further?
 - An honest doubt: The scope is still very large, and I think we're a bit stuck on deciding who is in charge of what. Right now, everyone picks 1 task, splits up to do their own discovery, and then brings ideas to share as a group. I think at some point we need a solid sketch to start building and a more transparent task distribution.
 - AI use (disclose): I ran the SWOT analysis on the latest version of our project proposal. I will use it to help brainstorm user flows, treating them as experimental steps informed by the available data.
+
+
+## Week 4 – Oct 1
+- Reading → decision: The reading about systems helped me understand a bit more about how businesses manage demand, resources, and supplies. Connecting it to our project gave me a clearer picture of how we can build and implement our app's features to make the flow cohesive for both users and hosts.
+
+- What I did: I started the first mockup with Claude's help using our business proposal outline. At this stage, it is a black-and-white wireframe with our core features. I started with 15 key screens to map out the navigation and how the features connect, then expanded to 43 screens with a site map sidebar.
+
+- Systemic reflection: Claude surprised me with how quickly it could generate a wireframe that included almost all the details I had in mind, though it still needed a few minor tweaks to reach a certain level of functionality. It was particularly interesting because I can get it to create different samples, which lets me explore the app's structure and different UI systems; as a result, I can make better design decisions as I iterate. I made a mistake getting claude-code to generate the first functional prototype before the final structure was in place, so I wasted quite a bunch of tokens for this part. I learned later that Claude Code can easily do sketches alone, and we would use the code once the final structure was complete.
+
+- An honest doubt: This week, we all had to sit down as a group and catch up on what we'd been doing. I could see what Asia did and was also aware of Taylor's backend work, which let me start on the UI. However, other members were a bit lost because they still aren't familiar with GitHub, so we missed many updates.  AI Use: wireframe prototyping for sketch1
+
+## Week 5 – Oct 8
+- Reading → decision: From the reading, I knew we needed a more refined prototype to conduct real user tests. Amy also brought up user testing during our group meeting, so I began editing the wireframes. 
+
+- What I did: After our discussions about the features and the overall UI approach, I took on the UI design role for our prototype and merged my prototype with the team's Figma low-fi version, while incorporating everyone's feedback into the new design. This step involved restructuring the app, updating its branding, and adding missing features for the host side as well. I also started exploring visual directions for our app.
+
+- Systemic reflection: It was quick to incorporate everyone's comments and change the app's structure. However, I realized I still need to lead the design system because, along the way, I spotted inconsistencies in the mid-fi version. It became much easier to make edits once I established a design system with reusable components and had Claude iterate based on them, especially as our app expanded to over 40 screens and small mistakes became harder to track down. 
+
+- An honest doubt: This is not necessarily a doubt. I just wanted to make sure I communicated the changes I made clearly to the group because, at this stage, our roles and contributions became much clearer. It was clear that I'm the visual/branding/UI designer for our app, working on the front end; meanwhile, Taylor and Amy worked on the back end, and Asia and the rest focused on strategy and research. If anything, our main worry was figuring out how to scrape data from real sources so our events stay realistic.
+
+- AI use: Claude for creating the Figma design system and merging prototypes, with tiny manual fixes on my end.
+
+## Week 6 – Oct 15
+- Reading → decision: The reading basically helped our team make some important decisions on how we want to "sell" our app. This directly impacts the branding and UI I was working on.
+
+- What I did: This week focused on finalizing the visual and branding direction for our app. I researched the most trending graphic design trends for 2026 and started from there. Initially, I wanted to include light and dark modes for our app, reflecting daytime and nighttime activities as the time of day changes. After exploring several branding and colour directions, we chose a modern, vibrant approach and alternated some CTAs and language used in the app to make the features clearer to the audience. Asia also started on the pitch deck, and I also went in to edit some of the motion, since Figma motion is still a beta version and therefore small glitches tend to happen. I wasn't satisfied with how the light mode looked because it didn't quite reflect Sidequest's vibe as well as the dark mode, so we decided to present only the dark mode.
+
+- Systemic Reflection: Since the system has the structure needed for the presentation, it came down to choosing which information to include in our pitch. Claude was a big help in drafting the presentation skeleton, although we largely chose the content.
+
+- An honest doubt: Mostly concerns about whether we have enough information needed to make the presentation successful - is there enough to represent Sidequest, or do we have too much information?
+
+- AI use: I started handing over the Figma file to the backend teammates, so their Claude was probably helping them to connect the data and make it a functional app.
+
+## Week 7: Oct 22nd
+- Note: Week of presentation
+- Reading -> Decision: N/A
+
+- What I did: By now, I had completed the functional prototype and finalized all the features, design systems, and branding, so I handed it off to Amy and Taylor so they could set up the backends. In the meantime, I edited my own scripts for our presentation. This week's focus was on delivering our presentation in the most engaging and persuasive way to the guests and our professors. 
+
+- Systemic reflection: Post-presentation, we realized that some of the questions that were asked were actually covered in our team meetings, notes and research, but due to time constraints, we didn't include those details in our presentation - that turned out to be a mistake. For our final presentation, we will be more mindful about filtering what information to surface and present to represent our product in the best way possible. 
+
+- AI use: N/A
+
+
+
+
