@@ -25,6 +25,7 @@ const { findDuplicate, mergeInto } = require("../sketch-1/import/dedupe");
 const { jsonLdEvents } = require("../sketch-1/import/fetch");
 const { stripHtml, trimText, place, travel: travelTo, vibesOf, NA } = require("../sketch-1/import/normalize");
 const siteName = require("./public/js/sites.js"); // shared with the add-event form
+const sidekick = require("./lib/sidekick/rooms"); // Sidekick planning calls (lib/sidekick, public/sidekick.html)
 
 const PORT = process.env.PORT || 3001; // Sketch 1 uses 3000, so both can run at once
 
@@ -1815,6 +1816,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/host-report") {
       return sendJSON(res, 200, hostReport(db.data.hosts[url.searchParams.get("host")] || null));
     }
+    if (url.pathname.startsWith("/api/sk/")) return sidekick.handle(req, res, url, { readBody, sendJSON });
+    if (req.method === "GET" && /^\/sk(\/[\w-]+)?\/?$/.test(url.pathname)) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      return fs.createReadStream(path.join(__dirname, "public", "sidekick.html")).pipe(res);
+    }
     const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster, "/api/extract": apiExtract, "/api/from-link": apiFromLink, "/api/cover": apiCover, "/api/read-ticket": apiReadTicket };
     if (req.method === "POST" && ROUTES[url.pathname]) {
       const body = await readBody(req);
@@ -1869,7 +1875,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 // Load the database (from Supabase or data/db.json) before taking requests
-db.load().then(() => server.listen(PORT, () => {
+db.load().then(() => sidekick.init({ events: () => db.data.events })).then(() => server.listen(PORT, () => {
   console.log(`Sketch 2 running at http://localhost:${PORT}`);
   console.log(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY ? "Database: Supabase" : "Database: data/db.json (no Supabase keys in .env)");
   const m = ai.mode();

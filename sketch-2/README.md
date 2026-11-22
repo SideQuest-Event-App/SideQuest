@@ -15,6 +15,32 @@ There's nothing to install. Copy `.env.example` to `.env` to turn on the AI (`AN
 
 Where accounts show up in Supabase, once onboarding is finished (or a host is approved): the `sketch2_accounts` table has one row per account (email, username, name, phone, role, and the whole profile in `data`), and **Authentication > Users** gets the email. Each server only writes the accounts it changed, so two people running Sketch 2 against the same Supabase don't erase each other's sign-ups. Until `supabase/schema.sql` has made that table, accounts stay inside `app_state` row 2 and the server says so when it starts.
 
+## Sidekick planning calls (in testing)
+
+Open `/sk` to start a planning call. Pick your nights, share the link, and friends join with voice, text, or a quick form, with no app needed.
+
+**How it works:**
+- Sidekick fills in a live plan board as people talk.
+- It asks one question at a time: the one that narrows the real listings the most.
+- Budget and dealbreakers are collected privately.
+- It suggests two picks once no answer left would change them. The crew votes, and the planner locks the plan.
+
+**Requirements:**
+- Voice captions use the browser's speech recognition (Chrome, Edge or Safari). Everyone can type instead.
+- Set `ANTHROPIC_API_KEY` so Sidekick understands speech and talks in its persona. Without it, the call still works using keyword matching and fixed lines.
+
+**Where things are:**
+- Code: `lib/sidekick/` (engine, personas, call server) and `public/sidekick.html`, `public/sidekick.css`, `public/js/sidekick.js`.
+- Design and rules: `reference/sidekick-conversation-design.md`.
+- The two personas and the A/B test: `reference/sidekick-personas.md`.
+
+**Test it:**
+
+```
+node test/sidekick-eval.js              # scripted calls, both personas, checked against everyone's limits
+node test/sidekick-eval.js --keywords   # the same without AI calls for understanding speech
+```
+
 ## Put it online (Render)
 
 Sketch 2 runs on Render the same way as Sketch 1, as a second web service from this repo, on the same Supabase project.
