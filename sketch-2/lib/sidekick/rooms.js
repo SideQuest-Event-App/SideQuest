@@ -61,6 +61,9 @@ function createRoom({ crew, planner, nights, persona }) {
     places: [], // non-ticketed places from Google, for this call only (never stored)
     cues: [], // moves sent to the ElevenLabs voice agent on the planner's phone
     agentMode: false,
+    mode: null, // null (not asked yet) | "voting" | "lead" | "sidelines"
+    modeVotes: {},
+    modeHow: null,
   };
   if (!room.nights.length) room.nights = suggestNights().slice(0, 2).map((n) => n.date);
   rooms.set(room.id, room);
@@ -114,8 +117,18 @@ function addLine(room, person, text, kind) {
   room.pending.push(line);
   person.lastSpokeAt = now();
   if (/\bside ?kick\b/i.test(text)) room.addressed = line;
+  if (room.mode === "voting") {
+    const v = modeFromText(text);
+    if (v) { room.addressed = null; voteMode(room, person, v, kind === "typed" ? "typed" : "speech"); }
+    else scheduleModeClose(room, SILENCE_MS); // still talking: wait for a pause
+    return;
+  }
+  if (room.mode && /\bside ?kick\b/i.test(text)) {
+    if (room.mode === "sidelines" && TAKE_OVER.test(text)) { room.wantMode = "lead"; room.addressed = null; }
+    else if (room.mode === "lead" && STEP_BACK.test(text)) { room.wantMode = "sidelines"; room.addressed = null; }
+  }
   const slot = room.card && room.card.slot;
-  if (slot && !P.SLOTS[slot].private && FLEX.test(text) && P.SLOTS[slot].multi) {
+  if (slot && P.SLOTS[slot] && !P.SLOTS[slot].private && FLEX.test(text) && P.SLOTS[slot].multi) {
     setAnswer(room, person, slot, P.optionsFor(slot, room).map(([v]) => v), kind === "typed" ? "call_text" : "call_speech");
     line.flex = true;
   } else if (slot && UNSURE.test(text)) room.wantGuide = slot;
@@ -128,6 +141,86 @@ function acceptOffer(room) {
   track("sk_relaxed", { sessionId: room.id, persona: room.persona, kind: room.offer });
   room.offer = null;
   return true;
+}
+
+// ---------- The check-in: should Sidekick lead, or sit back while the crew fills in the plan? ----------
+// Everyone votes (tap or say it). Sidekick leads on a tie, or if nobody answers within about 3 seconds
+// of the check-in finishing. People can switch later ("Sidekick, take over" / "Sidekick, step back").
+const SILENCE_MS = 3000;
+const VOTE_MAX_MS = 20000;
+const LEAD_RE = /\b(yes|yeah|yep|yup|sure|please|lead|take the lead|run it|help( us)?|jump in|go for it|take over|you plan|do it|active)\b/i;
+const SIDE_RE = /\b(no|nope|nah|sidelines?|sit back|hang back|step back|we('ve| have)? got (it|this)|we'?ll fill|ourselves|stay quiet|background|the form)\b/i;
+const TAKE_OVER = /\b(take over|take the lead|jump in|help( us)?|run it|lead)\b/i;
+const STEP_BACK = /\b(step back|sit back|hang back|we('ve| have)? got (it|this)|stay quiet|chill)\b/i;
+function modeFromText(text) {
+  const lead = LEAD_RE.test(text);
+  const side = SIDE_RE.test(text);
+  return lead && !side ? "lead" : side && !lead ? "sidelines" : null; // both or neither: not a clear vote
+}
+const voters = (room) => P.crew(room).filter((p) => p.mode !== "form");
+const speechMs = (text) => 600 + String(text || "").split(/\s+/).length * 380; // about how long a line takes to say
+
+async function startCheckIn(room) {
+  room.mode = "voting";
+  room.modeVotes = {};
+  room.modeDeadline = now() + VOTE_MAX_MS;
+  room.card = { slot: "mode", at: now() };
+  const line = await speak(room, "checkin", {});
+  track("sk_checkin", { sessionId: room.id, persona: room.persona, voters: voters(room).length });
+  scheduleModeClose(room, speechMs(line.text) + SILENCE_MS);
+}
+
+function voteMode(room, person, value, how) {
+  if (room.mode !== "voting" || !["lead", "sidelines"].includes(value)) return false;
+  room.modeVotes[person.id] = value;
+  track("sk_mode_vote", { sessionId: room.id, persona: room.persona, value, how });
+  if (voters(room).every((p) => room.modeVotes[p.id])) { clearTimeout(room.modeTimer); closeMode(room).then(() => broadcast(room)); }
+  else scheduleModeClose(room, SILENCE_MS);
+  return true;
+}
+
+function scheduleModeClose(room, ms) {
+  if (room.mode !== "voting") return;
+  clearTimeout(room.modeTimer);
+  const wait = Math.max(0, Math.min(ms, (room.modeDeadline || now()) - now()));
+  room.modeTimer = setTimeout(() => closeMode(room).then(() => broadcast(room)).catch((err) => console.error(err)), wait);
+}
+
+async function closeMode(room) {
+  if (room.mode !== "voting") return;
+  clearTimeout(room.modeTimer);
+  const votes = Object.values(room.modeVotes);
+  const side = votes.filter((v) => v === "sidelines").length;
+  const lead = votes.length - side;
+  await setMode(room, side > lead ? "sidelines" : "lead", votes.length ? "vote" : "default");
+}
+
+// The question the crew should answer first, said out loud
+const QUESTION_SPOKEN = { night: "what day works best for everyone?", time: "what time works for everyone?", origin: "where's everyone coming from?", vibe: "what kind of night are we after?", budget: "pop your budget in on your screen, it's private", kind: "a ticketed event, or just somewhere good to go?" };
+
+async function setMode(room, mode, how) {
+  const was = room.mode;
+  room.mode = mode;
+  room.modeHow = how;
+  room.modeSetAt = now();
+  clearTimeout(room.modeTimer);
+  track("sk_mode", { sessionId: room.id, persona: room.persona, mode, how, votes: Object.keys(room.modeVotes).length });
+  const switching = how === "switch";
+  if (mode === "sidelines") {
+    room.card = { slot: "form", at: now() };
+    room.lastSaidAt = 0;
+    await speak(room, switching ? "switch_sidelines" : "mode_sidelines", {});
+    return;
+  }
+  // Leading: confirm and ask the first open question in the same breath
+  const events = [...upcoming(), ...(room.places || [])];
+  const f = factsOf(room);
+  const slot = P.nextQuestion(events, room, f) || (f.budget.answered < P.need(room) ? "budget" : null);
+  room.card = slot ? { slot, at: now() } : null;
+  if (slot) room.asked.push(slot);
+  room.lastSaidAt = 0;
+  await speak(room, switching ? "switch_lead" : how === "default" ? "mode_default" : "mode_lead", { slot });
+  if (!slot && was !== "lead") schedule(room, 300);
 }
 
 // "Anything works" is an answer (all options); "not sure" is a cue for Sidekick to offer ideas
@@ -270,6 +363,13 @@ async function speak(room, move, c = {}) {
       nudge: `Gently invite ${c.person} in to answer: ${PROMPTS[c.slot]}`,
       picks: `Introduce these two picks and ask everyone to vote. You may add one local detail from the event data.\n1) ${c.picks[0]}\n2) ${c.picks[1]}`,
       none: c.relax ? `Nothing fits everything they've said. Say that ${c.relax} would open up ${c.n} options, and ask if they want to see them. Don't say whose answer is the tight one.` : `Nothing fits everything they've said. Ask whether anyone could be flexible on the time or the night.`,
+      checkin: `This is the first time you speak. Welcome everyone to SideQuest, say this call is for planning their next night out, and ask whether they want you to lead the planning or sit back while they fill in the plan on their screens. Keep it to two short sentences.`,
+      mode_lead: `The crew wants you to lead. Say you've got it, then ask: ${c.slot ? QUESTION_SPOKEN[c.slot] : "what works for everyone?"}`,
+      mode_default: `Nobody answered, so you're taking the lead. Say so lightly (they can tell you to step back anytime), then ask: ${c.slot ? QUESTION_SPOKEN[c.slot] : "what works for everyone?"}`,
+      mode_sidelines: `The crew wants you to sit back. Say you'll stay quiet, the plan is on their screens, and they can say "Sidekick" if they need you.`,
+      mode_stalled: `You're sitting back and things have gone quiet with the plan half done. Gently ask if they'd like you to jump in.`,
+      switch_lead: `Someone asked you to take over. Say you're on it and ask: ${c.slot ? QUESTION_SPOKEN[c.slot] : "what's left to decide?"}`,
+      switch_sidelines: `Someone asked you to step back. Say you'll stay quiet until they need you.`,
       guide: `People seem unsure about this: ${PROMPTS[c.slot]} Help them answer by offering these concrete options from what's actually on: ${c.options}. Keep it light and end with a question.`,
       locked: `The planner just locked the plan: ${c.pick}. Confirm it warmly in one short sentence.`,
       wrap: `Point everyone to the two quick survey questions on their screen, in one short sentence.`,
@@ -321,6 +421,7 @@ function lineContext(room, f, c) {
     pick1: c.short && c.short[0], pick2: c.short && c.short[1], why1: c.why && c.why[0], why2: c.why && c.why[1], pick: c.pick,
     missing: missing.length ? missing.slice(0, 2).join(" and ") : null,
     options: c.options,
+    question: c.slot ? QUESTION_SPOKEN[c.slot] : null,
   };
 }
 
@@ -351,6 +452,13 @@ const agentIdFor = (room) => (process.env.ELEVENLABS_API_KEY && process.env.SIDE
 const AGENT_MAX_MIN = () => Number(process.env.ELEVENLABS_MAX_CALL_MINUTES || 10);
 const MOVE_HINT = {
   welcome: "Welcome the crew, then ask the first question",
+  checkin: "Welcome everyone to SideQuest and ask: should you lead the planning, or sit back while they fill in the plan on their screens?",
+  mode_lead: "They want you to lead. Confirm, then ask this question",
+  mode_default: "Nobody answered, so take the lead lightly, then ask this question",
+  mode_sidelines: "They want you to sit back. Say you'll stay quiet and they can say Sidekick if they need you",
+  mode_stalled: "Things have gone quiet. Gently ask if they want you to jump in",
+  switch_lead: "Someone asked you to take over. Confirm, then ask this question",
+  switch_sidelines: "Someone asked you to step back. Confirm in a few words",
   ask: "Ask the group this one question",
   conflict: "Name this clash kindly, without taking sides, and offer a way forward",
   nudge: "Gently invite this person in",
@@ -363,7 +471,8 @@ const MOVE_HINT = {
 };
 function cueFor(room, move, c, suggestion) {
   const opts = c.slot && c.slot !== "budget" ? P.optionsFor(c.slot, room).map(([, l]) => l).join(", ") : "";
-  const detail = move === "ask" || move === "welcome" ? `${PROMPTS[c.slot] || ""}${opts ? ` Options on screen: ${opts}.` : ""}${c.slot === "budget" ? " Everyone answers privately on their own screen." : ""}`
+  const detail = ["mode_lead", "mode_default", "switch_lead"].includes(move) && c.slot ? `Question: ${QUESTION_SPOKEN[c.slot]}`
+    : move === "ask" || move === "welcome" ? `${PROMPTS[c.slot] || ""}${opts ? ` Options on screen: ${opts}.` : ""}${c.slot === "budget" ? " Everyone answers privately on their own screen." : ""}`
     : move === "picks" ? (c.picks || []).map((x, i) => `${i + 1}) ${x}`).join(" ")
     : move === "guide" ? `Ideas: ${c.options}.`
     : move === "conflict" ? `${c.a} vs ${c.b}.`
@@ -396,7 +505,7 @@ async function think(room) {
       }
       applyUpdates(room, out, lines);
       if (out.addressed_sidekick && !room.addressed) room.addressed = lines[lines.length - 1];
-      if (room.card && !P.SLOTS[room.card.slot].private) {
+      if (room.card && P.SLOTS[room.card.slot] && !P.SLOTS[room.card.slot].private) {
         const slot = room.card.slot;
         for (const l of lines) {
           const answeredSomething = Object.values(room.answers[l.pid] || {}).some((x) => x && x.at >= l.at - 50);
@@ -428,6 +537,16 @@ async function ensurePlaces(room, f) {
 
 async function decide(room, { forcePicks = false } = {}) {
   if (room.status !== "live" || room.picks) return;
+  if (!room.mode) {
+    if (room.people.length >= 2) return startCheckIn(room); // wait for a second person before saying hello
+    return;
+  }
+  if (room.mode === "voting" && !forcePicks) return;
+  if (room.wantMode) {
+    const m = room.wantMode;
+    room.wantMode = null;
+    return setMode(room, m, "switch");
+  }
   await ensurePlaces(room, factsOf(room));
   const events = [...upcoming(), ...(room.places || [])];
   const f = factsOf(room);
@@ -446,7 +565,8 @@ async function decide(room, { forcePicks = false } = {}) {
   }
   if (forcePicks && r.pool >= 2) return makePicks(room, r.list);
 
-  for (const slot of ["night", "time", "vibe"]) {
+  const quiet = room.mode === "sidelines"; // sitting back: no questions, clashes or ideas out loud
+  for (const slot of quiet ? [] : ["night", "time", "vibe"]) {
     const c = f[slot].conflict;
     if (!c) continue;
     const key = `${slot}:${c.join("|")}`;
@@ -459,7 +579,7 @@ async function decide(room, { forcePicks = false } = {}) {
     return;
   }
 
-  if (room.wantGuide && room.card && room.card.slot === room.wantGuide && !room.card.guided) {
+  if (!quiet && room.wantGuide && room.card && room.card.slot === room.wantGuide && !room.card.guided) {
     room.card.guided = true;
     room.wantGuide = null;
     const options = ideasFor(room, f, room.card.slot, events);
@@ -483,6 +603,10 @@ async function decide(room, { forcePicks = false } = {}) {
     return;
   }
 
+  if (quiet) {
+    if (!room.card || room.card.slot !== "form") room.card = { slot: "form", at: now() };
+    return;
+  }
   const slot = P.nextQuestion(events, room, f) || (f.budget.answered < P.need(room) ? "budget" : null);
   if (!slot) return;
   if (!room.card || room.card.slot !== slot) {
@@ -503,10 +627,16 @@ function nudgeTick() {
   for (const room of rooms.values()) {
     if (now() - room.touched > IDLE_MS) { endRoom(room, "idle"); continue; }
     if (room.status !== "live" || room.picks || !room.card || room.thinking) continue;
+    if (room.mode === "sidelines") {
+      const last = Math.max(room.modeSetAt || 0, ...room.lines.map((l) => l.at), ...Object.values(room.answers).flatMap((a) => Object.values(a).map((x) => x.at || 0)));
+      if (!room.stalledAsked && now() - last > 60000) { room.stalledAsked = true; speak(room, "mode_stalled", {}).then(() => broadcast(room)); }
+      continue;
+    }
+    if (room.mode !== "lead") continue;
     const slot = room.card.slot;
     if (now() - room.card.at < NUDGE_AFTER_MS || (room.lastSaidAt && now() - room.lastSaidAt < NUDGE_AFTER_MS)) continue;
     const got = P.answersFor(room, slot).map((x) => x.person.id);
-    if (P.SLOTS[slot].private) continue;
+    if (!P.SLOTS[slot] || P.SLOTS[slot].private) continue;
     if (!got.length) {
       const quietSince = Math.max(room.card.at, ...room.lines.map((l) => l.at));
       if (!room.card.guided && now() - quietSince > 30000) { room.wantGuide = slot; schedule(room, 10); }
@@ -576,6 +706,8 @@ function endRoom(room, why) {
     modes: P.crew(room).map((p) => p.mode),
     secs: Math.round((now() - room.createdAt) / 1000),
     questions: room.asked,
+    mode: room.mode,
+    modeHow: room.modeHow,
     facts: { night: f.night.value, time: f.time.value, vibe: f.vibe.value, budget: P.budgetLabel(f, room) },
     picks: (room.picks || []).map((p) => p.id),
     locked: room.locked && room.locked.id,
@@ -607,9 +739,29 @@ function rows(room, f = factsOf(room)) {
   });
 }
 
+const MODE_OPTIONS = [["lead", "Take the lead"], ["sidelines", "We'll fill it in"]];
 function cardFor(room, person) {
   const mine = room.answers[person.id] || {};
   if (room.status !== "live" || room.picks) return null;
+  if (room.mode === "voting") {
+    const votes = {};
+    for (const [pid, v] of Object.entries(room.modeVotes)) { const who = room.people.find((x) => x.id === pid); if (who) votes[v] = [...(votes[v] || []), initial(who.name)]; }
+    return { slot: "mode", private: false, multi: false, prompt: "How should Sidekick help?", note: "Tap or just say it. Sidekick leads if nobody answers.", options: MODE_OPTIONS.map(([value, label]) => ({ value, label, voters: votes[value] || [], mine: room.modeVotes[person.id] === value })) };
+  }
+  if (room.mode === "sidelines") {
+    const slotCard = (slot) => {
+      const voters = {};
+      for (const x of P.answersFor(room, slot)) for (const v of [].concat(x.a.value)) voters[v] = [...(voters[v] || []), initial(x.person.name)];
+      const chosen = mine[slot] ? [].concat(mine[slot].value) : [];
+      return { slot, prompt: PROMPTS[slot], multi: P.SLOTS[slot].multi, options: P.optionsFor(slot, room).map(([value, label]) => ({ value, label, voters: voters[value] || [], mine: chosen.includes(value) })) };
+    };
+    const slots = [...(room.nights.length > 1 ? ["night"] : []), "time", "vibe", "origin", ...(room.places && room.places.length ? ["kind"] : [])];
+    return {
+      form: true,
+      slots: slots.map(slotCard),
+      budget: mine.budget ? { done: true } : { slot: "budget", private: true, prompt: PROMPTS.budget, options: P.optionsFor("budget", room).map(([value, label]) => ({ value, label, voters: [] })) },
+    };
+  }
   // Private: budget, when it's the open question and this person hasn't answered
   if (room.card && room.card.slot === "budget") {
     if (mine.budget) return { slot: "budget", private: true, waiting: true, prompt: "Thanks. Waiting on the others", options: [] };
@@ -646,6 +798,7 @@ function viewFor(room, pid) {
     cues: me && me.role === "planner" && room.agentMode ? room.cues.slice(-6) : [],
     voiceAgent: Boolean(me && me.role === "planner" && agentIdFor(room)),
     agentOn: room.agentMode,
+    mode: room.mode,
     sidekick: room.said.slice(-3),
     picks: room.picks,
     votes,
@@ -709,6 +862,17 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     }
     const person = room.people.find((p) => p.id === body.p);
     if (!person) return sendJSON(res, 403, { error: "Join the call first." });
+    if (action === "answer" && body.slot === "mode") {
+      const ok = voteMode(room, person, body.value, "tap");
+      broadcast(room);
+      return sendJSON(res, ok ? 200 : 400, ok ? { ok } : { error: "The vote has closed." });
+    }
+    if (action === "mode") {
+      if (room.mode === "voting") voteMode(room, person, body.value, "tap");
+      else if (["lead", "sidelines"].includes(body.value) && body.value !== room.mode && room.mode) { room.wantMode = body.value; schedule(room, 50); }
+      broadcast(room);
+      return sendJSON(res, 200, { ok: true });
+    }
     if (action === "answer") {
       const ok = setAnswer(room, person, body.slot, body.value, body.source || "call_card");
       broadcast(room);
@@ -837,7 +1001,7 @@ async function agentTool(req, res, tool, { readBody, sendJSON }) {
     return {
       people: P.crew(room).map((p) => ({ name: p.name, joined: p.mode })),
       board: rows(room, f).map((r) => ({ fact: r.label, value: r.value, said_by: P.SLOTS[r.slot].private ? undefined : r.who, state: r.state })),
-      open_question: room.card ? { slot: room.card.slot, question: PROMPTS[room.card.slot], private: P.SLOTS[room.card.slot].private, options: P.SLOTS[room.card.slot].private ? undefined : P.optionsFor(room.card.slot, room).map(([, l]) => l) } : null,
+      open_question: room.card && P.SLOTS[room.card.slot] ? { slot: room.card.slot, question: PROMPTS[room.card.slot], private: P.SLOTS[room.card.slot].private, options: P.SLOTS[room.card.slot].private ? undefined : P.optionsFor(room.card.slot, room).map(([, l]) => l) } : null,
       picks: room.picks ? room.picks.map((x) => ({ title: x.title, when: x.when, price: x.price, where: x.where, reason: x.reason })) : null,
       locked: room.locked ? room.locked.title : null,
     };
@@ -878,4 +1042,4 @@ function init({ events }) {
   eventsSource = events;
 }
 
-module.exports = { init, handle, _test: { rooms, createRoom, addPerson, setAnswer, addLine, think, decide, extractKeywords, viewFor, endRoom } };
+module.exports = { init, handle, _test: { rooms, createRoom, addPerson, setAnswer, addLine, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode } };

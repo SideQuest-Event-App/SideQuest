@@ -135,6 +135,7 @@ const SAT = days.find((d) => d > FRI && new Date(d + "T12:00:00").getDay() === 6
     process.env.GOOGLE_PLACES_DAILY_MAX = "5";
     const { room: rid } = T.createRoom({ crew: "Test", planner: "Asia", nights: [FRI, SAT], persona: "friend" });
     const room = T.rooms.get(rid);
+    room.mode = "lead";
     const maya = T.addPerson(room, { name: "Maya", mode: "voice" });
     const people = [room.people[0], maya];
     for (const p of people) { T.setAnswer(room, p, "night", [SAT], "call_card"); T.setAnswer(room, p, "budget", "50", "call_card"); T.setAnswer(room, p, "origin", "union", "call_card"); T.setAnswer(room, p, "vibe", ["games"], "call_card"); }
@@ -158,6 +159,7 @@ const SAT = days.find((d) => d > FRI && new Date(d + "T12:00:00").getDay() === 6
     process.env.SIDEKICK_PLACES_OFF = "1";
     const { room: rid } = T.createRoom({ crew: "Test", planner: "Asia", nights: [FRI, SAT], persona: "concierge" });
     const room = T.rooms.get(rid);
+    room.mode = "lead";
     const maya = T.addPerson(room, { name: "Maya", mode: "voice" });
     for (const p of [room.people[0], maya]) { T.setAnswer(room, p, "night", [SAT], "call_card"); T.setAnswer(room, p, "budget", "50", "call_card"); T.setAnswer(room, p, "vibe", ["music"], "call_card"); }
     for (let i = 0; i < 6 && !room.picks; i++) { room.lastSaidAt = 0; await T.think(room); if (room.card) for (const p of [room.people[0], maya]) T.setAnswer(room, p, room.card.slot, P.SLOTS[room.card.slot].multi ? [P.optionsFor(room.card.slot, room)[0][0]] : P.optionsFor(room.card.slot, room)[0][0], "call_card"); }

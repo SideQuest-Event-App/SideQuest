@@ -170,6 +170,7 @@
 
   // ---------- 3. The call ----------
   let me = roomId ? store.get(`sk:${roomId}`) : null;
+  let lastMode = null;
   let view = null;
   let es = null;
   let phase = null;
@@ -205,6 +206,7 @@
 
   function render() {
     const next = view.locked ? "locked" : view.status === "ended" ? "ended" : view.picks ? "picks" : "call";
+    if (view.mode !== lastMode) { lastMode = view.mode; if (phase === next) renderDock(); }
     if (next !== phase) {
       phase = next;
       app.innerHTML = `<div id="top"></div><div id="body" class="stack"></div><div id="say" class="stack"></div><div id="ticks" class="stack"></div><div class="dock" id="dock"></div>`;
@@ -228,13 +230,15 @@
     return `<div class="bh"><span class="row"><span class="orb ${phase === "call" ? "live" : ""}"></span><h2 style="font-size:15px">${esc(view.crew)}'s plan</h2></span>${extra || `<span class="dots" role="img" aria-label="${view.known} of 5 known">${dots}</span>`}</div>`;
   }
 
-  function cardHTML(card) {
-    const opts = card.options.map((o) => `<button class="ans" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="grow">${esc(o.label)}</span>${o.voters.length ? `<span class="stk">${o.voters.map((v) => `<span class="av xs c${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(v) % 6}">${esc(v)}</span>`).join("")}</span>` : ""}</button>`).join("");
-    return `<div class="q"><span class="small">Sidekick is asking · ${view.me.mode === "voice" ? "say it or tap it" : "tap to answer"}${card.multi ? " · pick any that work" : ""}</span><h2>${esc(card.prompt)}</h2>${opts}</div>`;
+  function cardHTML(card, label) {
+    const opts = card.options.map((o) => `<button class="ans" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="grow">${esc(o.label)}</span>${o.voters.length ? `<span class="stk">${o.voters.map((v) => `<span class="av xs c${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(v) % 6}">${esc(v)}</span>`).join("")}</span>` : ""}</button>`).join("");
+    const hint = label || `Sidekick is asking · ${view.me.mode === "voice" ? "say it or tap it" : "tap to answer"}${card.multi ? " · pick any that work" : ""}`;
+    return `<div class="q"><span class="small">${esc(hint)}</span><h2>${esc(card.prompt)}</h2>${opts}${card.note ? `<span class="small">${esc(card.note)}</span>` : ""}</div>`;
   }
 
   function renderCall() {
-    const card = view.card;
+    const card = view.card && !view.card.form ? view.card : null;
+    const form = view.card && view.card.form ? view.card : null;
     const rows = view.rows.map((r) => {
       if (card && !card.private && card.slot === r.slot) return cardHTML(card);
       const cls = r.slot === "budget" ? "priv-row" : "";
@@ -251,7 +255,14 @@
     const invite = view.me.planner && view.people.length < 4
       ? `<div class="priv" style="border-style:solid;border-color:var(--soc-t)"><p style="font-weight:600">${view.people.length < 2 ? "Invite your crew" : "Anyone else coming?"}</p><p class="small">Anyone with the link can join from a browser. No app or account needed.</p><div class="row"><input class="in" readonly value="${esc(link)}" aria-label="Call link" style="font:500 13px var(--m)"><button class="btn sm out" id="copy">Copy</button></div>${navigator.share ? '<button class="btn sm out" id="share" style="width:100%">Share to the group chat</button>' : ""}</div>`
       : "";
-    document.getElementById("body").innerHTML = `${view.people.length < 2 ? invite : ""}<div class="board">${boardHead()}${rows}</div>${priv}${view.people.length >= 2 ? invite : ""}`;
+    const vote = card && card.slot === "mode" ? `<div class="board" style="border-color:var(--pri-e)">${cardHTML(card, "Quick vote · everyone")}</div>` : "";
+    const formHTML = form
+      ? `<div class="stack"><p class="small">Sidekick's sitting back. Fill in the plan together; it'll suggest two picks once everyone's in.</p>
+          ${form.slots.map((c) => cardHTML(c, c.multi ? "Pick any that work" : "Pick one")).join("")}
+          ${form.budget && !form.budget.done ? `<div class="priv"><span class="lock">${ICON.lock}Just for you · nobody else sees this</span><h2>${esc(form.budget.prompt)}</h2>${form.budget.options.map((o) => `<button class="ans" data-slot="budget" data-private="1" data-answer="${esc(o.value)}"><span class="grow">${esc(o.label)}</span></button>`).join("")}</div>` : ""}
+        </div>`
+      : "";
+    document.getElementById("body").innerHTML = `${view.people.length < 2 ? invite : ""}${vote}<div class="board">${boardHead()}${rows}</div>${priv}${formHTML}${view.people.length >= 2 ? invite : ""}`;
     document.getElementById("ticks").innerHTML = view.captions.slice(-2).map((c) => `<div class="tick"><b>${esc(c.name)}${c.kind === "typed" ? " · typed" : ""}</b><span>${esc(c.text)}</span></div>`).join("") + (interim ? `<div class="tick me"><b>You</b><span>${esc(interim)}</span></div>` : "");
   }
 
@@ -319,7 +330,10 @@
     const agentBtn = view.voiceAgent
       ? `<button class="btn ${agent ? "out" : "pri"}" id="agent" style="height:44px">${agent ? "Sidekick's voice is on · Turn off" : agentStarting ? "Connecting Sidekick's voice…" : "Turn on Sidekick's voice"}</button>`
       : "";
-    dock.innerHTML = `${agentBtn}
+    const modeBtn = view.mode === "sidelines"
+      ? `<button class="btn pri" id="modeSwitch" data-mode="lead" style="height:44px">Ask Sidekick to jump in</button>`
+      : view.mode === "lead" ? `<button class="btn out" id="modeSwitch" data-mode="sidelines" style="height:40px;font-size:13px">Sidekick's leading · Let it sit back</button>` : "";
+    dock.innerHTML = `${modeBtn}${agentBtn}
       <form class="compose" id="compose" ${voice && !typing ? "hidden" : ""}><label class="sr" for="line">Message the call</label><input class="in" id="line" autocomplete="off" placeholder="${voice ? "Type instead…" : "Type to the call…"}" maxlength="300"><button class="send" aria-label="Send">${ICON.send}</button></form>
       <div class="ctrls">
         ${voice && !agent ? `<button class="ctrl" id="mic" aria-pressed="${micOn}" aria-label="${micOn ? "Mute" : "Unmute"}">${ICON.mic}</button>` : ""}
@@ -335,7 +349,8 @@
     const t = e.target;
     const ans = t.closest("[data-answer]");
     if (ans && view && view.card) {
-      const card = view.card;
+      const card = view.card.form ? (ans.dataset.slot === "budget" ? view.card.budget : view.card.slots.find((c) => c.slot === ans.dataset.slot)) : view.card;
+      if (!card) return;
       let value = ans.dataset.answer;
       if (card.multi && !ans.dataset.private) {
         const now = card.options.filter((o) => o.mine).map((o) => o.value);
@@ -356,6 +371,8 @@
     if (t.closest("#share")) return void navigator.share({ title: `${view.crew}: help plan our next night`, text: "Sidekick's helping us plan. Hop on or answer in 30 seconds:", url: `${location.origin}/sk/${roomId}` }).catch(() => {});
     if (t.closest("#ask")) return void send("ask", {});
     if (t.closest("#agent")) return void (agent ? stopAgent() : startAgent());
+    const ms = t.closest("#modeSwitch");
+    if (ms) return void send("mode", { value: ms.dataset.mode });
     if (t.closest("#mic")) return void (micOn ? stopMic() : startMic());
     if (t.closest("#kb")) { typing = !typing; renderDock(); if (typing) document.getElementById("line").focus(); return; }
     if (t.closest("#aloud")) { aloud = !aloud; store.set("sk:aloud", aloud); renderDock(); if (!aloud) speechSynthesis.cancel(); return; }

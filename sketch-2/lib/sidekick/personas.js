@@ -74,6 +74,13 @@ function systemPrompt(id) {
 // {placeholders} are filled from the call. Each move has versions so Sidekick doesn't repeat itself.
 const LINES = {
   friend: {
+    checkin: ["Hey y'all, welcome to SideQuest! This is your call to plan the next night out. Want me to jump in and run the planning, or hang back while you fill in the plan yourselves?", "Hey hey, welcome to SideQuest! Should I take the lead on planning tonight, or chill on the sidelines while you fill in the plan?"],
+    mode_lead: ["Love it, I've got you. First up, {question}", "Say less, I've got this. So, {question}"],
+    mode_default: ["No answer, so I'll take the lead. Tell me to step back anytime. First up, {question}", "I'll run with it for now, just say if you want me to chill. So, {question}"],
+    mode_sidelines: ["Cool, I'll chill. The plan's on your screens. Just say 'Sidekick' if you need me.", "Got it, you've got this. Holler 'Sidekick' if you want me."],
+    mode_stalled: ["Looks like things slowed down. Want me to jump in and help wrap it up?"],
+    switch_lead: ["On it! Let's pick up where you left off. {question}"],
+    switch_sidelines: ["Got it, I'll step back. Holler if you need me."],
     hello: ["Hey, y'all, let's get the ball rolling for our next side quest. What day works best for everyone?", "Hello and welcome back everyone! How are we all feeling tonight?"],
     ask_night: ["So, which night are we thinking, {nights}?", "{nights}? Shout it out or tap it."],
     ask_time: ["{night} it is. Early dinner vibe, or later, like after eight?", "Nice. So what time are we heading out?"],
@@ -91,6 +98,13 @@ const LINES = {
     wrap: ["Last thing: two quick taps on your screen about how I did. Keeps me honest.", "Before you go, rate me on your screen. Be brutal."],
   },
   concierge: {
+    checkin: ["Hi everyone, welcome to SideQuest. This call is for planning your next night out. Would you like me to lead the planning, or stay in the background while you fill in the plan?", "Welcome to SideQuest, everyone. Shall I guide the planning, or would you prefer to fill in the plan yourselves while I stay in the background?"],
+    mode_lead: ["Wonderful, I'll guide us through it. To start, {question}", "Of course. Let's begin. {question}"],
+    mode_default: ["I'll take the lead for now; just tell me if you'd like me to step back. To start, {question}"],
+    mode_sidelines: ["Of course. The questions are on your screens. Say 'Sidekick' anytime and I'll step in.", "That's fine. I'll stay in the background. Just say 'Sidekick' whenever you'd like help."],
+    mode_stalled: ["It seems we've paused. Would you like me to help finish the plan?"],
+    switch_lead: ["Happy to help. Let's continue. {question}"],
+    switch_sidelines: ["Of course. I'll stay quiet until you need me."],
     hello: ["Hi everyone, I'm Sidekick. I'll keep track, so you can just talk. Which night works best?", "Good evening, {crew}. Let's find a night that suits everyone. {nights}?"],
     ask_night: ["Which night would suit everyone best?", "{nights}? Whichever is easier for you."],
     ask_time: ["{night}, lovely. What time would suit everyone?", "Would you prefer to start earlier in the evening, or later?"],
@@ -120,7 +134,7 @@ const pickOne = (list) => list[Math.floor(Math.random() * list.length)];
 function fallbackLine(id, move, c, recent = []) {
   const set = LINES[resolve(id)];
   const versions = set[move] || set.answer;
-  const fill = (t) => cap(t.replace(/\{(\w+)\}/g, (_, k) => (c[k] != null && c[k] !== "" ? c[k] : DEFAULTS[k] || "")).replace(/\s+([,.?!])/g, "$1").replace(/,\s*,/g, ","));
+  const fill = (t) => cap(t.replace(/\{(\w+)\}/g, (_, k) => (c[k] != null && c[k] !== "" ? c[k] : DEFAULTS[k] || "")).replace(/\s+([,.?!])/g, "$1").replace(/,\s*,/g, ",").replace(/([.!?]\s+)([a-z])/g, (_, p, ch) => p + ch.toUpperCase()));
   // A version that needs a fact we don't have (e.g. {why1}) is skipped when another version works
   const usable = versions.filter((t) => (t.match(/\{(\w+)\}/g) || []).every((m) => { const k = m.slice(1, -1); return (c[k] != null && c[k] !== "") || DEFAULTS[k]; }));
   const pool = (usable.length ? usable : versions).map(fill);
@@ -129,7 +143,7 @@ function fallbackLine(id, move, c, recent = []) {
   const fresh = pool.filter((t) => !used.has(opener(t)));
   return pickOne(fresh.length ? fresh : pool);
 }
-const DEFAULTS = { crew: "crew", nights: "Friday or Saturday", night: "That night", missing: "a couple more things", loosen: "loosening one thing", n: "a few", options: "a few different options" };
+const DEFAULTS = { question: "what works for everyone?", crew: "crew", nights: "Friday or Saturday", night: "That night", missing: "a couple more things", loosen: "loosening one thing", n: "a few", options: "a few different options" };
 
 const BANNED = [/as an ai/i, /i'?d be happy to/i, /great question/i, /i'?ll (come|be there|join you)/i, /\bi feel\b/i, /\b(um|uh)\b/i];
 function acceptable(text) {

@@ -71,6 +71,7 @@ const hourBucket = (iso) => {
 async function run(script, persona) {
   const { room: rid } = T.createRoom({ crew: "Test crew", planner: script.people[0].name, nights: [FRI, SAT], persona });
   const room = T.rooms.get(rid);
+  room.mode = "lead"; // these scripts test the planning itself; the check-in has its own tests (sidekick-modes.js)
   const people = [room.people[0]];
   for (const p of script.people.slice(1)) people.push(T.addPerson(room, { name: p.name, mode: p.quiet ? "text" : "voice" }));
   script.people.forEach((p, i) => {
