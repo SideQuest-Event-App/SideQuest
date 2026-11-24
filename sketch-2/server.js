@@ -26,6 +26,7 @@ const { jsonLdEvents } = require("../sketch-1/import/fetch");
 const { stripHtml, trimText, place, travel: travelTo, vibesOf, NA } = require("../sketch-1/import/normalize");
 const siteName = require("./public/js/sites.js"); // shared with the add-event form
 const sidekick = require("./lib/sidekick/rooms"); // Sidekick planning calls (lib/sidekick, public/sidekick.html)
+const skOg = require("./lib/sidekick/og"); // link previews for call invites
 
 const PORT = process.env.PORT || 3001; // Sketch 1 uses 3000, so both can run at once
 
@@ -1817,9 +1818,11 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, hostReport(db.data.hosts[url.searchParams.get("host")] || null));
     }
     if (url.pathname.startsWith("/api/sk/")) return sidekick.handle(req, res, url, { readBody, sendJSON });
-    if (req.method === "GET" && /^\/sk(\/[\w-]+)?\/?$/.test(url.pathname)) {
+    if ((req.method === "GET" || req.method === "HEAD") && /^\/sk(\/[\w-]+)?\/?$/.test(url.pathname)) {
+      // Link-preview tags (iMessage, WhatsApp, Slack...) are written into the page for each room
+      const html = skOg.page(fs.readFileSync(path.join(__dirname, "public", "sidekick.html"), "utf8"), req, url.pathname.split("/")[2] || null, sidekick.preview);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      return fs.createReadStream(path.join(__dirname, "public", "sidekick.html")).pipe(res);
+      return res.end(req.method === "HEAD" ? undefined : html);
     }
     const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster, "/api/extract": apiExtract, "/api/from-link": apiFromLink, "/api/cover": apiCover, "/api/read-ticket": apiReadTicket };
     if (req.method === "POST" && ROUTES[url.pathname]) {
@@ -1869,8 +1872,12 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404);
     return res.end("Not found");
   }
-  const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
-  res.writeHead(200, { "content-type": types[path.extname(filePath)] || "text/plain" });
+  const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" };
+  const ext = path.extname(filePath);
+  const headers = { "content-type": types[ext] || "text/plain", "content-length": fs.statSync(filePath).size };
+  if (/^\/og\//.test(url.pathname) && ext !== ".html") headers["cache-control"] = "public, max-age=86400"; // invite cards, fetched by messaging apps
+  res.writeHead(200, headers);
+  if (req.method === "HEAD") return res.end();
   fs.createReadStream(filePath).pipe(res);
 });
 

@@ -25,6 +25,9 @@ const IDLE_MS = 3 * 3600 * 1000;
 const PROMPTS = { night: "Which night works?", time: "What time works?", origin: "Where are you starting from?", vibe: "What kind of night?", budget: "Your max for the night?", nos: "Anything that's a no?", kind: "A ticketed event, or just somewhere good to go?" };
 
 const id = (n = 6) => crypto.randomBytes(n).toString("base64url");
+// Changes every time the server starts. Rooms live in memory, so a phone that saw a different boot
+// knows its call ended because the app restarted, not because the planner ended it.
+const BOOT = id(4);
 const initial = (name) => (name || "?").trim().charAt(0).toUpperCase();
 const now = () => Date.now();
 
@@ -64,6 +67,7 @@ function createRoom({ crew, planner, nights, persona }) {
     mode: null, // null (not asked yet) | "voting" | "lead" | "sidelines"
     modeVotes: {},
     modeHow: null,
+    signalQueue: new Map(), // in-app audio signalling for people whose stream is reconnecting
   };
   if (!room.nights.length) room.nights = suggestNights().slice(0, 2).map((n) => n.date);
   rooms.set(room.id, room);
@@ -108,9 +112,59 @@ function setAnswer(room, person, slot, value, source) {
   return true;
 }
 
+// ---------- Several phones in one room ----------
+// Friends sitting together: every phone's mic hears everyone, so one sentence can arrive from several
+// phones. And a phone reading Sidekick aloud gets captioned by the others. Both are dropped here.
+const DUP_MS = 4000;
+const DUP_SHORT_MS = 1500; // "yeah" from two phones: only a duplicate if it's identical and nearly at once
+const ECHO_MS = 12000;
+const words = (t) => String(t || "").toLowerCase().replace(/[\u2019']/g, "").replace(/[^a-z0-9$]+/g, " ").split(" ").filter(Boolean);
+function overlap(a, b) { // shared words over the average length (multiset), 0 to 1
+  const left = new Map();
+  for (const w of a) left.set(w, (left.get(w) || 0) + 1);
+  let n = 0;
+  for (const w of b) { const c = left.get(w); if (c) { n++; left.set(w, c - 1); } }
+  return (2 * n) / (a.length + b.length || 1);
+}
+function contained(a, b) { // share of a's words that appear in b
+  const pool = new Map();
+  for (const w of b) pool.set(w, (pool.get(w) || 0) + 1);
+  let n = 0;
+  for (const w of a) { const c = pool.get(w); if (c) { n++; pool.set(w, c - 1); } }
+  return n / (a.length || 1);
+}
+// Returns "duplicate", "echo" or null
+function heardElsewhere(room, person, text, kind) {
+  if (kind === "typed") return null;
+  const w = words(text);
+  if (!w.length) return null;
+  const t = now();
+  for (const s of room.said) {
+    if (s.system || t - s.at > ECHO_MS + speechMs(s.text)) continue;
+    const sw = words(s.text);
+    if (w.length >= 4 && contained(w, sw) >= 0.8) return "echo";
+    if (w.length === 3 && ` ${sw.join(" ")} `.includes(` ${w.join(" ")} `)) return "echo";
+  }
+  for (let i = room.lines.length - 1; i >= 0; i--) {
+    const l = room.lines[i];
+    if (t - l.at > DUP_MS) break;
+    if (l.pid === person.id || l.kind === "typed") continue;
+    const lw = words(l.text);
+    if (w.length < 3 || lw.length < 3) { if (t - l.at <= DUP_SHORT_MS && w.join(" ") === lw.join(" ")) return "duplicate"; continue; }
+    if (overlap(w, lw) >= 0.8) return "duplicate";
+  }
+  return null;
+}
+
 function addLine(room, person, text, kind) {
   text = String(text || "").trim().slice(0, 300);
-  if (!text) return;
+  if (!text) return null;
+  const heard = heardElsewhere(room, person, text, kind);
+  if (heard) {
+    room.dropped = (room.dropped || 0) + 1;
+    track("sk_line_dropped", { sessionId: room.id, why: heard });
+    return { dropped: heard };
+  }
   const line = { id: id(4), pid: person.id, name: person.name, text, kind: kind === "typed" ? "typed" : "spoken", at: now() };
   room.lines.push(line);
   if (room.lines.length > 40) room.lines.shift();
@@ -121,7 +175,7 @@ function addLine(room, person, text, kind) {
     const v = modeFromText(text);
     if (v) { room.addressed = null; voteMode(room, person, v, kind === "typed" ? "typed" : "speech"); }
     else scheduleModeClose(room, SILENCE_MS); // still talking: wait for a pause
-    return;
+    return line;
   }
   if (room.mode && /\bside ?kick\b/i.test(text)) {
     if (room.mode === "sidelines" && TAKE_OVER.test(text)) { room.wantMode = "lead"; room.addressed = null; }
@@ -133,6 +187,7 @@ function addLine(room, person, text, kind) {
     line.flex = true;
   } else if (slot && UNSURE.test(text)) room.wantGuide = slot;
   if (room.offer && /\b(yes|yeah|yep|sure|ok(ay)?|show (us|me)|do it|go for it|sounds good)\b/i.test(text)) acceptOffer(room);
+  return line;
 }
 
 function acceptOffer(room) {
@@ -183,6 +238,7 @@ function scheduleModeClose(room, ms) {
   if (room.mode !== "voting") return;
   clearTimeout(room.modeTimer);
   const wait = Math.max(0, Math.min(ms, (room.modeDeadline || now()) - now()));
+  room.modeCloseAt = now() + wait; // phones show a countdown to this
   room.modeTimer = setTimeout(() => closeMode(room).then(() => broadcast(room)).catch((err) => console.error(err)), wait);
 }
 
@@ -790,7 +846,9 @@ function viewFor(room, pid) {
     status: room.status,
     nights: room.nights.map((d) => P.nightLabel(d)),
     me: me && { id: me.id, name: me.name, mode: me.mode, planner: me.role === "planner", answers: room.answers[me.id] },
-    people: P.crew(room).map((p) => ({ id: p.id, name: p.name, initial: initial(p.name), mode: p.mode, talking: now() - p.lastSpokeAt < 3000, planner: p.role === "planner" })),
+    people: P.crew(room).map((p) => ({ id: p.id, name: p.name, initial: initial(p.name), mode: p.mode, talking: now() - p.lastSpokeAt < 3000, planner: p.role === "planner", online: room.streams.has(p.id), audio: Boolean(p.audio), muted: Boolean(p.muted) })),
+    audioRoom: room.people.some((p) => p.audio),
+    boot: BOOT,
     rows: r,
     known: r.filter((x) => x.state === "done").length,
     card: me ? cardFor(room, me) : null,
@@ -799,6 +857,7 @@ function viewFor(room, pid) {
     voiceAgent: Boolean(me && me.role === "planner" && agentIdFor(room)),
     agentOn: room.agentMode,
     mode: room.mode,
+    modeCloseAt: room.mode === "voting" ? room.modeCloseAt || null : null,
     sidekick: room.said.slice(-3),
     picks: room.picks,
     votes,
@@ -814,6 +873,37 @@ function broadcast(room) {
   for (const [pid, res] of room.streams) res.write(`data: ${JSON.stringify(viewFor(room, pid))}\n\n`);
 }
 
+// ---------- In-app audio (WebRTC mesh, 2 to 6 people) ----------
+// The server only passes messages between phones (offers, answers, network candidates). Audio goes
+// phone to phone. Messages are never logged or stored beyond a short queue for a reconnecting phone.
+const AUDIO_MAX = 6;
+const SIGNAL_KINDS = ["offer", "answer", "ice", "bye"];
+const SIGNAL_MAX_BYTES = 20000;
+const list = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean);
+function iceServers() {
+  const out = [];
+  const stun = process.env.SIDEKICK_STUN_URL == null ? "stun:stun.l.google.com:19302" : process.env.SIDEKICK_STUN_URL;
+  if (stun && stun !== "off") out.push({ urls: list(stun) });
+  if (process.env.SIDEKICK_TURN_URL) out.push({ urls: list(process.env.SIDEKICK_TURN_URL), username: process.env.SIDEKICK_TURN_USER || "", credential: process.env.SIDEKICK_TURN_PASS || "" });
+  return out;
+}
+function sendSignal(room, to, msg) {
+  const payload = `event: signal\ndata: ${JSON.stringify(msg)}\n\n`;
+  const res = room.streams.get(to);
+  if (res) return void res.write(payload);
+  const q = (room.signalQueue.get(to) || []).filter((x) => now() - x.at < 30000);
+  q.push({ payload, at: now() });
+  while (q.length > 60) q.shift();
+  room.signalQueue.set(to, q);
+}
+
+// For link previews: only the crew name and the nights, never names or answers
+function preview(roomId) {
+  const room = rooms.get(String(roomId || ""));
+  if (!room) return null;
+  return { crew: room.crew, status: room.status, nights: room.nights.map((d) => P.nightLabel(d).split(",")[0]) };
+}
+
 // ---------- HTTP ----------
 
 async function handle(req, res, url, { readBody, sendJSON }) {
@@ -826,22 +916,30 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       return sendJSON(res, 200, createRoom({ crew: body.crew, planner: body.name, nights: body.nights, persona: body.persona }));
     }
     const room = rooms.get(parts[3]);
-    if (!room) return sendJSON(res, 404, { error: "This call has ended or the link is wrong." });
+    if (!room) return sendJSON(res, 404, { error: "This call has ended or the link is wrong.", gone: true, boot: BOOT });
     room.touched = now();
     const action = parts[4];
     if (req.method === "GET" && action === "stream") {
       const pid = url.searchParams.get("p");
       if (!room.people.some((p) => p.id === pid)) return sendJSON(res, 403, { error: "Join the call first." });
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
-      res.write(`data: ${JSON.stringify(viewFor(room, pid))}\n\n`);
+      // retry: how long the browser waits before reconnecting on its own
+      res.write(`retry: 2000\n\n`);
       const old = room.streams.get(pid);
       if (old) old.end();
       room.streams.set(pid, res);
-      const ping = setInterval(() => res.write(": ping\n\n"), 20000);
-      req.on("close", () => { clearInterval(ping); if (room.streams.get(pid) === res) room.streams.delete(pid); });
+      for (const x of (room.signalQueue.get(pid) || []).filter((m) => now() - m.at < 30000)) res.write(x.payload);
+      room.signalQueue.delete(pid);
+      broadcast(room); // everyone sees this person back online (and this phone gets its first view)
+      // A named heartbeat (older pages ignore it) so phones can tell a silently dead connection
+      const ping = setInterval(() => res.write(`event: ping\ndata: {}\n\n`), 15000);
+      req.on("close", () => {
+        clearInterval(ping);
+        if (room.streams.get(pid) === res) { room.streams.delete(pid); setTimeout(() => !room.streams.has(pid) && broadcast(room), 8000).unref(); }
+      });
       return;
     }
-    if (req.method === "GET" && action === "info") return sendJSON(res, 200, { crew: room.crew, status: room.status, nights: room.nights.map((d) => P.nightLabel(d)), people: P.crew(room).map((p) => p.name), member: room.people.some((p) => p.id === url.searchParams.get("p")) });
+    if (req.method === "GET" && action === "info") return sendJSON(res, 200, { boot: BOOT, crew: room.crew, status: room.status, nights: room.nights.map((d) => P.nightLabel(d)), people: P.crew(room).map((p) => p.name), member: room.people.some((p) => p.id === url.searchParams.get("p")) });
     if (req.method !== "POST") return sendJSON(res, 404, { error: "Not found" });
     const body = await readBody(req);
     if (action === "join") {
@@ -880,9 +978,31 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       return sendJSON(res, ok ? 200 : 400, ok ? { ok } : { error: "That answer isn't one of the options." });
     }
     if (action === "line") {
-      addLine(room, person, body.text, body.kind);
+      const out = addLine(room, person, body.text, body.kind);
+      if (out && out.dropped) return sendJSON(res, 200, { ok: true, dropped: out.dropped });
       broadcast(room);
       schedule(room);
+      return sendJSON(res, 200, { ok: true });
+    }
+    if (action === "audio") {
+      const on = Boolean(body.on);
+      if (on && !person.audio && room.people.filter((p) => p.audio).length >= AUDIO_MAX) return sendJSON(res, 400, { error: `In-app audio fits ${AUDIO_MAX} people. You can still listen on speaker in the same room, or type.` });
+      if (on && !person.audio) track("sk_audio", { sessionId: room.id, on: true, inAudio: room.people.filter((p) => p.audio).length + 1 });
+      person.audio = on;
+      person.muted = on && Boolean(body.muted);
+      broadcast(room);
+      return sendJSON(res, 200, { ok: true, iceServers: on ? iceServers() : [] });
+    }
+    if (action === "signal") {
+      const to = room.people.find((p) => p.id === body.to);
+      if (!to || to.id === person.id) return sendJSON(res, 400, { error: "That person isn't on this call." });
+      if (!SIGNAL_KINDS.includes(body.kind)) return sendJSON(res, 400, { error: "Unknown signal." });
+      const data = body.data === undefined ? null : body.data;
+      if (JSON.stringify(data).length > SIGNAL_MAX_BYTES) return sendJSON(res, 413, { error: "Signal too large." });
+      const t = now();
+      if (!person.sig || t - person.sig.since > 60000) person.sig = { since: t, n: 0 };
+      if (++person.sig.n > 400) return sendJSON(res, 429, { error: "Too many signals. Slow down." });
+      sendSignal(room, to.id, { from: person.id, kind: body.kind, data });
       return sendJSON(res, 200, { ok: true });
     }
     if (action === "ask") {
@@ -938,6 +1058,11 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       if (text) {
         room.said.push({ id: id(4), text, move: "agent", at: now() });
         if (room.said.length > 20) room.said.shift();
+        // The agent's words often reach us after other phones already captioned them: take those back out
+        const aw = words(text);
+        const echo = (l) => l.kind !== "typed" && now() - l.at < ECHO_MS && words(l.text).length >= 3 && contained(words(l.text), aw) >= 0.8;
+        room.lines = room.lines.filter((l) => !echo(l));
+        room.pending = room.pending.filter((l) => !echo(l));
         room.lastSaidAt = now();
         broadcast(room);
       }
@@ -1042,4 +1167,4 @@ function init({ events }) {
   eventsSource = events;
 }
 
-module.exports = { init, handle, _test: { rooms, createRoom, addPerson, setAnswer, addLine, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode } };
+module.exports = { init, handle, preview, BOOT, _test: { rooms, createRoom, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode } };
