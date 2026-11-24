@@ -12,6 +12,8 @@
 //
 // Guardrails: a source that fails, or brings back under half of last run's events, keeps last run's events
 // instead; nothing here uses the AI (AI=off in the scheduled run); only events in the window are kept.
+// Left out: listings outside Toronto ("Beyond Toronto") and appointment-style ones (in-store sales consultations),
+// counted in the summary. AI vibes come only from import/event-tags.json, written by the hand-run `node import/tag.js`.
 
 const fs = require("fs");
 const path = require("path");
@@ -25,7 +27,8 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-const { toEvent, NA } = require("./normalize");
+const { toEvent, dropReason, retag, NA } = require("./normalize");
+const tags = require("./tags");
 const { dedupe } = require("./dedupe");
 const store = require("../lib/store");
 const { fetchDice } = require("./sources/dice");
@@ -36,6 +39,8 @@ const { fetchLuma } = require("./sources/luma");
 const { fetchToronto } = require("./sources/toronto");
 const { fetchTPL } = require("./sources/tpl");
 const { fetchInstagram } = require("./sources/instagram");
+const { fetchICS } = require("./sources/ics");
+const { fetchOntario } = require("./sources/ontario");
 
 const DAYS = Number(process.env.DAYS || 92);
 const OUT = path.join(__dirname, "..", "seed", "events.json");
@@ -51,6 +56,10 @@ const SOURCES = [
   ["City of Toronto", fetchToronto, Number(process.env.TORONTO_MAX || 10000)],
   ["Toronto Public Library", fetchTPL, Number(process.env.TPL_MAX || 3000)],
   ["Eventbrite", fetchEventbrite, Number(process.env.EVENTBRITE_MAX || 20000)],
+  // Venues' own calendar feeds (import/ics-feeds.json; empty until a feed's format and terms are checked)
+  ["Venue calendars", fetchICS, Number(process.env.ICS_MAX || 3000)],
+  // Ontario's open data: off unless ONTARIO_EVENTS=1 (format not yet checked against the live file)
+  ["Ontario open data", fetchOntario, Number(process.env.ONTARIO_MAX || 2000)],
 ];
 const RUN = SOURCES.filter(([name]) => !process.env.ONLY || process.env.ONLY.toLowerCase().split(",").includes(name.toLowerCase()));
 const NOT_IMPORTED = {
@@ -79,9 +88,10 @@ async function previousImport() {
   log(`Importing GTA events from ${start.toDateString()} to ${end.toDateString()}`);
 
   const previous = await previousImport();
-  const prevEvents = previous ? previous.events.filter(inWindow) : [];
+  const prevEvents = previous ? previous.events.filter((e) => inWindow(e) && !dropReason(e)) : [];
   const prevOf = (name) => prevEvents.filter((e) => e.source === name);
   const report = {};
+  const dropped = {}; // why listings were left out ("beyond-toronto", "appointment") -> count
   const found = {}; // source -> events, put together in priority order below
   await Promise.all(
     RUN.map(async ([name, fn, max]) => {
@@ -94,6 +104,12 @@ async function previousImport() {
         if (Array.isArray(raw)) {
           fetched = raw.length;
           events = raw.map(toEvent).filter((e) => e && inWindow(e) && e.venue.lat > 43.35 && e.venue.lat < 44.15 && e.venue.lng > -80.1 && e.venue.lng < -78.8);
+          // Outside Toronto, or an appointment rather than an event: counted, then left out
+          for (const e of events) {
+            const why = dropReason(e);
+            if (why) dropped[why] = (dropped[why] || 0) + 1;
+          }
+          events = events.filter((e) => !dropReason(e));
         } else note = raw.skipped;
       } catch (err) {
         note = (err && err.message) || String(err);
@@ -119,8 +135,12 @@ async function previousImport() {
   }
 
   // The same event listed twice (on two sites, or twice on one) becomes one listing; on a tie, the earlier source wins
-  const all = SOURCES.flatMap(([name]) => found[name] || []);
-  const { events } = dedupe(all);
+  // Last run's events (kept for a source that broke) go through today's filters too
+  const all = SOURCES.flatMap(([name]) => found[name] || []).filter((e) => !dropReason(e));
+  const deduped = dedupe(all).events;
+  // Vibes, format and setting saved by the last hand-run `node import/tag.js` (never the AI here)
+  const saved = tags.load();
+  const events = deduped.map((e) => tags.apply(retag(e), saved)); // retag: last run's kept events get today's keyword rules
   if (!events.length) {
     log("\nNo events imported; leaving the last import as it was.");
     process.exit(1);
@@ -138,6 +158,10 @@ async function previousImport() {
   for (const [name] of SOURCES) if (report[name]) lines.push(`  ${name}: ${report[name].kept} kept${report[name].note ? ` (${report[name].note})` : ""}`);
   const missing = { price: events.filter((e) => e.price == null).length, image: events.filter((e) => !e.image).length, description: events.filter((e) => e.description === NA).length };
   lines.push(`  N/A counts: ${Object.entries(missing).map(([k, n]) => `${k} ${n}`).join(", ")}`);
+  lines.push(`  With a price: ${events.length - missing.price} of ${events.length} (${Math.round((100 * (events.length - missing.price)) / events.length)}%); no vibe: ${events.filter((e) => !e.vibes.length).length}`);
+  if (Object.keys(dropped).length) lines.push(`  Left out: ${Object.entries(dropped).map(([k, n]) => `${n} ${k}`).join(", ")}`);
+  const tagged = events.filter((e) => e.tagSource === "ai").length;
+  lines.push(`  AI tags applied from import/event-tags.json: ${tagged}; untagged listings: ${events.length - tagged} (run \`node import/tag.js\` by hand to tag them)`);
   log(`\n${lines.join("\n")}`);
   // In GitHub Actions, the same summary shows on the run's page
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Event import\n\n\`\`\`\n${lines.join("\n")}\n\`\`\`\n`);

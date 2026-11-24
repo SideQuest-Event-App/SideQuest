@@ -2,6 +2,7 @@
 // coordinates, trip times over the real subway network, vibes and scene from the listing's own words.
 
 const crypto = require("crypto");
+const { saysFree } = require("./price");
 
 // ---------- Subway: Line 1 (Finch → Union → Vaughan) and Line 2 (Kipling → Kennedy) ----------
 const LINE1 = [
@@ -126,25 +127,31 @@ function place(lat, lng, city) {
 }
 
 // ---------- What it is: vibes from the listing's own words ----------
+// Order matters only as a tie-break: a vibe named in the title comes first (see vibesOf)
 const VIBE_RULES = [
   ["Jazz", /\b(jazz|blues|bebop|big band|swing)\b/],
-  ["Electronic", /\b(techno|house music|deep house|tech house|\bdj\b|djs|electronic|rave|edm|drum (and|&|n) bass|dnb|disco|club night|afrobeats|amapiano|dubstep|trance)\b/],
+  ["Electronic", /\b(techno|house music|deep house|tech house|\bdj\b|djs|electronic|electro pop|electropop|rave|edm|drum (and|&|n) bass|dnb|disco|club night|afrobeats|amapiano|dubstep|trance)\b/],
   ["Indie gigs", /\b(indie|punk|shoegaze|emo|garage rock|post-punk|alt-rock|alternative|folk|singer-songwriter|grunge|hardcore|noise rock)\b/],
-  ["Live music", /\b(concert|live music|live band|band|gig|orchestra|symphony|choir|recital|hip hop|hip-hop|rap|r&b|soul|funk|reggae|metal|rock|pop music|country|acoustic|open mic music|quartet|trio)\b/],
+  // Broad words ("music", "singer") only count in the title or the listing's own categories, not the description
+  ["Live music", /\b(concert|live music|live band|band|gig|orchestra|symphony|choir|recital|hip hop|hip-hop|rap|r&b|soul|funk|reggae|metal|rock|pop music|country|acoustic|open mic music|open jam|jam night|quartet|trio|classical|symphonic|chamber music|baroque|concerto|opera|operetta|pianist|violinist|cellist|soprano|tenor)\b/, /\b(music|musician|musicians|singer|songwriter|pop)\b/],
   ["Comedy", /\b(comedy|comedian|stand-up|standup|stand up|improv|sketch show|roast)\b/],
-  ["Dance", /\b(dance class|dance party|salsa|bachata|kizomba|tango|swing dance|line dancing|dancehall|soca|latin night|dance)\b/],
-  ["Records & vinyl", /\b(vinyl|record fair|record swap|listening party|listening session|crate)\b/],
+  ["Dance", /\b(dance class|dance party|salsa|bachata|kizomba|tango|swing dance|line dancing|dancehall|soca|latin night|dance|breakdance|breakdancing|breaking|b-boy|bboy|nightclub|nightlife|guestlist|guest list|bottle service)\b/],
+  ["Records & vinyl", /\b(vinyl|record fair|record swap|record store|listening party|listening session|crate)\b/],
   ["Film nights", /\b(film|films|cinema|screening|movie|documentary|shorts)\b/],
   ["Zines & print", /\b(zine|zines|risograph|printmaking|letterpress|book fair|comic arts|small press)\b/],
+  ["Markets", /\b(farmers'? market|night market|holiday market|christmas market|flea market|flea|bazaar|craft fair|craft show|holiday fair|artisan fair|makers'? fair|vendor fair|pop-up shop|swap meet)\b/, /\b(market|markets|marketplace)\b/],
+  ["Food & drink", /\b(foodie|brunch|supper club|tasting|tastings|wine tasting|beer tasting|brewery|craft beer|mixology|ramen|chef|cooking|culinary|dumplings?|food truck|potluck|sake|whisky|whiskey|tea tasting|baking class)\b/, /\b(food|dinner|supper|wine|wines|beer|beers|cocktail|cocktails|chocolate|pizza|bbq|barbecue|tacos?|coffee)\b/],
   ["Art & making", /\b(art|arts|gallery|exhibit|exhibition|workshop|craft|crafts|painting|paint|pottery|ceramics|sewing|knitting|drawing|sketch|maker|design|candle making|floral)\b/],
   ["Photography", /\b(photo|photography|photowalk|photographer)\b/],
   ["Writing & poetry", /\b(poetry|poet|poets|spoken word|writing|writers|author|book launch|book club|reading series|literary)\b/],
   ["Tech & coding", /\b(coding|hackathon|developer|startup|tech|ai|machine learning|data science|web3|product manager)\b/],
   ["Anime & cosplay", /\b(anime|cosplay|manga|k-pop|kpop|fan expo|comic con|gaming|video game|esports)\b/],
-  ["Outdoors", /\b(hike|hiking|outdoor|outdoors|nature|ravine|trail|park clean|garden|gardening|walking tour|bird)\b/],
+  ["Wellness", /\b(yoga|meditation|meditate|sound bath|sound healing|wellness|breathwork|pilates|mindfulness|reiki|tai chi|qigong|self-care|healing circle|sauna|cold plunge)\b/],
+  ["Outdoors", /\b(hike|hiking|outdoor|outdoors|nature walk|ravine|trail|park clean|gardening|walking tour|birding|paddleboard|paddleboarding|kayak|kayaking|canoe|canoeing|backcountry|camping)\b/, /\b(nature|garden|walk|walks|bird|beach|park)\b/],
   ["Run & ride", /\b(run club|running|5k|10k|half marathon|marathon|cycling|bike|ride)\b/],
-  ["Climbing", /\b(climb|climbing|bouldering)\b/],
-  ["Games & social", /\b(board game|board games|trivia|game night|karaoke|speed dating|singles|mixer|social club|meetup|bingo|drag)\b/],
+  ["Climbing", /\b(climb|climbing|climbers|bouldering|boulder|climbing gym)\b/],
+  // "meetup" used to be here, and tagged 511 of 682 Games & social listings (an AGM, English classes) by that word alone
+  ["Games & social", /\b(board game|board games|trivia|game night|games night|pub quiz|quiz night|karaoke|speed dating|singles|mixer|social club|bingo|drag|escape room|bowling|billiards|pool night|mahjong|chess club|dungeons|d&d|magic the gathering|language exchange|conversation exchange)\b/],
 ];
 // Listings that aren't in our three scenes, even if a word matches
 const EXCLUDE = /\b(webinar|conference|summit|real estate|investing|investor|mortgage|career fair|job fair|recruit|networking event|church|worship|prayer|seminar|masterclass for business|nhl|nba|mlb|mls|raptors|maple leafs|blue jays|toronto fc|argonauts|marlies|hockey game|immigration|tax|crypto|forex|wealth|parenting|weight loss)\b/;
@@ -154,14 +161,42 @@ const SCENE_OF = {
   Electronic: "Music & nightlife", "Records & vinyl": "Music & nightlife", "Film nights": "Arts & making", "Zines & print": "Arts & making", "Art & making": "Arts & making",
   Photography: "Arts & making", "Writing & poetry": "Arts & making", "Tech & coding": "Arts & making", "Anime & cosplay": "Arts & making", Outdoors: "Active & social",
   "Run & ride": "Active & social", Climbing: "Active & social", "Games & social": "Active & social",
+  "Food & drink": "Active & social", Markets: "Active & social", Wellness: "Active & social",
 };
 
-function vibesOf(text) {
-  const t = text.toLowerCase();
-  const hits = VIBE_RULES.filter(([, re]) => re.test(t)).map(([v]) => v);
-  // "Live music" is implied by more specific music vibes; keep it only if it adds something
-  return hits.slice(0, 3);
+// Up to 3 vibes. Ones the title (or the listing's own categories) names come first, so the main vibe is what the
+// listing is, not a word in its description. "Rock climbing" is climbing, not rock music.
+function vibesOf(text, title = "") {
+  // "Rock climbing" is climbing, not rock music; "photo ID required" and "VIP photo op" aren't photography
+  const clean = (s) => String(s || "").toLowerCase().replace(/\brock[- ]climbing\b/g, "climbing").replace(/\bphoto\.?\s*(i\.?\s?d\b\.?|identification)|\bphoto[- ]?opp?s?\b/g, " ")
+    // Ticketmaster's "Arts & Theatre" segment covers comedians, plays and Cirque: theatre, not art & making
+    .replace(/\barts (&|and) theat(re|er)\b/g, "theatre");
+  const t = clean(text);
+  const head = clean(title || text);
+  const hits = [];
+  VIBE_RULES.forEach(([v, re, headOnly], i) => {
+    const strong = re.test(head) || re.test(t);
+    const broad = !strong && headOnly && headOnly.test(head);
+    if (strong || broad) hits.push({ v, i, inTitle: re.test(head) || broad, broad });
+  });
+  // A DJ night or a jazz set that's "music" in its categories doesn't also need the general "Live music"
+  const specific = hits.some((h) => ["Jazz", "Electronic", "Indie gigs"].includes(h.v));
+  if (specific) for (let k = hits.length - 1; k >= 0; k--) if (hits[k].v === "Live music" && hits[k].broad) hits.splice(k, 1);
+  hits.sort((a, b) => (b.inTitle ? 1 : 0) - (a.inTitle ? 1 : 0) || a.i - b.i);
+  return hits.map((h) => h.v).slice(0, 3);
 }
+
+// Listings we don't show: outside Toronto (a quarter of the GTA feed, too far for a night out by transit) and
+// appointment-style "events" (in-store sales consultations at 30 Best Buys)
+const APPOINTMENT = /\b(appointments?|appointment[- ]based|sales consultations?|consultations?|by appointment|book (your|a) (slot|time)|private (session|consult)|one[- ]on[- ]one|1[:-]on[:-]1)\b/i;
+const APPOINTMENT_VENUE = /^(best buy|samsung experience store)$/i;
+function dropReason(e) {
+  if (!e) return "invalid";
+  if (e.area === "Beyond Toronto") return "beyond-toronto";
+  if (APPOINTMENT.test(e.title || "") || APPOINTMENT_VENUE.test(((e.venue && e.venue.name) || "").trim())) return "appointment";
+  return null;
+}
+const keepListing = (e) => !dropReason(e);
 
 // ---------- Text cleanup ----------
 const decode = (s) => String(s || "").replace(/&amp;/g, "&").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n));
@@ -207,10 +242,16 @@ function toEvent(raw) {
   const words = `${title} ${(raw.categories || []).join(" ")} ${description}`;
   // Judge off-topic by title and categories only: a concert "in the church hall" is still a concert
   if (EXCLUDE.test(`${title} ${(raw.categories || []).join(" ")}`.toLowerCase())) return null;
-  const vibes = vibesOf(words);
+  const vibes = vibesOf(words, `${title} ${(raw.categories || []).join(" ")}`);
   const { neighbourhood, area } = place(lat, lng, raw.venue.city);
   const tr = travel(lat, lng);
-  const price = raw.price == null || !Number.isFinite(Number(raw.price)) ? null : Math.ceil(Number(raw.price));
+  let price = raw.price == null || !Number.isFinite(Number(raw.price)) ? null : Math.ceil(Number(raw.price));
+  // No price field, but the listing itself says entry is free ("Free admission"): that's its price
+  let priceNote = raw.priceNote;
+  if (price == null && saysFree(`${title}. ${description}`)) {
+    price = 0;
+    priceNote = "Free (the listing says so)";
+  }
   const late = hourIn(raw.startsAt) >= 21 || hourIn(raw.startsAt) < 4;
   const venueName = decode(raw.venue.name || "").trim();
   const address = decode(raw.venue.address || "").trim();
@@ -228,7 +269,7 @@ function toEvent(raw) {
     venue: { name: venueName || NA, address: address || NA, lat, lng },
     scene: vibes.length ? SCENE_OF[vibes[0]] : "Other",
     price,
-    priceNote: raw.priceNote || (price == null ? NA : price === 0 ? "Free" : raw.priceHigh && raw.priceHigh > price ? `From $${price}` : `$${price}`),
+    priceNote: priceNote || (price == null ? NA : price === 0 ? "Free" : raw.priceHigh && raw.priceHigh > price ? `From $${price}` : `$${price}`),
     description: description || NA,
     tags: [...new Set([...(raw.categories || []).map((c) => String(c).toLowerCase()), ...vibes.map((v) => v.toLowerCase())])].slice(0, 8),
     vibes,
@@ -249,4 +290,21 @@ function toEvent(raw) {
   };
 }
 
-module.exports = { toEvent, stripHtml, trimText, km, travel, place, vibesOf, NA };
+// An event already in the database, re-tagged with today's keyword rules. Vibes a person or the AI chose
+// (tagSource "ai" or "host") are kept as they are.
+function retag(e) {
+  if (!e || e.type === "place" || e.tagSource === "ai" || e.publishedBy) return e;
+  // Categories the listing came with; multi-word vibe names in tags are our own old tags, so they don't count
+  const cats = (e.tags || []).filter((t) => !OUR_TAGS.has(t)).join(" ");
+  const vibes = vibesOf(`${e.title} ${cats} ${e.description || ""}`, `${e.title} ${cats}`);
+  const same = vibes.length === (e.vibes || []).length && vibes.every((v, i) => v === e.vibes[i]);
+  if (same) return e;
+  const tags = [...new Set([...(e.tags || []).filter((t) => !OUR_TAGS.has(t)), ...vibes.map((v) => v.toLowerCase())])].slice(0, 8);
+  return { ...e, vibes, tags, scene: vibes.length ? SCENE_OF[vibes[0]] : "Other" };
+}
+const VIBE_NAMES = new Set(VIBE_RULES.map(([v]) => v.toLowerCase()));
+// Our own old vibe tags, as opposed to a site's categories: every multi-word vibe name, plus single words no source uses
+// as a category ("comedy", "jazz", "dance" and "electronic" are real Ticketmaster and Eventbrite categories, so they stay)
+const OUR_TAGS = new Set([...[...VIBE_NAMES].filter((v) => /\s/.test(v)), "photography", "outdoors", "climbing", "wellness", "markets"]);
+
+module.exports = { toEvent, stripHtml, trimText, km, travel, place, vibesOf, retag, keepListing, dropReason, VIBE_RULES, SCENE_OF, NA };
