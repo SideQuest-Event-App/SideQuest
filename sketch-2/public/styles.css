@@ -1279,3 +1279,31 @@ a.tab { text-decoration: none; }
   .lx-sheet, .lx-float, .map-pin2 i { transition: none; }
 }
 .lx-more { min-height: 44px; font-weight: 600; font-size: 14px; color: var(--text-accent); align-self: flex-start; }
+
+/* ---------- "Are you demoing SideQuest or testing it?" (the first screen on a new device) ----------
+   The loader's city lights carry straight on behind it, so the hand-off doesn't jump. Gradient only on the primary choice. */
+.lights { position: relative; background: #0e0b15; overflow: hidden; }
+.lights::before { content: ""; position: absolute; inset: 0; pointer-events: none; background:
+  radial-gradient(min(70vw, 420px) min(56vw, 340px) at 75% 30%, rgba(242, 201, 76, 0.45), transparent 70%),
+  radial-gradient(min(60vw, 360px) min(48vw, 280px) at 85% 65%, rgba(242, 141, 200, 0.4), transparent 70%),
+  radial-gradient(min(54vw, 320px) min(44vw, 260px) at 30% 75%, rgba(92, 207, 230, 0.3), transparent 70%); }
+.mode { min-height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+.mode-in { position: relative; display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 520px; margin: 0 auto; padding: 48px 24px max(32px, env(safe-area-inset-bottom)); }
+.mode-wm { font-weight: 600; font-size: 22px; line-height: 28px; letter-spacing: -0.02em; }
+.mode-h { margin: 0 0 8px; font-weight: 600; font-size: 40px; line-height: 42px; letter-spacing: -0.04em; text-wrap: balance; }
+.mode-picks { display: flex; flex-direction: column; gap: 12px; }
+.mode-pick { display: flex; flex-direction: column; gap: 4px; width: 100%; min-height: 88px; padding: 16px 20px; border-radius: 22px; text-align: left; background: rgba(29, 24, 40, 0.82); box-shadow: inset 0 0 0 1.5px var(--border-default); color: var(--text-primary); transition: transform 0.16s cubic-bezier(0.23, 1, 0.32, 1); }
+.mode-pick:active { transform: scale(0.98); }
+.mode-pick.pri { background: var(--gradient); box-shadow: none; color: var(--text-on-action); }
+.mode-t { font-weight: 600; font-size: 20px; line-height: 26px; }
+.mode-s { font-size: 14px; line-height: 20px; color: var(--text-secondary); }
+.mode-pick.pri .mode-s { color: #2a1d3d; }
+.mode-note { margin: 0; font-size: 13px; line-height: 18px; color: var(--text-secondary); }
+.mode-switch { min-height: 44px; font-size: 14px; color: var(--text-secondary); }
+:is([data-layout="tablet"], [data-layout="desktop"]) .scroll > .mode { max-width: none; }
+@media (prefers-reduced-motion: reduce) { .mode-pick { transition: none; } }
+
+/* The bar back to the voice study's checklist, on app pages opened from it */
+.study-bar { position: absolute; left: 0; right: 0; top: 0; z-index: 20; height: 44px; display: flex; align-items: center; gap: 6px; padding: 0 16px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); color: var(--text-accent); font-weight: 600; font-size: 14px; line-height: 18px; text-decoration: none; }
+.study-bar[hidden] { display: none; }
+.phone.studying #screen { top: 44px; }

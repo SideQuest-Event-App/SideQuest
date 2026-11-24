@@ -22,7 +22,8 @@
     },
     set(k, v) {
       try {
-        window[kind].setItem(k, v);
+        if (v == null) window[kind].removeItem(k);
+        else window[kind].setItem(k, v);
       } catch {}
     },
   });
@@ -54,6 +55,32 @@
     });
   }
   SQ.lx = { state, DOWNTOWN };
+
+  // ---------- "Are you demoing SideQuest or testing it?" ----------
+  // The first screen on a new device (after the loader, before the start page). The answer is kept on this device:
+  // "demo" opens the demo account on the map; "test" opens the voice study at /study, whose checklist links back
+  // into the demo app (/?demo=1&study=<id>). Shared links (/sk, /study?s=…, ?quest=) never see the question.
+  const MODE_KEY = "sq2.mode";
+  SQ.mode = {
+    get: () => (["demo", "test"].includes(local.get(MODE_KEY)) ? local.get(MODE_KEY) : null),
+    set: (v) => local.set(MODE_KEY, v),
+  };
+  SQ.studyId = () => {
+    const s = session.get("sq2.study");
+    return s && /^[\w-]{4,80}$/.test(s) ? s : null;
+  };
+  SQ.planHref = () => (SQ.studyId() ? `/sk?study=${encodeURIComponent(SQ.studyId())}` : "/sk");
+  SQ.screens.mode = { role: "attendee", label: "Demoing or testing?", render: () => SQ.screen(`<div class="mode lights">
+      <div class="mode-in">
+        <span class="mode-wm">sidequest</span>
+        <h1 class="mode-h">Are you demoing SideQuest or testing it?</h1>
+        <div class="mode-picks">
+          <button class="mode-pick pri" data-act="modeDemo"><span class="mode-t">Demoing</span><span class="mode-s">Go straight into the full app: the map, Plan with Sidekick, and sample friends.</span></button>
+          <button class="mode-pick" data-act="modeTest"><span class="mode-t">Testing</span><span class="mode-s">Take part in the Sidekick voice study. A short checklist walks you through it.</span></button>
+        </div>
+        <p class="mode-note">We'll remember this on this device. You can switch from the start page or your profile.</p>
+      </div>
+    </div>`, { cls: "bleed" }) };
 
   // ---------- Actions ----------
   const A = SQ.actions;
@@ -98,6 +125,25 @@
       if (p && L.stop !== "peek") SQ.mapJump("discover", { lat: p.lat, lng: p.lng });
     }
     if (L.sel && L.stop === "full") setStop("peek", false);
+  };
+
+  A.modeDemo = async () => {
+    SQ.mode.set("demo");
+    await SQ.act("demoLogin");
+    return "discover";
+  };
+  A.modeTest = () => {
+    SQ.mode.set("test");
+    location.href = "/study";
+    return new Promise(() => {}); // the page is leaving
+  };
+  // "Switch to demo / testing": forget the answer (and the account on this device) and ask again
+  A.modeSwitch = async () => {
+    SQ.mode.set(null);
+    SQ.setIds({ user: null });
+    U().history = [];
+    await SQ.refresh();
+    return "mode";
   };
 
   // ---------- Places: once per map session ----------

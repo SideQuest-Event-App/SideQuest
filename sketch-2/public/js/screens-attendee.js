@@ -22,7 +22,7 @@
     const home = U().searchOpen ? "search" : "discover";
     if (active === "discover") active = home;
     // Plan opens the Sidekick call (its own page); Add Event lives on Sidequests now, as its "+" button
-    const plan = ["plan", "Plan", "orb", { href: "/sk" }];
+    const plan = ["plan", "Plan", "orb", { href: SQ.planHref ? SQ.planHref() : "/sk" }];
     if (active === "requests") active = "questlog";
     if (u && u.demo) return tabs([[home, "Discover", "home2"], ["parties", "Community", "crew"], plan, ["questlog", "Sidequests", "ticket"], ["landing", "Exit demo", "out", { act: "signOut" }]], active, { questlog: pending });
     return tabs([[home, "Discover", "home2"], ["parties", "Community", "crew"], plan, ["questlog", "Sidequests", "ticket"], ["profile", "Profile", "user"]], active, { questlog: pending + unread });
@@ -117,6 +117,7 @@
         <span class="handle">${icon("arrow")}</span><span class="text">Slide to demo Sidequest</span>${icon("chevR", "chev")}
       </div>
       <p class="login-line">Already have an account?<button class="link" data-go="login">Log in</button></p>
+      <button class="link mode-switch" data-act="modeSwitch">Switch to demo / testing</button>
     </div>`, { cls: "bleed" }) };
 
   S.role = { role: "attendee", label: "Going out or hosting", render: () => {
@@ -1471,6 +1472,7 @@
           ${settingRow("train", "Getting around", [originShort(u.origin) ? `From ${originShort(u.origin)}` : "", u.budget != null ? (u.budget ? `up to $${u.budget}` : "free only") : "any budget", u.maxMinutes ? `${u.maxMinutes} min max` : ""].filter(Boolean).join(" · "), { "data-go": "prefs" })}
           ${settingRow("wallet", "Ticket wallet", `${(u.tickets || []).length} ticket${(u.tickets || []).length === 1 ? "" : "s"}`, { "data-act": "openWallet" })}
           ${settingRow("sun", "Appearance", { dark: "Dark", light: "Light", system: "Match my phone" }[theme] || "Dark", { "data-act": "cycleTheme" })}
+          ${settingRow("swap", "Switch to demo / testing", "Signs out here and asks again", { "data-act": "modeSwitch" })}
           ${settingRow("out", "Sign out", u.email || "This device", { "data-act": "signOut" })}
         </div>
         <p class="t-caption c-tertiary">Matching: ${esc(SQ.aiLabel(SQ.d.mode))}${SQ.d.mode === "api" ? ` (${esc(SQ.d.model)})` : ""}</p>

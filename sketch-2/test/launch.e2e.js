@@ -11,6 +11,9 @@
 //  g. The sheet's stops work by drag and by the List and Map buttons, and the last stop is remembered.
 //  h. Plan opens /sk; Add Event is reachable from Sidequests.
 //  i. At 375 and 1280 px: no sideways overflow, nothing under the tab bar, 44 px targets, weights 400/500/600 only.
+//  j. "Are you demoing SideQuest or testing it?" on first load; Demoing opens the demo app's map; Testing opens
+//     /study, whose Discover step lands in the demo app with a bar back to the checklist; the choice is
+//     remembered; shared links skip the question.
 //
 // The server runs in this process so Google Places can be faked: nothing here ever calls Google. Every other
 // outside request (map tiles, the MapLibre script, fonts) is blocked, so the light map stands in.
@@ -57,6 +60,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
   Object.assign(process.env, {
     PORT: String(port), SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), AI: "off", ANTHROPIC_API_KEY: "",
     GOOGLE_MAPS_API_KEY: "test-key", SIDEKICK_ELEVENLABS_OFF: "1", SIDEKICK_STUN_URL: "off",
+    SIDEKICK_STUDY_FILE: path.join(tmp, "sidekick-study.json"),
   });
   delete process.env.SUPABASE_URL;
   delete process.env.SUPABASE_SECRET_KEY;
@@ -99,14 +103,17 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
   const browser = await chromium.launch();
 
   // A signed-in phone. Outside requests are blocked (so no tile, CDN or Google call ever leaves the browser).
-  async function phone({ width = 375, height = 812, reducedMotion = "no-preference", permissions = [], geolocation, init, route, sheet } = {}) {
+  // user: null for a new device (nobody signed in, no demo-or-test answer yet)
+  async function phone({ width = 375, height = 812, reducedMotion = "no-preference", permissions = [], geolocation, init, route, sheet, user = userId } = {}) {
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, reducedMotion, permissions, geolocation, hasTouch: false });
-    await ctx.addInitScript(([uid, stop]) => {
+    if (user) await ctx.addInitScript(([uid, stop]) => {
       try {
+        if (sessionStorage.getItem("__seeded")) return; // only the first page load starts signed in this way
+        sessionStorage.setItem("__seeded", "1");
         localStorage.setItem("sq2.user", uid);
         if (stop) localStorage.setItem(`sq2.sheet.${uid}`, stop);
       } catch {}
-    }, [userId, sheet || null]);
+    }, [user, sheet || null]);
     if (init) await ctx.addInitScript(init);
     await ctx.route("**/*", (r) => {
       const u = new URL(r.request().url());
@@ -136,7 +143,11 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       // Warm the server's events cache, as a returning visit would find it
       await realFetch(`${base}/api/events`);
       const { ctx, page } = await phone({ init: watchLoader });
-      await page.goto(base);
+      await page.goto(base); // a first visit warms the browser; the measured load is the next one, as a returning visitor's
+      await ready(page);
+      const first = await page.evaluate(() => window.SQboot.doneAt);
+      console.log(`      first visit: first screen in at ${Math.round(first)} ms`);
+      await page.reload();
       await ready(page);
       await page.waitForFunction(() => !document.getElementById("boot"), null, { timeout: 5000 });
       const frames = await page.evaluate(() => window.__boot.frames);
@@ -490,6 +501,98 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
         }
       });
     }
+
+    // ---------- j ----------
+    const mapUp = (page) => page.waitForFunction(() => window.SQ && SQ.u && SQ.u.screen === "discover" && document.querySelector(".disc-map.lx") && !document.getElementById("boot"), null, { timeout: 20000 });
+    await test("j. First load on a new device asks 'Are you demoing SideQuest or testing it?', before the start page", async () => {
+      const { ctx, page } = await phone({ user: null });
+      await page.goto(base);
+      await page.waitForSelector(".mode-h", { timeout: 20000 });
+      await page.waitForFunction(() => !document.getElementById("boot"));
+      assert.strictEqual((await page.textContent(".mode-h")).trim(), "Are you demoing SideQuest or testing it?");
+      const picks = await page.$$eval(".mode-pick", (bs) => bs.map((b) => ({ t: b.querySelector(".mode-t").textContent, bg: getComputedStyle(b).backgroundImage, h: b.getBoundingClientRect().height, w: b.getBoundingClientRect().width })));
+      assert.deepStrictEqual(picks.map((p) => p.t), ["Demoing", "Testing"]);
+      assert(/gradient/.test(picks[0].bg) && !/gradient/.test(picks[1].bg), "the gradient is on the primary choice only");
+      assert(picks.every((p) => p.h >= 44 && p.w >= 44));
+      assert.strictEqual(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0);
+      const weights = await page.$$eval(".mode *", (els) => [...new Set(els.map((e) => getComputedStyle(e).fontWeight))]);
+      assert(weights.every((w) => ["400", "500", "600"].includes(w)), weights.join());
+      assert(!(await page.$("text=Find your people in a new city")), "the start page comes after the question");
+      await page.screenshot({ path: path.join(SHOTS, "question.png") });
+      await ctx.close();
+    });
+
+    await test("j. Demoing opens the demo account on the map, and a reload doesn't ask again", async () => {
+      const { ctx, page } = await phone({ user: null });
+      await page.goto(base);
+      await page.waitForSelector(".mode-pick.pri");
+      await page.click(".mode-pick.pri");
+      await mapUp(page);
+      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.demo), true, "signed in to the demo");
+      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.mode")), "demo");
+      await page.reload();
+      await mapUp(page);
+      assert(!(await page.$(".mode-h")), "not asked again");
+      // Exit the demo: the start page (not the question), with a way to switch
+      await page.click('nav.tabs .tab:has-text("Exit demo")');
+      await page.waitForSelector(".mode-switch");
+      await page.click(".mode-switch");
+      await page.waitForSelector(".mode-h");
+      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.mode")), null, "switching forgets the answer");
+      await ctx.close();
+    });
+
+    await test("j. Testing opens /study; its Discover step lands in the demo app with a '← Study checklist' bar", async () => {
+      const { ctx, page } = await phone({ user: null });
+      await page.goto(base);
+      await page.waitForSelector(".mode-pick:not(.pri)");
+      await Promise.all([page.waitForURL(/\/study$/), page.click(".mode-pick:not(.pri)")]);
+      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.mode")), "test");
+      // Remembered: the start page sends a tester back to the study
+      await page.goto(base);
+      await page.waitForURL(/\/study/);
+      // The study: agree, start, open "Look around Discover", and follow its link
+      await page.check("#agree");
+      await page.click("#start");
+      await page.waitForURL(/\/study\?s=/);
+      const sid = new URL(page.url()).searchParams.get("s");
+      await page.click('.step-h[data-step="discover"]').catch(() => {});
+      if (!(await page.$('a:has-text("Open Discover")'))) await page.click('.step-h[data-step="discover"]');
+      const href = await page.getAttribute('a:has-text("Open Discover")', "href");
+      assert.strictEqual(href, `/?demo=1&study=${encodeURIComponent(sid)}`);
+      await page.click('a:has-text("Open Discover")');
+      await mapUp(page);
+      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.demo), true, "signed in to the demo");
+      assert.strictEqual(new URL(page.url()).search, "", "the link's details are tidied out of the address");
+      const bar = await page.$eval("#study-bar", (b) => ({ shown: !b.hidden && b.getBoundingClientRect().height, text: b.textContent.trim(), href: b.getAttribute("href") }));
+      assert(bar.shown >= 44, "the bar shows, 44px tall");
+      assert.strictEqual(bar.text, "← Study checklist");
+      assert.strictEqual(bar.href, `/study?s=${encodeURIComponent(sid)}#discover`);
+      const screenTop = await page.$eval("#screen", (s) => s.getBoundingClientRect().top);
+      assert(screenTop >= bar.shown, "the app sits below the bar, not under it");
+      assert.strictEqual(await page.getAttribute('nav.tabs a.tab:has-text("Plan")', "href"), `/sk?study=${encodeURIComponent(sid)}`, "Plan keeps the study");
+      await page.click("#study-bar");
+      await page.waitForURL(/\/study\?s=/);
+      await page.waitForSelector(".steps");
+      await ctx.close();
+    });
+
+    await test("j. Shared links skip the question: /sk, /sk/<room>, /study?s=… and ?quest=", async () => {
+      const { ctx, page } = await phone({ user: null });
+      const made = await (await realFetch(`${base}/api/sk/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Asia", crew: "Launch test" }) })).json();
+      for (const link of ["/sk", `/sk/${made.room}`, "/study?s=nothere123"]) {
+        await page.goto(base + link);
+        await wait(700);
+        assert(!(await page.$(".mode-h")), `${link} shows no question`);
+        assert(new URL(page.url()).pathname === link.split("?")[0], `${link} stays put (${page.url()})`);
+      }
+      const quest = await page.evaluate(async () => (await (await fetch("/api/events")).json()).events.find((e) => !e.over).id);
+      await page.goto(`${base}/?quest=${quest}`);
+      await page.waitForFunction(() => window.SQ && SQ.u && !document.getElementById("boot"), null, { timeout: 20000 });
+      await wait(300);
+      assert(!(await page.$(".mode-h")), "a shared sidequest link shows no question");
+      await ctx.close();
+    });
   } finally {
     await browser.close();
     restore();

@@ -159,9 +159,10 @@
       case "consent":
         return `<p class="muted">You agreed to take part. We record the steps you finish, timings, whether a plan gets locked, and your answers to our questions. Never names, voices, captions or your private answers.</p>`;
       case "discover":
-        return `<p class="muted">Open the app and slide <b>Slide to demo Sidequest</b>. Then try:</p>
-          <ul><li>the For you rows</li><li>the Map</li><li>a search, with a filter</li><li>opening one sidequest</li></ul>
-          <div class="btns"><a class="btn out" href="/" target="_blank" rel="noopener">Open Discover</a>${mark("discover")}</div>`;
+        return `<p class="muted">Open the app (you're signed in to the demo). Then try:</p>
+          <ul><li>the map's pins and cards</li><li>pulling the sheet up for the list</li><li>a search, with a filter</li><li>opening one sidequest</li></ul>
+          <p class="small">The bar at the top of the app brings you back here.</p>
+          <div class="btns"><a class="btn out" href="/?demo=1&amp;study=${encodeURIComponent(sid)}">Open Discover</a>${mark("discover")}</div>`;
       case "plan":
         return `<p class="muted">Plan is where Sidekick lives. Open it, add your name and a crew name, pick a night or two, and tap <b>Start the call</b>.</p>
           <div class="btns">${v.calls[1].status === "none" ? (v.you.creator ? `<a class="btn pri" href="${planLink()}">Open Plan</a>` : '<p class="note">Whoever started the study opens Plan and starts the call.</p>') : v.calls[1].status === "live" ? `<a class="btn pri" href="${callLink(1, v.calls[1].room)}">${v.calls[1].mine ? "Back to" : "Join"} the call</a>` : ""}${mark("plan")}</div>`;

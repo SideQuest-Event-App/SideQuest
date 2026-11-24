@@ -205,7 +205,7 @@
 
   // ---------- Navigation ----------
   const ROOTS = ["discover", "parties", "questlog", "profile", "host-demand", "host-quests", "host-insights", "host-messages"];
-  const OPEN = ["landing", "role", "login", "login-code", "signup", "host-type", "host-login"]; // screens that work signed out
+  const OPEN = ["mode", "landing", "role", "login", "login-code", "signup", "host-type", "host-login"]; // screens that work signed out
   // Where you actually land: signed-out users can't open app screens
   function guard(id) {
     if (id === "discover-map") id = "discover"; // the old map view is Discover now
@@ -588,6 +588,32 @@
 
   // ---------- Start ----------
   (async function start() {
+    // Links into the app from the voice study (/?demo=1&study=<id>): the demo account, and a bar back to the checklist
+    const params = new URLSearchParams(location.search);
+    const study = params.get("study");
+    if (study && /^[\w-]{4,80}$/.test(study)) {
+      try {
+        sessionStorage.setItem("sq2.study", study);
+      } catch {}
+      SQ.mode.set("test");
+    }
+    const sid = SQ.studyId();
+    if (sid) {
+      const bar = document.getElementById("study-bar");
+      bar.href = `/study?s=${encodeURIComponent(sid)}#discover`;
+      bar.hidden = false;
+      document.getElementById("phone").classList.add("studying");
+    }
+    // A tester coming back to the start page goes back to their study (the question isn't asked twice)
+    if (SQ.mode.get() === "test" && !ids.user && !ids.host && !location.search) {
+      location.replace("/study");
+      return;
+    }
+    if (params.get("switch")) {
+      SQ.mode.set(null);
+      SQ.setIds({ user: null });
+      history.replaceState(null, "", location.pathname);
+    }
     try {
       await SQ.refresh();
     } catch (err) {
@@ -606,18 +632,30 @@
     try {
       SQ.u.searchOpen = !!SQ.u.search.result && (last === "search" || sessionStorage.getItem("sq2.searchOpen") === "1");
     } catch {}
-    const fallback = u ? (u.registered ? "discover" : "ob-vibes") : "landing";
+    // Someone new on this device is asked first: demoing or testing? (A shared ?quest= link skips the question.)
+    const fallback = u ? (u.registered ? "discover" : "ob-vibes") : SQ.mode.get() || params.get("quest") ? "landing" : "mode";
     SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", ...(SQ.u.search.result ? [] : ["search"]), "host-request", "host-checkin", "host-recap", "host-published", "host-create", "host-create-dayinfo", "host-draft-test", "spot", "add-event"].includes(last) ? last : fallback);
+    // The study's "Look around Discover" link: into the demo account, on the map
+    if (params.get("demo") && !SQ.d.user) {
+      try {
+        await SQ.act("demoLogin");
+        SQ.u.screen = "discover";
+      } catch {}
+    }
+    if (params.get("demo") || study) history.replaceState(null, "", location.pathname);
     // A shared link to one sidequest (?quest=id) opens it
     const linked = Number(new URLSearchParams(location.search).get("quest"));
-    if (linked && SQ.ev(linked)) {
+    if (linked && SQ.ev(linked) && SQ.d.user) { // (signed out, it opens the start page: the sidequest screen needs an account)
       SQ.u.quest = linked;
       SQ.u.history = [SQ.u.screen];
       SQ.u.screen = "quest";
       history.replaceState(null, "", location.pathname);
     }
     trackScreen(SQ.u.screen, null);
-    render(true);
-    if (window.SQboot) window.SQboot.done(); // the first screen is in: the loader fades away
+    try {
+      render(true);
+    } finally {
+      if (window.SQboot) window.SQboot.done(); // the first screen is in: the loader fades away (never left up, even on an error)
+    }
   })();
 })();
