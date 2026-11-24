@@ -23,6 +23,15 @@
 //  j. tabs crossfade, pushed screens slide, Back reverses;  k. slow lists: skeletons after 300 ms, none when fast;
 //  l. a waiting button keeps its width;  m. an API error shows "Try again", and it works.
 //
+// Who sees the question, the "account" checks:
+//  a. a signed-in real account opening a fresh tab goes to Discover with no question (the zoom's second half
+//     still plays), and its session is unchanged; ?demo=1 never swaps it for the demo;
+//  b. signed out, the question has "Sign in or create an account"; it opens the login and lands in the app signed in;
+//  c. Demoing still works (after a restart too: flow c), and the sandbox note shows on its card;
+//  d. Testing asks for an account after consent; the checklist's app links then use it; skipping falls back to the
+//     demo; returning testers can sign in; the export has no names or emails and records the account kind, id-only.
+//   ACCOUNT_SHOTS=/some/folder ... to keep the 375 px screenshots of the question, the study's account step and the note
+//
 // The server runs in this process so Google Places can be faked: nothing here ever calls Google. Every other
 // outside request (map tiles, the MapLibre script, fonts) is blocked, so the light map stands in.
 // The database file is copied first and put back afterwards.
@@ -70,7 +79,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
   Object.assign(process.env, {
     PORT: String(port), SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), AI: "off", ANTHROPIC_API_KEY: "",
     GOOGLE_MAPS_API_KEY: "test-key", SIDEKICK_ELEVENLABS_OFF: "1", SIDEKICK_STUN_URL: "off",
-    SIDEKICK_STUDY_FILE: path.join(tmp, "sidekick-study.json"),
+    SIDEKICK_STUDY_FILE: path.join(tmp, "sidekick-study.json"), SIDEKICK_STUDY_KEY: "launch-study-key",
   });
   delete process.env.SUPABASE_URL;
   delete process.env.SUPABASE_SECRET_KEY;
@@ -114,17 +123,18 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
 
   // A signed-in phone. Outside requests are blocked (so no tile, CDN or Google call ever leaves the browser).
   // user: null for a new device (nobody signed in, no demo-or-test answer yet)
-  async function phone({ width = 375, height = 812, reducedMotion = "no-preference", permissions = [], geolocation, init, route, sheet, user = userId } = {}) {
+  // mode: null for a fresh tab of a signed-in account (no answer kept in this tab)
+  async function phone({ width = 375, height = 812, reducedMotion = "no-preference", permissions = [], geolocation, init, route, sheet, user = userId, mode = "demo" } = {}) {
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, reducedMotion, permissions, geolocation, hasTouch: false });
-    if (user) await ctx.addInitScript(([uid, stop]) => {
+    if (user) await ctx.addInitScript(([uid, stop, m]) => {
       try {
         if (sessionStorage.getItem("__seeded")) return; // only the first page load starts signed in this way
         sessionStorage.setItem("__seeded", "1");
         localStorage.setItem("sq2.user", uid);
-        sessionStorage.setItem("sq2.mode", "demo"); // the question was answered in this tab (these checks are about the map)
+        if (m) sessionStorage.setItem("sq2.mode", m); // the question was answered in this tab (these checks are about the map)
         if (stop) localStorage.setItem(`sq2.sheet.${uid}`, stop);
       } catch {}
-    }, [user, sheet || null]);
+    }, [user, sheet || null, mode]);
     if (init) await ctx.addInitScript(init);
     await ctx.route("**/*", (r) => {
       const u = new URL(r.request().url());
@@ -642,7 +652,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await ctx.close();
     });
 
-    await test("flow e. Deep links skip the question: /sk, /sk/<room>, /study?s=…, ?quest= and ?demo=1 (which always signs into the demo)", async () => {
+    await test("flow e. Deep links skip the question: /sk, /sk/<room>, /study?s=…, ?quest= and ?demo=1 (the demo, unless a real account is signed in)", async () => {
       const { ctx, page } = await phone({ user: null });
       const made = await (await realFetch(`${base}/api/sk/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Asia", crew: "Launch test" }) })).json();
       for (const link of ["/sk", `/sk/${made.room}`, "/study?s=nothere123"]) {
@@ -658,12 +668,20 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await p2.waitForFunction(() => window.SQ && SQ.u && SQ.d && !document.getElementById("boot"), null, { timeout: 20000 });
       assert(!(await p2.$(".mode-h")), "a shared sidequest link shows no question");
       assert.strictEqual(await p2.evaluate(() => SQ.u.screen), "quest", "it opens the sidequest");
-      // The study's link, from a browser still signed in to someone else: always the demo account
+      // ?demo=1 signed out: the demo account
+      const p4 = await ctx.newPage();
+      await p4.route("**/*", (rt) => (new URL(rt.request().url()).hostname === "localhost" ? rt.continue() : rt.abort()));
+      await p4.goto(`${base}/?demo=1`);
+      await mapUp(p4);
+      assert(!(await p4.$(".mode-h")));
+      assert.strictEqual(await p4.evaluate(() => SQ.d.user && SQ.d.user.demo), true, "signed in to the demo");
+      // The study's demo link, from a browser signed in to a real account: that account stays (never swapped for the demo)
       const { ctx: c3, page: p3 } = await phone({ user: userId });
       await p3.goto(`${base}/?demo=1&study=launchstudy1`);
       await mapUp(p3);
       assert(!(await p3.$(".mode-h")));
-      assert.strictEqual(await p3.evaluate(() => SQ.d.user && SQ.d.user.demo), true, "signed in to the demo");
+      assert.strictEqual(await p3.evaluate(() => SQ.d.user && SQ.d.user.id), userId, "still the real account");
+      assert.strictEqual(await p3.evaluate(() => localStorage.getItem("sq2.user")), userId);
       assert(await p3.isVisible("#study-bar"), "with the bar back to the checklist");
       await c3.close();
       await ctx.close();
@@ -683,6 +701,8 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await page.click("#start");
       await page.waitForURL(/\/study\?s=/);
       const sid = new URL(page.url()).searchParams.get("s");
+      await page.click("#skipAccount"); // the account step: skipped, so the app links use the demo
+      await page.waitForSelector(".steps");
       await page.click('.step-h[data-step="discover"]').catch(() => {});
       if (!(await page.$('a:has-text("Open Discover")'))) await page.click('.step-h[data-step="discover"]');
       const href = await page.getAttribute('a:has-text("Open Discover")', "href");
@@ -901,6 +921,235 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await page.click(".err-retry");
       await page.waitForSelector(".search-hit, .search-end", { timeout: 8000 });
       assert(!(await page.$(".err-block")), "the error is gone");
+      await ctx.close();
+    });
+
+    // ---------- Who sees the question: accounts ----------
+    const ACC_SHOTS = process.env.ACCOUNT_SHOTS || path.join(SHOTS, "account");
+    fs.mkdirSync(ACC_SHOTS, { recursive: true });
+    const tidy = (t) => t.route("**/*", (rt) => (new URL(rt.request().url()).hostname === "localhost" ? rt.continue() : rt.abort()));
+    // Watches every frame for the question and the lights' scale (the zoom)
+    const watchOpening = () => {
+      window.__op = { asked: 0, scale: 1, frames: 0 };
+      const tick = () => {
+        if (document.querySelector("#boot .b-q, .mode-h")) window.__op.asked++;
+        const l = document.querySelector("#boot .b-lights");
+        if (l) { const t = getComputedStyle(l).transform; if (t && t !== "none") window.__op.scale = Math.max(window.__op.scale, new DOMMatrixReadOnly(t).a); }
+        if (++window.__op.frames < 400) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+
+    await test("account a. A signed-in real account opening a fresh tab goes to Discover with no question, the zoom still plays, and its session is unchanged", async () => {
+      const { ctx, page } = await phone({ user: userId, mode: null, init: watchOpening });
+      await page.goto(base);
+      await mapUp(page);
+      await wait(300);
+      const op = await page.evaluate(() => window.__op);
+      assert.strictEqual(op.asked, 0, "the question never showed");
+      assert(op.scale > 1.5, `the zoom into the map played (lights to ${op.scale.toFixed(2)}x)`);
+      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.id), userId, "the same account");
+      assert.strictEqual(await page.evaluate(() => SQ.d.user.demo), undefined, "not the demo");
+      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.user")), userId, "the session is unchanged");
+      assert(!(await page.evaluate(() => sessionStorage.getItem("sq2.demo"))), "no demo flag");
+      // Another fresh tab on the same device: the same
+      const tab = await ctx.newPage();
+      await tidy(tab);
+      await tab.addInitScript(watchOpening);
+      await tab.goto(base);
+      await mapUp(tab);
+      assert.strictEqual(await tab.evaluate(() => window.__op.asked), 0, "no question in a new tab either");
+      assert.strictEqual(await tab.evaluate(() => SQ.d.user && SQ.d.user.id), userId);
+      // And a reload in it stays put, no question, no demo
+      await tab.reload();
+      await mapUp(tab);
+      assert(!(await tab.$(".mode-h")));
+      assert.strictEqual(await tab.evaluate(() => SQ.d.user && SQ.d.user.id), userId);
+      await ctx.close();
+    });
+
+    await test("account a. Reduced motion: a signed-in fresh visit crossfades onto the map, no transforms", async () => {
+      const { ctx, page } = await phone({ user: userId, mode: null, reducedMotion: "reduce", init: watchOpening });
+      await page.goto(base);
+      await mapUp(page);
+      const op = await page.evaluate(() => window.__op);
+      assert.strictEqual(op.asked, 0);
+      assert.strictEqual(op.scale, 1, "the lights didn't scale");
+      await ctx.close();
+    });
+
+    await test("account b. Signed out, the question has 'Sign in or create an account'; it opens the login and lands in the app signed in", async () => {
+      const { ctx, page } = await phone({ user: null });
+      await page.goto(base);
+      await question(page);
+      const link = await page.$eval(".mode-signin", (b) => { const r = b.getBoundingClientRect(); const c = getComputedStyle(b); return { text: b.textContent.trim(), h: r.height, w: r.width, bg: c.backgroundImage, size: parseFloat(c.fontSize), weight: c.fontWeight, below: r.top >= document.querySelector(".mode-picks").getBoundingClientRect().bottom }; });
+      assert.strictEqual(link.text, "Sign in or create an account");
+      assert(link.h >= 44 && link.w >= 44, "a 44 px target");
+      assert(!/gradient/.test(link.bg), "no gradient: that's the primary choice's");
+      assert(link.below, "under the two choices");
+      assert(link.size >= 12 && ["400", "500", "600"].includes(link.weight));
+      assert.strictEqual(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0);
+      await page.screenshot({ path: path.join(ACC_SHOTS, "question-sign-in.png") });
+      await page.click(".mode-signin");
+      await page.waitForFunction(() => SQ.u.screen === "login" && !document.getElementById("boot"), null, { timeout: 8000 });
+      const email = await page.evaluate(async (id) => (await (await fetch(`/api/state?user=${id}&host=`)).json()).user.email, userId);
+      await page.fill('[data-bind="login.email"]', email);
+      await page.click('button[data-act="requestCode"]');
+      await page.waitForFunction(() => SQ.u.screen === "login-code" && SQ.u.login.demoCode, null, { timeout: 8000 });
+      const code = await page.evaluate(() => SQ.u.login.demoCode);
+      await page.fill('[data-bind="login.code"]', code);
+      await page.click('button[data-act="verifyCode"]');
+      await mapUp(page);
+      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.id), userId, "signed in as that account");
+      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.user")), userId);
+      // A reload, then a fresh tab: straight to the app, no question
+      await page.reload();
+      await mapUp(page);
+      assert(!(await page.$(".mode-h")));
+      const tab = await ctx.newPage();
+      await tidy(tab);
+      await tab.goto(base);
+      await mapUp(tab);
+      assert(!(await tab.$(".mode-h")), "a fresh tab doesn't ask once signed in");
+      assert.strictEqual(await tab.evaluate(() => SQ.d.user && SQ.d.user.id), userId);
+      // "Create an account" is one tap from there too
+      const { ctx: c2, page: p2 } = await phone({ user: null });
+      await p2.goto(base);
+      await question(p2);
+      await p2.click(".mode-signin");
+      await p2.waitForFunction(() => SQ.u.screen === "login", null, { timeout: 8000 });
+      await p2.click('button:has-text("New to Sidequest? Create an account")');
+      await p2.waitForFunction(() => SQ.u.screen === "role");
+      await c2.close();
+      await ctx.close();
+    });
+
+    await test("account c. Demoing: the sandbox note shows on its card, and Demoing still lands on the map in the shared demo", async () => {
+      const { ctx, page } = await phone({ user: null });
+      await page.goto(base);
+      await question(page);
+      const note = await page.$eval('.mode-pick.pri .mode-n', (n) => { const c = getComputedStyle(n); return { text: n.textContent.trim(), shown: n.getBoundingClientRect().height > 0 && c.visibility !== "hidden", size: parseFloat(c.fontSize), weight: c.fontWeight }; });
+      assert(note.shown, "the note shows");
+      assert.match(note.text, /visible to everyone using it, and is reset/);
+      assert(note.size >= 12 && ["400", "500", "600"].includes(note.weight));
+      await page.locator(".mode-pick.pri").screenshot({ path: path.join(ACC_SHOTS, "demo-sandbox-note-card.png") });
+      await page.screenshot({ path: path.join(ACC_SHOTS, "demo-sandbox-note.png") });
+      await page.click('.mode-pick[data-pick="demo"]');
+      await mapUp(page);
+      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.demo), true);
+      assert(await page.$('nav.tabs .tab:has-text("Exit demo")'), "Exit demo is kept");
+      // A restart (the demo account forgotten), then a fresh tab: Demoing still works
+      forgetDemo();
+      const tab = await ctx.newPage();
+      await tidy(tab);
+      await tab.goto(base);
+      await question(tab);
+      await tab.click('.mode-pick[data-pick="demo"]');
+      await mapUp(tab);
+      assert.strictEqual(await tab.evaluate(() => SQ.d.user && SQ.d.user.demo), true);
+      await ctx.close();
+    });
+
+    await test("account d. Testing: an account after consent, the checklist's app links use it, skipping falls back to the demo, and the export is anonymous", async () => {
+      const stamp2 = Date.now().toString(36);
+      const tester = { name: "Rowan", email: `rowan-${stamp2}@example.com` };
+      // 1. Create an account
+      const { ctx, page } = await phone({ user: null });
+      await page.goto(base);
+      await question(page);
+      await Promise.all([page.waitForURL(/\/study$/), page.click('.mode-pick[data-pick="test"]')]);
+      await page.check("#agree");
+      await page.click("#start");
+      await page.waitForSelector("text=Create your account (1 min)");
+      const sid1 = new URL(page.url()).searchParams.get("s");
+      await page.waitForFunction(() => !document.documentElement.classList.contains("arrive"), null, { timeout: 5000 }); // the rows' fade-in is over
+      assert(await page.isVisible("text=Already have an account? Sign in"), "sign-in for returning testers");
+      assert(await page.isVisible("#skipAccount"), "and a way to skip");
+      const look = await page.evaluate(() => {
+        const out = { small: [], tiny: [], weights: new Set(), grad: 0, overflow: document.documentElement.scrollWidth - innerWidth };
+        for (const el of document.querySelectorAll("#app button, #app input, #app a")) { const r = el.getBoundingClientRect(); if (r.width && (r.height < 43.5)) out.small.push(`${el.tagName}#${el.id}.${el.className} ${Math.round(r.height)}`); if (/gradient/.test(getComputedStyle(el).backgroundImage)) out.grad++; }
+        for (const el of document.querySelectorAll("#app *")) { if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue; const c = getComputedStyle(el); out.weights.add(c.fontWeight); if (parseFloat(c.fontSize) < 12) out.tiny.push(el.textContent.trim().slice(0, 20)); }
+        out.weights = [...out.weights];
+        return out;
+      });
+      assert.deepStrictEqual(look.small, [], "44 px targets");
+      assert.deepStrictEqual(look.tiny, [], "text 12 px or larger");
+      assert(look.weights.every((w) => ["400", "500", "600"].includes(w)), `weights ${look.weights}`);
+      assert.strictEqual(look.grad, 1, "the gradient only on the primary button");
+      assert(look.overflow <= 0, "no sideways scroll");
+      await page.screenshot({ path: path.join(ACC_SHOTS, "study-account-step.png"), fullPage: true });
+      await page.fill("#a-name", tester.name);
+      await page.fill("#a-email", tester.email);
+      await page.click('[data-vibe="Live music"]');
+      await page.click('[data-vibe="Comedy"]');
+      await page.click('#acctCreate [type=submit]');
+      await page.waitForSelector(".steps");
+      const own = await page.evaluate(() => localStorage.getItem("sq2.user"));
+      const made = dbm.data.users[own];
+      assert(made && made.email === tester.email && made.registered && !made.demo, "a real, finished account");
+      if (!(await page.$('a:has-text("Open Discover")'))) await page.click('.step-h[data-step="discover"]');
+      const href = await page.getAttribute('a:has-text("Open Discover")', "href");
+      assert.strictEqual(href, `/?study=${encodeURIComponent(sid1)}`, "the app link uses their account, not the demo");
+      await page.click('a:has-text("Open Discover")');
+      await mapUp(page);
+      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.id), own, "the app opens as their account");
+      assert(!(await page.evaluate(() => SQ.d.user.demo)), "not the demo");
+      assert(await page.isVisible("#study-bar"), "with the bar back to the checklist");
+      // What they make is theirs and stays: a save survives a reload
+      const ev = await page.evaluate(() => SQ.d.events.find((e) => !e.over).id);
+      await page.evaluate((id) => SQ.act("save", { eventId: id }), ev);
+      await page.reload();
+      await mapUp(page);
+      assert.strictEqual(await page.evaluate(() => SQ.d.user.id), own);
+      // 2. Skip: the demo
+      const { ctx: c2, page: p2 } = await phone({ user: null });
+      await p2.goto(`${base}/study`);
+      await p2.check("#agree");
+      await p2.click("#start");
+      await p2.waitForSelector("#skipAccount");
+      const sid2 = new URL(p2.url()).searchParams.get("s");
+      await p2.click("#skipAccount");
+      await p2.waitForSelector(".steps");
+      if (!(await p2.$('a:has-text("Open Discover")'))) await p2.click('.step-h[data-step="discover"]');
+      assert.strictEqual(await p2.getAttribute('a:has-text("Open Discover")', "href"), `/?demo=1&study=${encodeURIComponent(sid2)}`);
+      await p2.click('a:has-text("Open Discover")');
+      await mapUp(p2);
+      assert.strictEqual(await p2.evaluate(() => SQ.d.user && SQ.d.user.demo), true, "the demo account");
+      // 3. A returning tester signs in
+      const { ctx: c3, page: p3 } = await phone({ user: null });
+      await p3.goto(`${base}/study`);
+      await p3.check("#agree");
+      await p3.click("#start");
+      await p3.click("text=Already have an account? Sign in");
+      await p3.fill("#a-email", tester.email);
+      await p3.click("#acctSignin [type=submit]");
+      await p3.waitForSelector("#a-code");
+      const code = await p3.$eval(".note b", (b) => b.textContent.trim());
+      await p3.fill("#a-code", code);
+      await p3.click("#acctCode [type=submit]");
+      await p3.waitForSelector(".steps");
+      const sid3 = new URL(p3.url()).searchParams.get("s");
+      assert.strictEqual(await p3.evaluate(() => localStorage.getItem("sq2.user")), own, "signed in as their account");
+      if (!(await p3.$('a:has-text("Open Discover")'))) await p3.click('.step-h[data-step="discover"]');
+      assert.strictEqual(await p3.getAttribute('a:has-text("Open Discover")', "href"), `/?study=${encodeURIComponent(sid3)}`);
+      // 4. The export: account kind and internal id only, no names or emails
+      await require(path.join(ROOT, "lib", "sidekick", "study")).flush();
+      const json = await (await realFetch(`${base}/api/sk/study/export?key=launch-study-key&format=json`)).json();
+      const csvT = await (await realFetch(`${base}/api/sk/study/export?key=launch-study-key&table=testers`)).text();
+      const rows = Object.fromEntries(json.testers.map((r) => [r.session, r]));
+      assert.strictEqual(rows[sid1].account_kind, "own");
+      assert.strictEqual(rows[sid1].account_id, own, "linked by the internal id");
+      assert.strictEqual(rows[sid2].account_kind, "demo");
+      assert.strictEqual(rows[sid2].account_id, null, "the demo has no id");
+      assert.strictEqual(rows[sid3].account_kind, "own");
+      assert(/account_kind,account_id/.test(csvT), "the CSV has the columns");
+      const all = JSON.stringify(json) + csvT;
+      for (const bad of [tester.name, tester.email, "@example.com", "Launch Test", "demo@sidequest.app"]) assert(!all.includes(bad), `the export contains "${bad}"`);
+      assert(!/[\w.+-]+@[\w-]+\.[\w.]+/.test(all), "no email anywhere in the export");
+      const raw = fs.readFileSync(process.env.SIDEKICK_STUDY_FILE, "utf8");
+      assert(!raw.includes(tester.email) && !raw.includes(tester.name), "the study file keeps no name or email either");
+      await c3.close();
+      await c2.close();
       await ctx.close();
     });
   } finally {

@@ -6,6 +6,10 @@
      underneath, and the map's real event and place pins fly from the glows into their spots. About 1.1 s, ease-in-out.
      It always signs into the demo account, even over a stale session.
    - Testing: the same zoom, then the study checklist at /study, whose rows fade in.
+   - "Sign in or create an account" (under the two choices): the question fades and the app's login opens.
+   - Signed in with a real account: no question. The loader's headline fades and the zoom's second half runs
+     (the lights grow, the stage fades to the map, the pins fly in): SQ.opening.hold() before the map renders,
+     then SQ.opening.arrive().
    - A tap or a key press during any of it jumps to the end. Reduced motion: crossfades only.
    The stage is the loader's own element (#boot); "Switch to demo / testing" brings a fresh one up over the app. */
 (function () {
@@ -38,10 +42,11 @@
       <span class="mode-wm">sidequest</span>
       <h1 class="mode-h" id="mode-h" tabindex="-1">Are you demoing SideQuest or testing it?</h1>
       <div class="mode-picks">
-        <button type="button" class="mode-pick pri" data-pick="demo"><span class="mode-t">Demoing</span><span class="mode-s">Go straight into the full app: the map, Plan with Sidekick, and sample friends.</span></button>
+        <button type="button" class="mode-pick pri" data-pick="demo"><span class="mode-t">Demoing</span><span class="mode-s">Go straight into the full app: the map, Plan with Sidekick, and sample friends.</span><span class="mode-n">A shared sandbox: anything you make in the demo is visible to everyone using it, and is reset.</span></button>
         <button type="button" class="mode-pick" data-pick="test"><span class="mode-t">Testing</span><span class="mode-s">Take part in the Sidekick voice study. A short checklist walks you through it.</span></button>
       </div>
-      <p class="mode-note">Asked once per visit.</p>
+      <button type="button" class="mode-signin" data-signin>Sign in or create an account</button>
+      <p class="mode-note">Asked once per visit. Signed in, you go straight to the app.</p>
     </div>
     <p class="b-wait" role="status" aria-live="polite"></p>`;
 
@@ -78,6 +83,7 @@
       if (b) pick(b.dataset.pick);
       const r = e.target.closest("[data-retry]");
       if (r) pick(r.dataset.retry);
+      if (e.target.closest("[data-signin]")) signIn();
     });
     phase = "rise";
     const still = M().reduced();
@@ -139,6 +145,63 @@
     finish();
   }
 
+  // ---------- "Sign in or create an account": the question fades, the app's login is underneath ----------
+  async function signIn() {
+    if (picking || !stage) return;
+    picking = true;
+    skip();
+    skipping = false;
+    phase = "zoom";
+    SQ.mode.set("app");
+    const still = M().reduced();
+    const q = stage.querySelector(".b-q");
+    if (q) q.style.pointerEvents = "none";
+    try {
+      await SQ.opening.enterLogin();
+    } catch (err) {
+      console.error(err);
+      picking = false;
+      phase = null;
+      if (q) q.style.pointerEvents = "";
+      return;
+    }
+    await ended([anim(stage, [{ opacity: 1 }, { opacity: 0 }], { duration: still ? M().FAST : M().BASE, easing: M().INOUT })]);
+    finish();
+    const first = document.querySelector("#screen input");
+    if (first) first.focus({ preventScroll: true });
+  }
+
+  // ---------- Signed in already: the zoom's second half, straight onto the map ----------
+  // hold() keeps the loader up as the stage while the map renders underneath (so the pins wait for the fly-in);
+  // arrive() then fades the headline, grows the lights and hands over to the map as Demoing does.
+  function hold() {
+    if (stage && stage.isConnected) return true;
+    const b = window.SQboot && window.SQboot.hold();
+    if (!b) return false;
+    stage = b;
+    skipping = false;
+    running = [];
+    phase = "zoom";
+    stage.removeAttribute("role");
+    stage.removeAttribute("aria-live");
+    stage.removeAttribute("aria-label");
+    stage.addEventListener("pointerdown", () => { if (phase) skip(); }, true);
+    stage.addEventListener("keydown", (e) => { if (phase && e.key !== "Tab") skip(); }, true);
+    return true;
+  }
+  async function arrive() {
+    if (!stage || !stage.isConnected) return;
+    const still = M().reduced();
+    const head = stage.querySelector(".b-in"), lights = stage.querySelector(".b-lights");
+    if (head) anim(head, [{ opacity: getComputedStyle(head).opacity }, { opacity: 0 }], { duration: M().FAST, easing: M().IN });
+    if (!still) anim(lights, [{ transform: "scale(1)", filter: "blur(4px) saturate(1)" }, { transform: "scale(2.2)", filter: "blur(0px) saturate(1.3)" }], { duration: 760, easing: M().INOUT });
+    await wait(still ? 0 : 280);
+    const list = [anim(stage, [{ opacity: 1 }, { opacity: 0 }], { duration: still ? M().BASE : 480, delay: still ? 0 : 40, easing: M().INOUT })];
+    if (!still) list.push(...flyPins(lights));
+    await ended(list);
+    finish();
+  }
+
   // Where the three glows are now (they grow with the lights), in window pixels
   function glows(lights) {
     const r = stage.getBoundingClientRect();
@@ -185,10 +248,14 @@
 
   SQ.opening = {
     ask,
+    hold,
+    arrive,
     active: () => !!(stage && stage.isConnected),
     phase: () => phase,
     skip,
     // Into the demo account, on the map. Set by app.js (it owns sign-in and navigation).
     enterDemo: async () => { throw new Error("not ready"); },
+    // The app's login, signed out of any demo account. Set by app.js too.
+    enterLogin: async () => { throw new Error("not ready"); },
   };
 })();

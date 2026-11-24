@@ -14,6 +14,11 @@
 // (questions asked, time to picks, picks accepted, check-in mode), and each tester's survey taps.
 // Never stored: names, transcripts, what anyone said, or anyone's private answers (budget, places to avoid).
 // Free-text "why" answers have the call's names and any amounts taken out before they're saved.
+//
+// Accounts: after consent, a tester creates a quick app account or signs in (so the events they add and
+// the plans they make are theirs and stay), or skips and uses the shared demo account. Each tester keeps
+// only which kind it was ("own" or "demo") and, for their own account, its internal id: never a name
+// or an email. The export carries the kind and that id, nothing else about the account.
 
 const crypto = require("crypto");
 const fs = require("fs");
@@ -34,7 +39,18 @@ const BOT_NAMES = ["Robin (practice)", "Jules (practice)"];
 const FORM_PLANNER = "Sam (practice)";
 const WAIT_FOR_HUMANS_MS = 25000; // practice friends answer anyway if the humans haven't after this long
 
+const ACCOUNT_KINDS = ["own", "demo"];
+
 const now = () => Date.now();
+// The app's accounts (lib/db, the same module the server loads). An own account must exist and not be the demo.
+function realAccount(id) {
+  if (typeof id !== "string" || !/^[\w-]{4,40}$/.test(id)) return null;
+  let users = null;
+  try { users = require("../db").data.users; } catch { return null; }
+  const u = users && Object.prototype.hasOwnProperty.call(users, id) ? users[id] : null;
+  if (!u || u.demo || /^@?demo$/i.test(String(u.handle || u.username || ""))) return null;
+  return u;
+}
 const rid = (n = 6) => crypto.randomBytes(n).toString("base64url");
 const pick = (list) => list[crypto.randomInt(list.length)];
 
@@ -361,7 +377,7 @@ function testerView(s, tid) {
     call2: Boolean(t.surveys[2]),
     survey: Boolean(t.final),
   };
-  return { sid: s.id, you: { n: t.n, creator: s.creator === tid, steps, surveys: { 1: Boolean(t.surveys[1]), 2: Boolean(t.surveys[2]) }, final: Boolean(t.final) }, calls, practice: s.practice, testers: Object.keys(s.testers).length, steps: STEPS };
+  return { sid: s.id, you: { n: t.n, creator: s.creator === tid, account: t.account ? t.account.kind : null, steps, surveys: { 1: Boolean(t.surveys[1]), 2: Boolean(t.surveys[2]) }, final: Boolean(t.final) }, calls, practice: s.practice, testers: Object.keys(s.testers).length, steps: STEPS };
 }
 
 // Free text: no names from the calls, no emails, phone numbers or amounts
@@ -434,7 +450,18 @@ function preferenceRows() {
   for (const s of Object.values(data.sessions).sort((a, b) => a.index - b.index)) {
     for (const t of Object.values(s.testers)) {
       if (!t.final) continue;
-      rows.push({ session: s.id, session_index: s.index, order: s.order, tester: t.n, keep_voice: t.final.keep, keep_arm: t.final.keepArm, keep_persona: ARMS[t.final.keepArm], kept_first_heard: t.final.keep === 1, seq: t.final.seq, why: t.final.why || "" });
+      rows.push({ session: s.id, session_index: s.index, order: s.order, tester: t.n, ...accountCols(t), keep_voice: t.final.keep, keep_arm: t.final.keepArm, keep_persona: ARMS[t.final.keepArm], kept_first_heard: t.final.keep === 1, seq: t.final.seq, why: t.final.why || "" });
+    }
+  }
+  return rows;
+}
+// Which account a tester used: the kind, and for their own account its internal id. Never a name or an email.
+const accountCols = (t) => ({ account_kind: t.account ? t.account.kind : "none", account_id: t.account && t.account.kind === "own" ? t.account.id : null });
+function testerRows() {
+  const rows = [];
+  for (const s of Object.values(data.sessions).sort((a, b) => a.index - b.index)) {
+    for (const t of Object.values(s.testers).sort((a, b) => a.n - b.n)) {
+      rows.push({ session: s.id, session_index: s.index, order: s.order, tester: t.n, ...accountCols(t), steps_done: Object.keys(t.steps || {}).length, surveys: [1, 2].filter((n) => t.surveys && t.surveys[n]).length, finished: Boolean(t.final), joined: new Date(t.joinedAt).toISOString() });
     }
   }
   return rows;
@@ -494,9 +521,10 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
       if (!ok) return sendJSON(res, 401, { error: "Wrong or missing study key." });
       if (parts[3] === "summary") return sendJSON(res, 200, summary());
-      const table = url.searchParams.get("table") === "preferences" ? preferenceRows() : callRows();
-      if (url.searchParams.get("format") === "json") return sendJSON(res, 200, { calls: callRows(), preferences: preferenceRows() });
-      res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "cache-control": "no-store", "content-disposition": `attachment; filename="sidekick-study-${url.searchParams.get("table") === "preferences" ? "preferences" : "calls"}.csv"` });
+      const which = ["preferences", "testers"].includes(url.searchParams.get("table")) ? url.searchParams.get("table") : "calls";
+      const table = which === "preferences" ? preferenceRows() : which === "testers" ? testerRows() : callRows();
+      if (url.searchParams.get("format") === "json") return sendJSON(res, 200, { calls: callRows(), preferences: preferenceRows(), testers: testerRows() });
+      res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "cache-control": "no-store", "content-disposition": `attachment; filename="sidekick-study-${which}.csv"` });
       return res.end(csv(table));
     }
     if (req.method !== "GET" && req.method !== "POST") return sendJSON(res, 405, { error: "Not allowed." });
@@ -523,6 +551,16 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     const t = s.testers[tid];
     if (req.method === "GET" && !action) return sendJSON(res, 200, testerView(s, tid));
     if (req.method !== "POST") return sendJSON(res, 404, { error: "Not found" });
+
+    // The account this tester uses in the app: their own (by internal id), or the shared demo if they skipped
+    if (action === "account") {
+      const kind = ACCOUNT_KINDS.includes(body.kind) ? body.kind : null;
+      if (!kind) return sendJSON(res, 400, { error: "Choose your own account or the demo." });
+      if (kind === "own" && !realAccount(body.user)) return sendJSON(res, 400, { error: "That account couldn't be found. Create one, sign in again, or use the demo." });
+      t.account = kind === "own" ? { kind, id: body.user, at: now() } : { kind, at: now() };
+      save(s);
+      return sendJSON(res, 200, testerView(s, tid));
+    }
 
     if (action === "step") {
       if (!MANUAL_STEPS.includes(body.step)) return sendJSON(res, 400, { error: "That step fills in by itself." });
@@ -638,4 +676,4 @@ async function handle(req, res, url, { readBody, sendJSON }) {
   }
 }
 
-module.exports = { handle, flush, ARMS, ORDERS, _test: { lineBookOf, binomial, scrub, summary, callRows, preferenceRows, load, live } };
+module.exports = { handle, flush, ARMS, ORDERS, _test: { lineBookOf, binomial, scrub, summary, callRows, preferenceRows, testerRows, load, live } };

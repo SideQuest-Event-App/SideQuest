@@ -91,6 +91,8 @@ The class study (INF2573) compares Sidekick's two call voices. Testers try the a
 
 Each person who opens it and taps Start is a new crew. The page is a checklist: agree, look around Discover, open Plan, share the call link, call 1, try the form, call 2, and a last short survey. Testers can do the steps in order or jump around. The two calls and the form only open in the order that keeps the test fair. It takes about 15 minutes, and the questions take under a minute and a half.
 
+**Accounts:** right after agreeing, testers make a quick account (first name, email, two or more interests) or sign in, so the events they add and the plans they make are their own and stay. The checklist's app links then open the app as that account. A tester can skip and use the shared demo account instead. The study keeps only which kind it was (`own` or `demo`) and, for their own account, its internal id: never a name or email.
+
 **Testing with friends:** one person opens `/study` and taps Start. They copy the study link from the bottom of the checklist and send it to the others, who open it, agree, and join the call when it starts. Everyone on one call hears the same voice.
 
 **Testing alone:** on the call's invite card, tap **Add 2 practice friends**. Two practice friends (Robin and Jules) join, vote and tap answers the way real friends would. They wait for you before they answer, and they come back for call 2. They're marked as practice and are never counted as testers.
@@ -99,7 +101,7 @@ Each person who opens it and taps Start is a new crew. The page is a checklist: 
 
 **Where the results are:**
 - Open `https://<your-app>.onrender.com/study/results` and enter the study key. It shows the call 1 comparison, which voice people would keep (with a significance test) and an order check, plus download links.
-- The downloads: one row per call (`/api/sk/study/export?key=<key>`), and one row per tester for the voice preference (`&table=preferences`). They open in Excel or Google Sheets.
+- The downloads: one row per call (`/api/sk/study/export?key=<key>`), one row per tester for the voice preference (`&table=preferences`), and one row per tester with the account kind and internal id (`&table=testers`). They open in Excel or Google Sheets.
 - No names, transcripts, voices or private answers (budget, places to avoid) are ever stored or exported.
 - The raw data is `data/sidekick-study.json` on the server, also copied to Supabase Storage when Supabase is set up. Render wipes its disk on every deploy, so set up Supabase before the study starts.
 

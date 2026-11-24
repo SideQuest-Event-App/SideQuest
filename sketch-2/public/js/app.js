@@ -135,6 +135,8 @@
     } catch {}
     return !!on;
   };
+  // Signed in with a real account (not the shared demo): the question is skipped, and nothing signs it into the demo
+  SQ.realUser = () => !!(SQ.d && SQ.d.user && !SQ.d.user.demo);
   async function relogin() {
     const r = await request("/api/act", { user: null, host: ids.host, type: "demoLogin" });
     SQ.setIds({ user: r.result.userId });
@@ -148,6 +150,7 @@
       SQ.setIds({ user: null }); // the database was reset, or the server restarted
       if (SQ.demoSession()) await relogin().catch(() => {});
     }
+    if (SQ.realUser()) SQ.demoSession(false); // a real account is never swapped for the demo
     if (ids.host && !SQ.d.host) SQ.setIds({ host: null });
   };
   // Every change goes through here, and comes back with fresh state
@@ -159,6 +162,7 @@
       if (r.result.hostId) SQ.setIds({ host: r.result.hostId });
       if (type === "demoLogin") SQ.demoSession(true);
       SQ.d = await withEvents(r.state);
+      if (SQ.realUser()) SQ.demoSession(false);
       SQ.reportStale = true;
       SQ.acts++;
       return r.result;
@@ -658,11 +662,22 @@
   });
 
   // ---------- Start ----------
-  // Every fresh visit (a new tab or session) goes: city-lights loader -> "Are you demoing SideQuest or testing it?".
+  // A fresh visit (a new tab or session) goes: city-lights loader -> then
+  //  - signed in with a real (non-demo) account: straight onto the map, with the zoom's second half; no question;
+  //  - otherwise: "Are you demoing SideQuest or testing it?", with "Sign in or create an account" under it.
   // The answer is kept for this tab only (sessionStorage), so a reload in the same tab doesn't ask again; a screen
   // saved by an earlier visit is ignored until the question has been answered here. Shared links skip the question:
-  // ?quest=<id> and the study's ?demo=1&study=<id> (the /sk and /study pages are pages of their own).
+  // ?quest=<id>, ?demo=1 and the study's ?study=<id> (the /sk and /study pages are pages of their own).
+  // Nothing here ever replaces a real account's session with the demo account: ?demo=1 and the study's links sign
+  // into the demo only when no real account is signed in.
   SQ.actions.bootRetry = () => location.reload();
+  SQ.opening.enterLogin = async () => {
+    SQ.demoSession(false);
+    if (!SQ.realUser()) SQ.setIds({ user: null });
+    await SQ.refresh();
+    Object.assign(SQ.u.login, { error: null, code: "" });
+    SQ.enter(SQ.realUser() ? "discover" : "login");
+  };
   SQ.opening.enterDemo = async () => {
     await SQ.act("demoLogin"); // always, even over a stale session or another account
     SQ.u.search = { ...SQ.u.search, result: null, ran: "", error: null };
@@ -678,14 +693,15 @@
         sessionStorage.setItem("sq2.study", study);
       } catch {}
     }
-    // "Switch to demo / testing" from the study page: forget this tab's answer and the account, and ask again
-    if (params.get("switch")) {
+    // "Back to the start" from the study page: forget this tab's answer and the demo account, and ask again
+    // (a real account stays signed in, and so goes straight to the app)
+    const switching = !!params.get("switch");
+    if (switching) {
       SQ.mode.set(null);
       SQ.demoSession(false);
-      SQ.setIds({ user: null });
       history.replaceState(null, "", location.pathname);
     }
-    if (params.get("demo")) SQ.mode.set(SQ.studyId() ? "test" : "demo");
+    if (params.get("demo") || (params.get("study") && SQ.studyId())) SQ.mode.set(SQ.studyId() ? "test" : "demo");
     else if (params.get("quest") && !SQ.mode.get()) SQ.mode.set("demo");
     const sid = SQ.studyId();
     if (sid) {
@@ -705,10 +721,17 @@
     };
     try {
       await SQ.refresh();
+      if (switching && ids.user && !SQ.realUser()) {
+        SQ.setIds({ user: null });
+        await SQ.refresh();
+      }
     } catch (err) {
       return failed();
     }
     restoreSearch();
+    // A real account on a fresh visit: no question, straight into the app (with the zoom's second half, below)
+    const arriving = !SQ.mode.get() && SQ.realUser();
+    if (arriving) SQ.mode.set("app");
     // Not answered in this tab yet: the question, on the loader's lights (opening.js). Nothing saved is restored.
     if (!SQ.mode.get()) {
       SQ.u.screen = "mode";
@@ -717,8 +740,10 @@
       SQ.opening.ask();
       return;
     }
-    // The study's links always sign into the demo; so does a demo tab whose account the server forgot
-    if (params.get("demo") || (!SQ.d.user && (SQ.demoSession() || (params.get("quest") && SQ.mode.get() === "demo")))) {
+    // ?demo=1 and the study's links sign into the demo when no real account is signed in (a tester who made their
+    // own account comes in as it); so does a demo tab whose account the server forgot
+    const studyLink = !!(params.get("study") && sid);
+    if (!SQ.realUser() && (params.get("demo") || studyLink || (!SQ.d.user && (SQ.demoSession() || (params.get("quest") && SQ.mode.get() === "demo"))))) {
       try {
         await SQ.act("demoLogin");
       } catch {
@@ -737,7 +762,7 @@
     } catch {}
     const fallback = u ? (u.registered ? "discover" : "ob-vibes") : "landing";
     const skip = ["mode", "quest", "tickets", "rate", "eventday", "eventday-chat", ...(SQ.u.search.result ? [] : ["search"]), "host-request", "host-checkin", "host-recap", "host-published", "host-create", "host-create-dayinfo", "host-draft-test", "spot", "add-event", ...(u ? ["landing"] : [])];
-    SQ.u.screen = guard(params.get("demo") ? "discover" : last && SQ.screens[last] && !skip.includes(last) ? last : fallback);
+    SQ.u.screen = guard(params.get("demo") || studyLink ? "discover" : last && SQ.screens[last] && !skip.includes(last) ? last : fallback);
     // A shared link to one sidequest (?quest=id) opens it
     const linked = Number(params.get("quest"));
     if (linked && SQ.ev(linked) && SQ.d.user) {
@@ -747,10 +772,13 @@
     }
     if (params.get("demo") || params.get("study") || params.get("quest")) history.replaceState(null, "", location.pathname);
     trackScreen(SQ.u.screen, null);
+    // Signed in, fresh visit, on the map: the loader stays as the stage while the map renders, then zooms into it
+    const zoom = arriving && SQ.u.screen === "discover" && SQ.opening.hold();
     try {
       render(true);
     } finally {
-      if (window.SQboot) window.SQboot.done(); // the first screen is in: the loader fades away (never left up, even on an error)
+      if (zoom) SQ.opening.arrive().catch(() => { const b = document.getElementById("boot"); if (b) b.remove(); });
+      else if (window.SQboot) window.SQboot.done(); // the first screen is in: the loader fades away (never left up, even on an error)
     }
   })();
 })();

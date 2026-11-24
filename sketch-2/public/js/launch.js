@@ -57,13 +57,16 @@
   SQ.lx = { state, DOWNTOWN };
 
   // ---------- "Are you demoing SideQuest or testing it?" ----------
-  // Asked on every fresh visit, after the loader (opening.js draws it on the loader's lights and runs the zoom into
-  // the app). The answer is kept for this tab only, so a reload in the same tab doesn't ask again: "demo" opens the
-  // demo account on the map; "test" opens the voice study at /study, whose checklist links back into the demo app
-  // (/?demo=1&study=<id>). Shared links (/sk, /study?s=…, ?quest=, ?demo=1) never see the question.
+  // Asked on every fresh visit by someone who isn't signed in with a real account, after the loader (opening.js
+  // draws it on the loader's lights and runs the zoom into the app). A real, non-demo account skips it and goes
+  // straight to the map, with the zoom's second half. The answer is kept for this tab only, so a reload in the same
+  // tab doesn't ask again: "demo" opens the shared demo account on the map; "test" opens the voice study at /study,
+  // whose checklist links back into the app as the tester's own account (/?study=<id>) or, if they skipped making
+  // one, the demo (/?demo=1&study=<id>); "app" is a real account (signed in, or "Sign in or create an account").
+  // Shared links (/sk, /study?s=…, ?quest=, ?demo=1) never see the question.
   const MODE_KEY = "sq2.mode";
   SQ.mode = {
-    get: () => (["demo", "test"].includes(session.get(MODE_KEY)) ? session.get(MODE_KEY) : null),
+    get: () => (["demo", "test", "app"].includes(session.get(MODE_KEY)) ? session.get(MODE_KEY) : null),
     set: (v) => session.set(MODE_KEY, v),
   };
   SQ.studyId = () => {

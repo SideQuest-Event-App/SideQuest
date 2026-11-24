@@ -77,7 +77,7 @@
       function paint() {
         [["events", ".b-ev", "event"], ["places", ".b-pl", "place"]].forEach(function (k) {
           var el = b.querySelector(k[1]);
-          if (n[k[0]] == null || !(n[k[0]] > 0)) return;
+          if (!el || n[k[0]] == null || !(n[k[0]] > 0)) return; // the headline may be gone (the question took its place)
           el.hidden = false;
           el.querySelector("b").textContent = fmt(n[k[0]]) + " " + k[2] + (n[k[0]] === 1 ? "" : "s");
         });

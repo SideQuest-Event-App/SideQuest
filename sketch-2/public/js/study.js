@@ -71,12 +71,123 @@
         history.replaceState(null, "", `/study?s=${encodeURIComponent(sid)}`);
         view = out.view;
         open = null;
+        acct = null;
         render();
       } catch (err) {
         start.disabled = false;
         toast(err.message);
       }
     };
+  }
+
+  // ---------- Your account (after consent) ----------
+  // A quick app account, or sign in, so the events testers add and the plans they make are their own and stay.
+  // Skipping uses the shared demo account. The study keeps only which kind it was and the account's internal id.
+  // The app reads the signed-in account from localStorage "sq2.user" (the same origin), so the checklist's
+  // links open the app as this account.
+  const appUser = {
+    get() { try { const v = localStorage.getItem("sq2.user"); return v && /^[\w-]{4,40}$/.test(v) ? v : null; } catch { return null; } },
+    set(v) { try { localStorage.setItem("sq2.user", v); sessionStorage.removeItem("sq2.demo"); } catch {} },
+  };
+  const VIBES = [["Live music", ["Live music", "Jazz", "Indie gigs"]], ["Food & drink", ["Food & drink"]], ["Art", ["Art & making", "Photography"]], ["Comedy", ["Comedy"]], ["Dance nights", ["Dance", "Electronic"]], ["Markets", ["Markets", "Records & vinyl"]], ["Film", ["Film nights"]], ["Games", ["Games & social"]], ["Outdoors", ["Outdoors"]]];
+  // acct: what the account step shows. { how: "create" | "signin" | "code", mine: { id, name } | null, ... }
+  let acct = null;
+  const act = async (type, args, user = null) => (await api("/api/act", { user, type, args })).result;
+  async function stateOf(id) {
+    try { return (await api(`/api/state?user=${encodeURIComponent(id)}&host=`)).user || null; } catch { return null; }
+  }
+  async function accountScreen() {
+    if (!acct) {
+      acct = { how: "create", mine: null, name: "", email: "", vibes: [], code: "", demoCode: null, error: null, busy: false };
+      const id = appUser.get();
+      const u = id && (await stateOf(id));
+      if (u && !u.demo) acct.mine = { id, name: u.name || "your account" };
+    }
+    const a = acct;
+    const err = a.error ? `<p class="field-err" role="alert">${esc(a.error)}</p>` : "";
+    let body;
+    if (a.how === "signin") {
+      body = `<h1>Sign in</h1>
+        <p class="muted">Enter the email on your Sidequest account. We'll send you a 6-digit code.</p>
+        <form class="stack" id="acctSignin">
+          <label class="f">Email<input class="in" id="a-email" type="email" inputmode="email" autocomplete="email" value="${esc(a.email)}" required></label>
+          ${err}<button class="btn pri" type="submit" ${a.busy ? "disabled" : ""}>Send code</button></form>
+        <button class="linkish" type="button" data-acct="create">New here? Create an account</button>`;
+    } else if (a.how === "code") {
+      body = `<h1>Check your email</h1>
+        <p class="muted">We sent a 6-digit code to ${esc(a.email)}.</p>
+        ${a.demoCode ? `<p class="note">No email service is set up here, so here's your code: <b>${esc(a.demoCode)}</b></p>` : ""}
+        <form class="stack" id="acctCode">
+          <label class="f">6-digit code<input class="in" id="a-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" value="${esc(a.code)}" required></label>
+          ${err}<button class="btn pri" type="submit" ${a.busy ? "disabled" : ""}>Sign in</button></form>
+        <button class="linkish" type="button" data-acct="signin">Use a different email</button>`;
+    } else {
+      body = `<h1>Create your account (1 min)</h1>
+        <p class="muted">So the events you add and the plans you make are yours, and they stay after the study.</p>
+        ${a.mine ? `<button class="btn pri" type="button" id="useMine">Continue as ${esc(a.mine.name)}</button><p class="small">Or make a new account:</p>` : ""}
+        <form class="stack" id="acctCreate">
+          <label class="f">First name<input class="in" id="a-name" maxlength="30" autocomplete="given-name" value="${esc(a.name)}" required></label>
+          <label class="f">Email<input class="in" id="a-email" type="email" inputmode="email" autocomplete="email" value="${esc(a.email)}" required><span class="hint">Your sign-in codes go here.</span></label>
+          <div class="likert" role="group" aria-label="Pick two or more things you're into"><p>Pick two or more things you're into</p>
+            <div class="chips">${VIBES.map(([label]) => `<button type="button" class="chip" data-vibe="${esc(label)}" aria-pressed="${a.vibes.includes(label)}">${esc(label)}</button>`).join("")}</div></div>
+          ${err}<button class="btn ${a.mine ? "out" : "pri"}" type="submit" ${a.busy ? "disabled" : ""}>Create account</button></form>
+        <button class="linkish" type="button" data-acct="signin">Already have an account? Sign in</button>`;
+    }
+    app.innerHTML = `
+      <div class="row sb"><span class="tag pri">Sidekick study</span><span class="small">Step 2 · your account</span></div>
+      <div class="lead-in acct">${body}</div>
+      <p class="fine">Your study answers stay anonymous. They're linked to your account only by a random id, never your name or email.</p>
+      <div class="skip">
+        <button class="btn out" type="button" id="skipAccount">Skip and use the demo account</button>
+        <p class="small">The demo account is shared: anything you make there is visible to everyone using it, and is reset.</p>
+      </div>`;
+  }
+  async function useAccount(kind, user) {
+    view = await post("account", { kind, user });
+    acct = null;
+    open = null;
+    render();
+  }
+  async function accountSubmit(form) {
+    const a = acct;
+    const val = (id) => (document.getElementById(id) ? document.getElementById(id).value.trim() : "");
+    a.error = null;
+    a.busy = true;
+    try {
+      if (form.id === "acctCreate") {
+        Object.assign(a, { name: val("a-name"), email: val("a-email") });
+        if (!a.name) throw new Error("Add your first name.");
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.email)) throw new Error("Check the email. It should look like name@example.com.");
+        if (a.vibes.length < 2) throw new Error("Pick two or more things you're into.");
+        const r = await act("signup", { name: a.name, email: a.email, username: "" });
+        const vibes = [...new Set(a.vibes.flatMap((l) => (VIBES.find((v) => v[0] === l) || [l, [l]])[1]))];
+        await act("setProfile", { vibes, registered: true }, r.userId);
+        appUser.set(r.userId);
+        await useAccount("own", r.userId);
+        toast("Account made. You're signed in to the app as you.");
+        return;
+      }
+      if (form.id === "acctSignin") {
+        a.email = val("a-email");
+        const r = await act("requestCode", { email: a.email });
+        Object.assign(a, { how: "code", code: "", demoCode: r.demoCode || null });
+      } else if (form.id === "acctCode") {
+        a.code = val("a-code");
+        const r = await act("verifyCode", { email: a.email, code: a.code });
+        if (!r.userId) throw new Error("That email is on a host account. Create an attendee account instead.");
+        const u = await stateOf(r.userId);
+        if (u && u.demo) throw new Error("That's the shared demo account. Tap Skip below to use it.");
+        if (u && !u.registered) await act("setProfile", { registered: true }, r.userId);
+        appUser.set(r.userId);
+        await useAccount("own", r.userId);
+        toast("Signed in. The app opens as you.");
+        return;
+      }
+    } catch (err) {
+      a.error = err.message;
+    }
+    a.busy = false;
+    accountScreen();
   }
 
   // ---------- The checklist ----------
@@ -92,6 +203,8 @@
   };
   const callLink = (n, room) => `/sk/${encodeURIComponent(room)}?study=${encodeURIComponent(sid)}&v=${n}`;
   const planLink = () => `/sk?study=${encodeURIComponent(sid)}`;
+  // Into the app: as the tester's own account, or the shared demo if they skipped
+  const appLink = () => (view.you.account === "own" ? `/?study=${encodeURIComponent(sid)}` : `/?demo=1&study=${encodeURIComponent(sid)}`);
 
   function sub(step) {
     const v = view;
@@ -159,10 +272,10 @@
       case "consent":
         return `<p class="muted">You agreed to take part. We record the steps you finish, timings, whether a plan gets locked, and your answers to our questions. Never names, voices, captions or your private answers.</p>`;
       case "discover":
-        return `<p class="muted">Open the app (you're signed in to the demo). Then try:</p>
+        return `<p class="muted">Open the app (${view.you.account === "own" ? "you're signed in as you, so what you add stays yours" : "you're in the shared demo account"}). Then try:</p>
           <ul><li>the map's pins and cards</li><li>pulling the sheet up for the list</li><li>a search, with a filter</li><li>opening one sidequest</li></ul>
           <p class="small">The bar at the top of the app brings you back here.</p>
-          <div class="btns"><a class="btn out" href="/?demo=1&amp;study=${encodeURIComponent(sid)}">Open Discover</a>${mark("discover")}</div>`;
+          <div class="btns"><a class="btn out" href="${esc(appLink())}">Open Discover</a>${mark("discover")}</div>`;
       case "plan":
         return `<p class="muted">Plan is where Sidekick lives. Open it, add your name and a crew name, pick a night or two, and tap <b>Start the call</b>.</p>
           <div class="btns">${v.calls[1].status === "none" ? (v.you.creator ? `<a class="btn pri" href="${planLink()}">Open Plan</a>` : '<p class="note">Whoever started the study opens Plan and starts the call.</p>') : v.calls[1].status === "live" ? `<a class="btn pri" href="${callLink(1, v.calls[1].room)}">${v.calls[1].mine ? "Back to" : "Join"} the call</a>` : ""}${mark("plan")}</div>`;
@@ -187,6 +300,7 @@
 
   function render() {
     if (!view) return;
+    if (!view.you.account) return accountScreen(); // right after consent: the account step
     const doneN = view.steps.filter((s) => view.you.steps[s]).length;
     const next = firstOpen();
     if (!open) open = location.hash.replace("#", "") in TITLES ? location.hash.replace("#", "") : next;
@@ -215,6 +329,21 @@
   // ---------- Taps ----------
   app.addEventListener("click", async (e) => {
     const t = e.target;
+    if (acct) {
+      const v = t.closest("[data-vibe]");
+      if (v) { const l = v.dataset.vibe; acct.vibes = acct.vibes.includes(l) ? acct.vibes.filter((x) => x !== l) : [...acct.vibes, l]; v.setAttribute("aria-pressed", String(acct.vibes.includes(l))); return; }
+      const to = t.closest("[data-acct]");
+      if (to) { const keep = document.getElementById("a-email"); if (keep) acct.email = keep.value.trim(); acct.how = to.dataset.acct; acct.error = null; accountScreen(); return; }
+      if (t.closest("#useMine") || t.closest("#skipAccount")) {
+        const b = t.closest("button");
+        b.disabled = true;
+        try {
+          if (b.id === "useMine") await useAccount("own", acct.mine.id);
+          else await useAccount("demo");
+        } catch (err) { b.disabled = false; toast(err.message); }
+        return;
+      }
+    }
     const head = t.closest("[data-step]");
     if (head) {
       open = open === head.dataset.step ? "" : head.dataset.step;
@@ -275,6 +404,7 @@
       sid = null;
       tid = null;
       view = null;
+      acct = null;
       history.replaceState(null, "", "/study");
       introScreen(false);
     }
@@ -283,6 +413,7 @@
   app.addEventListener("submit", async (e) => {
     e.preventDefault();
     const form = e.target;
+    if (/^acct/.test(form.id)) return accountSubmit(form);
     const btn = form.querySelector("[type=submit]");
     btn.disabled = true;
     try {
@@ -301,11 +432,12 @@
       const next = await api(`/api/sk/study/${encodeURIComponent(sid)}?t=${encodeURIComponent(tid)}`);
       if (JSON.stringify(next) !== JSON.stringify(view)) {
         const typing = document.activeElement && document.activeElement.id === "why";
+        const onAccount = acct && !next.you.account; // the account step keeps what's typed
         view = next;
-        if (!typing) render();
+        if (!typing && !onAccount) render();
       }
     } catch (err) {
-      if (err.status === 403) { store.set(`study:${sid}:tid`, null); tid = null; introScreen(true); }
+      if (err.status === 403) { store.set(`study:${sid}:tid`, null); tid = null; acct = null; introScreen(true); }
       if (err.status === 404) { store.set("study:last", null); sid = null; tid = null; view = null; history.replaceState(null, "", "/study"); introScreen(false); toast("That study link has expired. Start a new one."); }
     }
   }

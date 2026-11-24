@@ -1306,6 +1306,9 @@ a.tab { text-decoration: none; }
 .mode-t { font-weight: 600; font-size: 20px; line-height: 26px; }
 .mode-s { font-size: 14px; line-height: 20px; color: var(--text-secondary); }
 .mode-pick.pri .mode-s { color: #2a1d3d; }
+.mode-n { margin-top: 4px; font-size: 13px; line-height: 18px; font-weight: 500; color: #2a1d3d; }
+.mode-signin { align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; padding: 0 2px; font-weight: 600; font-size: 15px; line-height: 20px; color: var(--text-accent); text-decoration: underline; text-underline-offset: 3px; }
+.mode-signin:focus-visible { outline: 2px solid var(--text-accent); outline-offset: 3px; border-radius: 6px; }
 .mode-note { margin: 0; font-size: 13px; line-height: 18px; color: var(--text-secondary); }
 .mode-switch { min-height: 44px; font-size: 14px; color: var(--text-secondary); }
 :is([data-layout="tablet"], [data-layout="desktop"]) .scroll > .mode { max-width: none; }

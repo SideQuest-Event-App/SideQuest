@@ -183,6 +183,10 @@ const blindCheck = (text, where) => { for (const re of BLIND) assert(!re.test(te
         await shot("1-study-hub.png");
         await page.check("#agree");
         await page.click("#start");
+        // The account step: this tester skips it and uses the shared demo account
+        await page.waitForSelector("#skipAccount");
+        await visible("the account step");
+        await page.click("#skipAccount");
         await page.waitForSelector(".steps");
         const sid = new URL(page.url()).searchParams.get("s");
         const html = await page.content();

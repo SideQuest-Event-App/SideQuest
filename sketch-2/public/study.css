@@ -66,3 +66,11 @@ textarea.in{height:auto;min-height:76px;padding:12px 14px;resize:vertical;font:i
 .arrive #app > :nth-child(n+7), .arrive .steps > li:nth-child(n+7) { animation-delay: 240ms; }
 @keyframes arrive { from { opacity: 0; transform: translateY(6px); } }
 @media (prefers-reduced-motion: reduce) { @keyframes arrive { from { opacity: 0; } } }
+
+/* The account step (after consent): create a quick account, sign in, or skip to the shared demo */
+.acct .chips{gap:8px}
+.acct .chip{font-size:14px}
+.hint{font-size:13px;line-height:18px;font-weight:400;color:var(--t2)}
+.field-err{font-size:13px;line-height:18px;color:#ffb4b4;background:rgba(255,120,120,.1);border-radius:12px;padding:10px 12px}
+.fine{font-size:13px;line-height:18px;color:var(--t2)}
+.skip{display:flex;flex-direction:column;gap:8px;padding-top:4px;border-top:1px solid var(--bs);padding-top:16px}
