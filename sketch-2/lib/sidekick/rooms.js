@@ -429,6 +429,8 @@ function eventBrief(e, origins) {
   return `${e.title} | ${e.date} | ${e.price === 0 ? "free" : e.price != null ? `$${e.price}` : "price unknown"} | ${e.venue && e.venue.name}, ${e.neighbourhood} | ${trip}${e.rating ? ` | rated ${e.rating}` : ""}${review ? ` | review: "${String(review.text || review).slice(0, 100)}"` : ""}`;
 }
 
+// c.deadline (a time): stop waiting for the AI then and use the line book, with c.lateKey if given.
+// c.late: the AI already ran out of time earlier (the picks came from the engine): skip it.
 async function speak(room, move, c = {}) {
   const f = factsOf(room);
   const people = P.crew(room);
@@ -436,7 +438,7 @@ async function speak(room, move, c = {}) {
   if (room.agentMode) {
     // The ElevenLabs agent leads and speaks. The engine never speaks for itself: it keeps the move for
     // the agent's get_next_move tool, and passes on only what the agent can't know (picks on screen, a lock).
-    const key = move === "welcome" ? "hello" : move === "ask" ? `ask_${c.slot}` : move === "conflict" ? "clash" : move === "none" ? "loosen" : move;
+    const key = c.late && c.lateKey ? c.lateKey : move === "welcome" ? "hello" : move === "ask" ? `ask_${c.slot}` : move === "conflict" ? "clash" : move === "none" ? "loosen" : move;
     const suggestion = personas.fallbackLine(room.persona, key, ctx, room.said.filter((x) => !x.system).slice(-3).map((x) => x.text));
     room.nextMove = { move, slot: c.slot || null, todo: moveText(room, move, c), example: suggestion, at: now() };
     if (move === "picks") agentNote(room, `[app] Two picks are on everyone's screens now. ${moveText(room, move, c)} Present them at the next natural pause.`);
@@ -447,7 +449,8 @@ async function speak(room, move, c = {}) {
   }
   let text = null;
   let usedAI = false;
-  if (claude.available()) {
+  let late = Boolean(c.late);
+  if (claude.available() && !late) {
     const origins = Array.isArray(f.origin.value) && f.origin.value.length ? f.origin.value : ["union"];
     const list = (c.events || []).slice(0, 4).map((e) => `- ${eventBrief(e, origins)}`).join("\n");
     const opts = c.slot ? P.optionsFor(c.slot, room).map(([, l]) => l).join(", ") : "";
@@ -477,19 +480,21 @@ ${room.lines.slice(-6).map((l) => `${l.name}: ${redact(l.text)}`).join("\n") || 
 ${list ? `Events that fit (the only facts you may use about places):\n${list}\n` : ""}${room.said.length ? `Your last lines (start differently from these):\n${room.said.slice(-3).map((s) => `- ${s.text}`).join("\n")}\n` : ""}
 Your move: ${moves[move]}`;
     try {
-      const out = await claude.say(personas.systemPrompt(room.persona), user, 120);
-      if (personas.acceptable(out)) { text = out.replace(/^["']|["']$/g, ""); usedAI = true; }
+      const asked = claude.say(personas.systemPrompt(room.persona), user, 120);
+      const out = c.deadline ? await beforeDeadline(asked, c.deadline) : await asked;
+      if (out === LATE) late = true;
+      else if (personas.acceptable(out)) { text = out.replace(/^["']|["']$/g, ""); usedAI = true; }
     } catch (err) {
       console.error(err.message);
     }
   }
-  const lineKey = move === "welcome" ? "hello" : move === "ask" ? `ask_${c.slot}` : move === "conflict" ? "clash" : move === "none" ? "loosen" : move;
+  const lineKey = late && c.lateKey ? c.lateKey : move === "welcome" ? "hello" : move === "ask" ? `ask_${c.slot}` : move === "conflict" ? "clash" : move === "none" ? "loosen" : move;
   if (!text) text = personas.fallbackLine(room.persona, lineKey, ctx, room.said.filter((s) => !s.system).slice(-3).map((s) => s.text));
   const line = { id: id(4), text, move, at: now() };
   room.said.push(line);
   if (room.said.length > 20) room.said.shift();
   room.lastSaidAt = now();
-  track("sk_said", { sessionId: room.id, persona: room.persona, move, ai: usedAI, words: text.split(/\s+/).length });
+  track("sk_said", { sessionId: room.id, persona: room.persona, move, ai: usedAI, late: late || undefined, words: text.split(/\s+/).length });
   return line;
 }
 
@@ -575,7 +580,7 @@ function openingSlot(room) {
 function openingLine(room, person, slot) {
   const ctx = { ...lineContext(room, factsOf(room), { slot }), name: person.name };
   const back = room.said.some((x) => !x.system);
-  const key = room.status !== "live" || room.picks ? "agent_back_done" : back ? "agent_back" : P.crew(room).length < 2 ? "agent_solo" : "agent_hello";
+  const key = room.status !== "live" || (room.picks && room.picks.length) ? "agent_back_done" : back ? "agent_back" : P.crew(room).length < 2 ? "agent_solo" : "agent_hello";
   return personas.fallbackLine(room.persona, key, ctx);
 }
 const MOVE_HINT = {
@@ -659,10 +664,9 @@ async function think(room) {
 
 // Loads Google places for this call once: after the night is known and the vibe has been asked or
 // answered. At most SIDEKICK_PLACES_PER_CALL searches, and none once the usage cap is near.
+const placesDue = (room, f) => !room.placesTried && (room.nights.length === 1 || f.night.known) && (f.vibe.answered > 0 || room.asked.includes("vibe") || room.asked.length >= 3);
 async function ensurePlaces(room, f) {
-  if (room.placesTried) return;
-  if (!(room.nights.length === 1 || f.night.known)) return;
-  if (!(f.vibe.answered > 0 || room.asked.includes("vibe") || room.asked.length >= 3)) return;
+  if (!placesDue(room, f)) return;
   room.placesTried = true;
   if (!(await places.available())) return;
   // Near the crew: everyone's starting points so far (from the join card or the call)
@@ -673,12 +677,22 @@ async function ensurePlaces(room, f) {
     return a.origin.here && a.location ? { lat: a.location.lat, lng: a.location.lng } : a.origin.value;
   }).filter(Boolean);
   const out = await places.forCall(f.vibe.value || [], { origins });
+  if (room.picks || room.status !== "live") return; // too late: the picks went ahead without them (see decide)
   room.places = out.places;
   track("sk_places_loaded", { sessionId: room.id, persona: room.persona, n: out.places.length, capped: out.capped || null });
 }
 
-async function decide(room, { forcePicks = false } = {}) {
-  if (room.status !== "live" || room.picks) return;
+// Any "Finding your two picks" state that didn't lead to picks (the places changed the plan) goes away
+async function decide(room, opts = {}) {
+  try {
+    return await decideNow(room, opts);
+  } finally {
+    if (room.think && !room.picking) { endThinking(room); broadcast(room); }
+  }
+}
+
+async function decideNow(room, { forcePicks = false } = {}) {
+  if (room.status !== "live" || room.picks || room.picking) return;
   // The agent leads: no spoken check-in vote (people can still say "step back" or tap "sits back")
   if (room.agentMode && (!room.mode || room.mode === "voting")) {
     clearTimeout(room.modeTimer);
@@ -698,14 +712,24 @@ async function decide(room, { forcePicks = false } = {}) {
     room.wantMode = null;
     return setMode(room, m, "switch");
   }
-  await ensurePlaces(room, factsOf(room));
+  const f0 = factsOf(room);
+  if (placesDue(room, f0)) {
+    // The places search can take a while (up to 2 searches of 6 s). If the engine is about to make
+    // picks anyway, show the steps now and give the search only a short head start.
+    const pre = P.readiness([...upcoming(), ...(room.places || [])], room, f0);
+    if (pre.ready || (forcePicks && pre.pool >= 2)) {
+      startThinking(room, { placesPending: true });
+      await beforeDeadline(ensurePlaces(room, f0).catch((err) => console.error(err.message)), now() + THINK.placesMs());
+      setThinkStage(room, 1);
+    } else await ensurePlaces(room, f0);
+  }
   const events = [...upcoming(), ...(room.places || [])];
   const f = factsOf(room);
   const r = P.readiness(events, room, f);
   // The agent paces itself; the built-in voice keeps a gap between lines (a direct question skips it, above)
   const canSpeak = () => room.agentMode || !room.lastSaidAt || now() - room.lastSaidAt > MIN_GAP_MS;
 
-  if (forcePicks && room.offer) { acceptOffer(room); return decide(room, { forcePicks }); }
+  if (forcePicks && room.offer) { acceptOffer(room); return decideNow(room, { forcePicks }); }
   if (room.addressed) {
     const q = room.addressed;
     room.addressed = null;
@@ -825,8 +849,131 @@ function startTime(iso, spoken = false) {
   return spoken ? t.replace(/\s?[AP]M$/, "") : t;
 }
 
+// ---------- While Sidekick finds the picks: show the work ----------
+// Picks can take a while (places search, the AI choosing, the AI writing the line). Instead of silence,
+// the plan board turns into a short checklist with real numbers from the engine, Sidekick says how it's
+// going, and after about 12 s it stops waiting for the AI and shows the engine's own top two.
+// Steps and lines never carry a private answer: "everyone's budget", never an amount or an avoided area.
+const THINK = {
+  revealMs: () => Number(process.env.SIDEKICK_THINK_REVEAL_MS || 270), // faster than this: no checklist at all
+  stepMs: () => Number(process.env.SIDEKICK_THINK_STEP_MS || 450), // the board ticks at most one step this often
+  progressMs: () => Number(process.env.SIDEKICK_PROGRESS_MS || 3000), // "There's like 46 things on Saturday..."
+  stillMs: () => Number(process.env.SIDEKICK_STILL_MS || 10000), // "Still looking..."
+  giveUpMs: () => Number(process.env.SIDEKICK_PICKS_MAX_MS || 12000), // the engine's own top two
+  placesMs: () => Number(process.env.SIDEKICK_PLACES_WAIT_MS || 3000), // most the places search may hold up picks
+};
+const LATE = Symbol("late");
+// A promise's result, or LATE once the deadline (a time) passes. A late failure is swallowed.
+function beforeDeadline(promise, deadline) {
+  const p = Promise.resolve(promise);
+  p.catch(() => {});
+  const ms = deadline - now();
+  if (ms <= 0) return Promise.resolve(LATE);
+  let timer;
+  return Promise.race([p, new Promise((r) => { timer = setTimeout(() => r(LATE), ms); })]).finally(() => clearTimeout(timer));
+}
+const STEP_KEYS = ["look", "fit", "budget", "vibe", "choose"];
+const TIME_WORDS = { early: "in the afternoon", evening: "after 6", late: "after 8" };
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// The numbers the steps and lines use, straight from the engine
+function thinkNumbers(room) {
+  const f = factsOf(room);
+  const events = upcoming();
+  const all = [...events, ...(room.places || [])];
+  // What fits the night and time alone (no budget, area or trip limits, so nothing private shows)
+  const loose = { ...f, budget: { ...f.budget, value: null }, nos: { ...f.nos, value: [] }, origin: { ...f.origin, value: [] } };
+  const fit = P.filterEvents(all, room, loose);
+  const nights = f.night.known && f.night.value.length ? f.night.value : room.nights;
+  const night = nights.length === 1 ? spokenDay(P.nightLabel(nights[0])) : nights.map((d) => spokenDay(P.nightLabel(d))).join(" or ");
+  const time = f.time.known && f.time.value.length ? ["early", "evening", "late"].find((t) => f.time.value.includes(t)) : null;
+  const pool = P.filterEvents(all, room, f);
+  const hasPlace = pool.some((e) => e.type === "place"), hasEvent = pool.some((e) => e.type !== "place");
+  const one = f.kind && f.kind.known && f.kind.value.length === 1 ? f.kind.value[0] : null;
+  const mixed = hasPlace && hasEvent && one !== "events" && one !== "places";
+  return { events: events.length, places: (room.places || []).length, fit: fit.length, night, when: `${night}${time ? ` ${TIME_WORDS[time]}` : ""}`, choose: mixed ? "Choosing one show and one spot" : hasPlace && !hasEvent ? "Choosing your two spots" : "Choosing your two picks" };
+}
+function thinkLabels(room) {
+  const t = room.think;
+  const n = t.n;
+  const look = t.placesPending
+    ? `Checking ${plural(n.events, "event", "events")} and places nearby`
+    : `Checked ${plural(n.events, "event", "events")}${n.places ? ` and ${plural(n.places, "place", "places")}` : ""}`;
+  return { look, fit: `${n.fit} fit ${n.when}`, budget: "Keeping what fits everyone's budget", vibe: "Matching your vibes", choose: n.choose };
+}
+// The real stage: 0 looking (places), 1 to 2 filtering (instant), 3 the AI matching, 4 writing the line, 5 done.
+// What the board shows ("shown") follows it one step at a time, so it reads as live, never ahead of the work.
+function startThinking(room, { placesPending = false } = {}) {
+  if (room.think) return room.think;
+  const t = (room.think = { startedAt: now(), stage: placesPending ? 0 : 3, shown: 0, visible: false, placesPending, timers: [], said: [] });
+  t.n = thinkNumbers(room);
+  t.timers.push(setTimeout(() => { if (room.think === t) { t.visible = true; broadcast(room); } }, THINK.revealMs()));
+  t.timers.push(setInterval(() => {
+    if (room.think !== t || t.shown >= Math.min(t.stage, STEP_KEYS.length - 1)) return;
+    t.shown++;
+    if (t.visible) broadcast(room);
+  }, THINK.stepMs()));
+  t.timers.push(setTimeout(() => sayProgress(room, t, "progress"), THINK.progressMs()));
+  t.timers.push(setTimeout(() => sayProgress(room, t, "still"), THINK.stillMs()));
+  return t;
+}
+function setThinkStage(room, stage) {
+  const t = room.think;
+  if (!t) return;
+  t.stage = Math.max(t.stage, stage);
+  if (t.placesPending && stage > 0) { t.placesPending = false; t.n = thinkNumbers(room); if (t.visible) broadcast(room); } // now with the places count
+}
+function endThinking(room) {
+  const t = room.think;
+  if (!t) return;
+  for (const x of t.timers) { clearTimeout(x); clearInterval(x); }
+  room.think = null;
+}
+function thinkingView(room) {
+  const t = room.think;
+  if (!t || !t.visible) return null;
+  const labels = thinkLabels(room);
+  return { steps: STEP_KEYS.map((k, i) => ({ label: labels[k], state: i < t.shown ? "done" : i === t.shown ? "now" : "next" })), startedAt: t.startedAt };
+}
+// "There's like 46 things on Saturday..." (about 3 s), "Still looking..." (about 10 s), in the persona's
+// voice from the line book (no AI wait). With the ElevenLabs agent leading, the server doesn't speak: the
+// line goes to the agent as context (and get_picks / get_next_move return it), so the agent can say it.
+function progressLine(room, key, t = room.think) {
+  const n = t ? t.n : thinkNumbers(room);
+  return personas.fallbackLine(room.persona, key, { n: WORDS[n.fit] || String(n.fit), night: n.night }, room.said.filter((x) => !x.system).slice(-3).map((x) => x.text));
+}
+function sayProgress(room, t, key) {
+  if (room.think !== t || room.status !== "live") return;
+  const text = progressLine(room, key, t);
+  t.said.push({ key, text });
+  t.lastLine = text;
+  track("sk_thinking_line", { sessionId: room.id, persona: room.persona, key, agent: room.agentMode, secs: Math.round((now() - t.startedAt) / 1000) });
+  if (room.agentMode) {
+    agentNote(room, `[app] Still finding the two picks; the steps are on everyone's screens. If nobody's talking, say one short line like: "${text}"`);
+  } else {
+    room.said.push({ id: id(4), text, move: key, at: now() });
+    if (room.said.length > 20) room.said.shift();
+    room.lastSaidAt = now();
+  }
+  broadcast(room);
+}
+
 async function makePicks(room, list) {
-  room.picks = [];
+  if (room.picks || room.picking) return;
+  room.picks = []; // under way: nothing else asks or picks meanwhile (the view still shows no picks)
+  room.picking = true;
+  const t = startThinking(room);
+  const deadline = t.startedAt + THINK.giveUpMs();
+  try {
+    setThinkStage(room, 3);
+    await pickTwo(room, list, deadline);
+  } finally {
+    room.picking = false;
+    endThinking(room);
+  }
+}
+
+async function pickTwo(room, list, deadline) {
   const f = factsOf(room);
   const people = P.crew(room).map((p) => {
     const a = room.answers[p.id];
@@ -835,13 +982,18 @@ async function makePicks(room, list) {
   });
   const pool = list.slice(0, 25);
   let matches = [];
+  let late = false;
   try {
-    const out = await ai.match(people, pool, 2);
-    matches = out.matches || [];
+    const out = await beforeDeadline(ai.match(people, pool, 2), deadline);
+    if (out === LATE) late = true; // stop waiting: the engine's own ranking (by score) decides
+    else matches = (out && out.matches) || [];
   } catch (err) {
     console.error(err.message);
   }
+  matches = matches.filter((m) => pool.some((e) => e.id === m.id));
+  // The list is already ranked by the engine's score, and holds only what obeys every hard limit
   for (const e of pool) if (matches.length < 2 && !matches.some((m) => m.id === e.id)) matches.push({ id: e.id, reason: "", fits: {} });
+  setThinkStage(room, 4);
   // Unless the crew asked for only events or only places, show one of each when both fit: the
   // best event from the listings and the best place from Google, so the crew sees both options.
   const typeOf = (id) => ((pool.find((x) => x.id === id) || {}).type === "place" ? "place" : "event");
@@ -853,7 +1005,7 @@ async function makePicks(room, list) {
       matches[1] = { id: other.id, reason: "", fits: {} };
     }
   }
-  room.picks = matches.slice(0, 2).map((m) => {
+  const picks = matches.slice(0, 2).map((m) => {
     const e = pool.find((x) => x.id === m.id);
     if (e.type === "place") {
       const night = f.night.known && f.night.value.length ? f.night.value[0] : room.nights[0];
@@ -865,9 +1017,6 @@ async function makePicks(room, list) {
     // An event: a day and a start time, and a ticket price
     return { id: e.id, kind: "event", title: e.title, when: e.startsAt ? `${startDay(e.startsAt)} · starts ${startTime(e.startsAt)}` : e.date, stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `$${e.price} ticket` : "Price not listed", where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), startsAt: e.startsAt || null, reason: m.reason || "", fits: m.fits || {}, url: e.sourceUrl || null };
   });
-  room.card = null;
-  track("call_facts_complete", { sessionId: room.id, persona: room.persona, secs: Math.round((now() - room.createdAt) / 1000), questions: room.asked.length });
-  track("picks_shown", { sessionId: room.id, persona: room.persona, pool: list.length });
   const whyOf = (p) => {
     const e = pool.find((x) => x.id === p.id);
     if (e.type === "place") return [e.rating ? `rated ${e.rating}` : null, e.neighbourhood && `in ${e.neighbourhood}`, e.price != null ? `about ${e.price} dollars each` : null].filter(Boolean).join(", ");
@@ -875,8 +1024,16 @@ async function makePicks(room, list) {
     return [[vibe && vibe.toLowerCase(), e.neighbourhood && `in ${e.neighbourhood}`].filter(Boolean).join(" "), e.price === 0 ? "and it's free" : e.price != null ? `about ${e.price} dollars` : null].filter(Boolean).join(", ");
   };
   // Say out loud which is which: "one's a show at 7:30, the other's a bar you can drop into"
-  const kinds = personas.kindsLine(room.persona, room.picks.map((p) => ({ kind: p.kind, time: p.startsAt ? startTime(p.startsAt, true) : null, type: p.placeType })));
-  await speak(room, "picks", { kinds, why: room.picks.map(whyOf), short: room.picks.map((p) => cleanTitle(p.title)), picks: room.picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => room.picks.some((p) => p.id === e.id)) });
+  const kinds = personas.kindsLine(room.persona, picks.map((p) => ({ kind: p.kind, time: p.startsAt ? startTime(p.startsAt, true) : null, type: p.placeType })));
+  // The line is written before the cards go up, so both land together. Past the deadline it's the
+  // line book's plain "here's what I've got so far" with the two names.
+  await speak(room, "picks", { kinds, why: picks.map(whyOf), short: picks.map((p) => cleanTitle(p.title)), picks: picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => picks.some((p) => p.id === e.id)), deadline, late, lateKey: "fallback" });
+  if (room.status !== "live") return;
+  room.picks = picks;
+  room.card = null;
+  broadcast(room); // the cards replace the steps now, even when a tool started this and stopped waiting
+  track("call_facts_complete", { sessionId: room.id, persona: room.persona, secs: Math.round((now() - room.createdAt) / 1000), questions: room.asked.length });
+  track("picks_shown", { sessionId: room.id, persona: room.persona, pool: list.length, waitMs: room.think ? now() - room.think.startedAt : 0, engine: late || undefined });
 }
 
 // ---------- Ending, saving the summary ----------
@@ -953,7 +1110,7 @@ function slotOptions(room, person, slot) {
 }
 function cardFor(room, person) {
   const mine = room.answers[person.id] || {};
-  if (room.status !== "live" || room.picks) return null;
+  if (room.status !== "live" || room.picks || room.think) return null; // no question while the picks are found
   if (room.mode === "voting") {
     const votes = {};
     for (const [pid, v] of Object.entries(room.modeVotes)) { const who = room.people.find((x) => x.id === pid); if (who) votes[v] = [...(votes[v] || []), initial(who.name)]; }
@@ -1006,7 +1163,8 @@ function viewFor(room, pid) {
     mode: room.mode,
     modeCloseAt: room.mode === "voting" ? room.modeCloseAt || null : null,
     sidekick: room.said.slice(-3),
-    picks: room.picks,
+    picks: room.picks && room.picks.length ? room.picks : null, // [] while they're being found
+    thinking: thinkingView(room), // "Finding your two picks": { steps: [{ label, state }], startedAt }, or null
     votes,
     myVote: me ? room.votes[me.id] || null : null,
     locked: room.locked,
@@ -1260,7 +1418,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     }
     if (action === "lock") {
       if (person.role !== "planner") return sendJSON(res, 403, { error: "Only the planner can lock the plan." });
-      if (!room.picks) return sendJSON(res, 400, { error: "No picks yet." });
+      if (!room.picks || !room.picks.length) return sendJSON(res, 400, { error: "No picks yet." });
       const tally = {};
       for (const ev of Object.values(room.votes)) tally[ev] = (tally[ev] || 0) + 1;
       const chosen = Number(body.eventId) || Number(Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0]) || room.picks[0].id;
@@ -1331,22 +1489,41 @@ function planState(room) {
     } : null,
     answer_options: Object.fromEntries(PUBLIC_SLOTS.filter((s) => s !== "kind" || (room.places && room.places.length)).map((s) => [s, P.optionsFor(s, room).map(([, l]) => l)])),
     mode: room.mode === "sidelines" ? "sitting back (stay quiet unless someone says Sidekick)" : "leading",
-    picks: room.picks ? room.picks.map((x) => ({ title: x.title, kind: x.kind, when: x.when, price: x.price, where: x.where, reason: x.reason || undefined })) : null,
+    picks: room.picks && room.picks.length ? room.picks.map((x) => ({ title: x.title, kind: x.kind, when: x.when, price: x.price, where: x.where, reason: x.reason || undefined })) : null,
     locked: room.locked ? room.locked.title : null,
   };
 }
 
 // The move the agent should make now, from the engine (run after any lines it hasn't read yet)
+// Finding the picks can take a while: tools answer within about 2.5 s with how it's going instead of
+// holding the agent's turn (a note tells the agent when the picks are on screen).
+const TOOL_WAIT_MS = 2500;
+const settle = (p, ms) => beforeDeadline(p, now() + ms);
+async function waitUntil(fn, ms) {
+  const end = now() + ms;
+  while (!fn() && now() < end) await new Promise((r) => setTimeout(r, 50));
+}
+function findingPicks(room) {
+  const t = room.think;
+  const labels = t ? thinkLabels(room) : null;
+  return {
+    next_move: "finding_picks",
+    what_to_do: "The app is finding the two picks; the steps are on everyone's screens. Say one short progress line like the example (never a budget amount or an avoided area), then wait: a note tells you when the picks are on screen.",
+    example_line: (t && t.lastLine) || progressLine(room, "progress"),
+    progress: labels ? STEP_KEYS.map((k, i) => `${i < t.shown ? "done" : i === t.shown ? "now" : "next"}: ${labels[k]}`) : undefined,
+  };
+}
 async function nextMove(room) {
   clearTimeout(room.timer);
   for (let i = 0; room.thinking && i < 60; i++) await new Promise((r) => setTimeout(r, 50));
-  if (room.pending.length) await think(room);
-  else { await decide(room); broadcast(room); }
+  if (room.pending.length) await settle(think(room), TOOL_WAIT_MS);
+  else { await settle(decide(room), TOOL_WAIT_MS); broadcast(room); }
   const st = planState(room);
   const fresh = room.nextMove && !room.nextMove.read ? room.nextMove : null;
   if (fresh) fresh.read = true;
   let move;
-  if (room.locked) move = { next_move: "locked", what_to_do: `The plan is locked: ${cleanTitle(room.locked.title)}. If you haven't yet, confirm it in one sentence and point to the two quick survey questions on screen. Otherwise stay quiet (skip_turn).` };
+  if (room.picking || (room.think && !(room.picks && room.picks.length))) move = findingPicks(room);
+  else if (room.locked) move = { next_move: "locked", what_to_do: `The plan is locked: ${cleanTitle(room.locked.title)}. If you haven't yet, confirm it in one sentence and point to the two quick survey questions on screen. Otherwise stay quiet (skip_turn).` };
   else if (room.picks) move = { next_move: "present_picks", what_to_do: fresh && fresh.move === "picks" ? fresh.todo : "The two picks are on everyone's screens. If you haven't presented them, do it now with one reason each and ask everyone to vote in the app. Otherwise answer questions about them, using only the pick details.", example_line: fresh && fresh.move === "picks" ? fresh.example : undefined };
   else if (room.mode === "sidelines") move = { next_move: "stay_quiet", what_to_do: "The crew asked you to sit back. Stay quiet (skip_turn) unless someone says Sidekick." };
   else if (fresh && fresh.move !== "ask" && fresh.move !== "welcome") move = { next_move: fresh.move, what_to_do: fresh.todo, example_line: fresh.example };
@@ -1395,9 +1572,16 @@ async function runTool(room, tool, body) {
     return ok({ recorded: updates.length, skipped: skipped.length ? skipped : undefined, ...move });
   }
   if (tool === "get_picks") {
-    if (!room.picks && room.status === "live") await decide(room, { forcePicks: true });
+    const out = () => room.picks && room.picks.length;
+    if (!out() && room.status === "live") {
+      const end = now() + TOOL_WAIT_MS;
+      await beforeDeadline(decide(room, { forcePicks: true }), end);
+      await waitUntil(() => out() || !room.picking, end - now());
+    }
     broadcast(room);
-    return ok(room.picks ? planState(room) : { ...planState(room), note: "Not enough to suggest picks yet. Ask the open question first." });
+    if (out()) return ok(planState(room));
+    if (room.picking || room.think) return ok({ ...planState(room), ...findingPicks(room), note: "Still finding the two picks. Say the progress line now; a note will tell you when they're on screen." });
+    return ok({ ...planState(room), note: "Not enough to suggest picks yet. Ask the open question first." });
   }
   if (tool === "show_private_card") {
     if ((body.slot || "budget") !== "budget") return { status: 400, body: { error: "Only the budget card can be shown." } };
@@ -1420,4 +1604,4 @@ function init({ events }) {
   eventsSource = events;
 }
 
-module.exports = { init, handle, preview, BOOT, _test: { rooms, createRoom, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, QUIET_MS, QUIET_ASKED_MS } };
+module.exports = { init, handle, preview, BOOT, _test: { rooms, createRoom, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS } };

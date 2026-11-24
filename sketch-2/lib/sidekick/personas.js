@@ -101,6 +101,11 @@ const LINES = {
     agent_solo: ["Hey {name}, Sidekick here. Send the link to the crew. While they hop on, {question}", "Hey {name}! I'm on. Share the invite, and in the meantime, {question}"],
     agent_back: ["Okay, I'm back. Picking up where we left off: {question}", "Alright, I'm here. So, {question}"],
     agent_back_done: ["Hey, I'm back. Your picks are on screen. Want me to run through them?"],
+    // While the picks are being found (about 3 s in, about 10 s in, and the 12 s fallback). {n} is a
+    // real count from the engine; never a private answer (no amounts, no avoided areas).
+    progress: ["There's like {n} things on {night}. Cutting the ones that don't work for everyone.", "Okay, {n} options on {night}. Narrowing it down to what works for all of you."],
+    still: ["Still looking, there's a lot on {night}. Hang tight.", "Almost there, there's a lot on {night}. Two secs."],
+    fallback: ["Taking forever, so here's what I've got so far. {pick1}, or {pick2}. Which one?", "This is slow, so here's what I've got so far: {pick1}, or {pick2}. Vote away."],
   },
   concierge: {
     checkin: ["Hi everyone, welcome to SideQuest. This call is for planning your next night out. Would you like me to lead the planning, or stay in the background while you fill in the plan?", "Welcome to SideQuest, everyone. Shall I guide the planning, or would you prefer to fill in the plan yourselves while I stay in the background?"],
@@ -129,6 +134,9 @@ const LINES = {
     agent_solo: ["Hello {name}, I'm Sidekick. Share the link with your crew, and while they join, {question}", "Hi {name}. I'm here whenever your crew joins. To get us started, {question}"],
     agent_back: ["I'm back with you. Let's continue. {question}", "Here again. Where were we: {question}"],
     agent_back_done: ["I'm back. Your two options are on screen. Would you like me to go through them?"],
+    progress: ["I've found {n} options for {night}. Removing anything that doesn't suit the group.", "There are {n} options for {night}. I'm narrowing them to what suits everyone."],
+    still: ["This is taking a little longer than usual. Thank you for waiting.", "Still checking the options for {night}. Thank you for your patience."],
+    fallback: ["Rather than keep you waiting, here are the two strongest so far. {pick1}, or {pick2}. Take your time.", "So you're not kept waiting, here are the two strongest so far: {pick1}, or {pick2}."],
   },
 };
 // Old persona ids still resolve (rooms made before the rename, saved links with ?persona=)

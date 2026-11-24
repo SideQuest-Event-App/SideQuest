@@ -409,7 +409,8 @@
     if (view.mode !== lastMode) { lastMode = view.mode; if (phase === next) renderDock(); }
     if (next !== phase) {
       phase = next;
-      app.innerHTML = `<div id="top"></div><div id="say"></div><div id="body" class="stack"></div><div id="ticks" class="stack"></div><div class="dock" id="dock"></div>`;
+      landed = phase === "picks" && Boolean(lastThinking); // the steps give way to the cards
+      app.innerHTML = `<div id="top"></div><div id="say"></div><div id="body" class="stack"></div><div id="ticks" class="stack"></div><p class="sr" id="thinkLive" aria-live="polite"></p><div class="dock" id="dock"></div>`;
       watchDock();
       renderDock();
     }
@@ -452,9 +453,33 @@
 
   function boardHead(extra = "") {
     const dots = [0, 1, 2, 3, 4].map((i) => `<span class="dot ${i < view.known ? "done" : ""}"></span>`).join("");
-    return `<div class="bh"><span class="row"><span class="orb ${listening() ? "live" : ""}"></span><h2 style="font-size:15px">${esc(view.crew)}'s plan</h2></span>${extra || `<span class="dots" role="img" aria-label="${view.known} of 5 known">${dots}</span>`}</div>`;
+    return `<div class="bh"><span class="row"><span class="orb ${orbState()}"></span><h2 style="font-size:15px">${esc(view.crew)}'s plan</h2></span>${extra || `<span class="dots" role="img" aria-label="${view.known} of 5 known">${dots}</span>`}</div>`;
   }
   const listening = () => phase === "call" && view.mode === "lead" && view.status === "live";
+  const thinking = () => phase === "call" && view.thinking && view.thinking.steps && view.thinking.steps.length ? view.thinking : null;
+  const orbState = () => (thinking() ? "think" : listening() ? "live" : "");
+
+  // "Finding your two picks": the board becomes a checklist that ticks off as the engine works.
+  // A step that just changed gets a short opacity and position change (none with reduced motion).
+  let lastThinking = null;
+  let landed = false;
+  const STEP_ICON = { done: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>', now: '<i aria-hidden="true"></i>', next: "" };
+  const STEP_SR = { done: "done", now: "in progress", next: "next" };
+  function thinkingHTML(t) {
+    const before = lastThinking && lastThinking.startedAt === t.startedAt ? lastThinking.steps : [];
+    const steps = t.steps.map((s, i) => {
+      const changed = before.length && (!before[i] || before[i].state !== s.state);
+      return `<li class="step ${s.state} ${changed ? "tick" : ""}"><span class="si">${STEP_ICON[s.state] || ""}</span><span class="sl">${esc(s.label)}</span><span class="sr">, ${STEP_SR[s.state] || ""}</span></li>`;
+    }).join("");
+    return `<div class="board thinking" aria-busy="true">${boardHead('<span class="tag pri">Thinking</span>')}<div class="steps-wrap"><h2 class="steps-h">Finding your two picks</h2><ol class="steps">${steps}</ol></div></div>`;
+  }
+  function announceThinking(t) {
+    const live = document.getElementById("thinkLive");
+    if (!live) return;
+    const now = t && t.steps.find((s) => s.state === "now");
+    const text = now ? now.label : "";
+    if (live.textContent !== text) live.textContent = text;
+  }
   const avStack = (vs) => (vs.length ? `<span class="stk">${vs.map((v) => `<span class="av xs c${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(v) % 6}">${esc(v)}</span>`).join("")}</span>` : "");
 
   function cardHTML(card, label) {
@@ -553,6 +578,15 @@
 
   function renderCall() {
     const body = document.getElementById("body");
+    const t = thinking();
+    if (t) {
+      body.innerHTML = thinkingHTML(t);
+      lastThinking = t;
+      announceThinking(t);
+      renderTicks();
+      return;
+    }
+    if (lastThinking) { lastThinking = null; announceThinking(null); }
     if (voting()) {
       body.innerHTML = renderVote(view.card);
       runCountdown();
@@ -625,8 +659,12 @@
     const lock = view.me.planner
       ? `<button class="btn pri" id="lock" ${Object.keys(view.votes).length ? "" : "disabled"}>Lock in the plan</button>`
       : `<p class="small center">${esc(view.people.find((p) => p.planner)?.name || "The planner")} locks it in once you've voted.</p>`;
-    document.getElementById("body").innerHTML = `<div class="board">${boardHead('<span class="tag ok">All set</span>')}<p class="small" style="padding:0 14px 12px;color:var(--t2)">${esc(summary)}</p></div>
-      <div class="q" style="border-radius:22px;border:1px solid var(--pri-e)"><span class="small">${mixed ? "A show to go to, or a spot to drop in. Tap one to vote." : "Two picks fit everyone · tap one to vote"}</span>${picks}</div>
+    const land = landed ? " land" : "";
+    if (landed) setTimeout(() => { landed = false; }, 400);
+    lastThinking = null;
+    announceThinking(null);
+    document.getElementById("body").innerHTML = `<div class="board${land}">${boardHead('<span class="tag ok">All set</span>')}<p class="small" style="padding:0 14px 12px;color:var(--t2)">${esc(summary)}</p></div>
+      <div class="q${land}" style="border-radius:22px;border:1px solid var(--pri-e)"><span class="small">${mixed ? "A show to go to, or a spot to drop in. Tap one to vote." : "Two picks fit everyone · tap one to vote"}</span>${picks}</div>
       <p class="small">Picked for your crew's budget, distance and vibe. Venues can't pay to appear here.</p>
       ${lock}`;
     renderTicks();
@@ -666,7 +704,7 @@
     const fresh = !last.system && !sitting && Date.now() - last.at < 20000;
     clearTimeout(sayTimer);
     if (fresh) sayTimer = setTimeout(() => view && renderSay(), 20000 - (Date.now() - last.at) + 50);
-    el.innerHTML = `<div class="say ${fresh ? "new" : ""} ${last.system ? "sys" : ""}"><span class="orb sm ${listening() ? "live" : ""}"></span><div class="say-t"><span class="say-l">${sitting ? "Sidekick is sitting back" : "SIDEKICK"}</span><p>${esc(last.text)}</p></div></div>`;
+    el.innerHTML = `<div class="say ${fresh ? "new" : ""} ${last.system ? "sys" : ""}"><span class="orb sm ${orbState()}"></span><div class="say-t"><span class="say-l">${sitting ? "Sidekick is sitting back" : "SIDEKICK"}</span><p>${esc(last.text)}</p></div></div>`;
   }
 
   function renderDock() {

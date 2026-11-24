@@ -171,3 +171,24 @@ label.f{display:flex;flex-direction:column;gap:6px;font-weight:600}
 .pk-link{display:inline-flex;align-items:center;min-height:44px;padding:0 18px;border-radius:999px;font-weight:600;font-size:14px;text-decoration:none}
 .ev .pk-link{background:var(--pri-t);color:var(--acc)}
 .pl .pk-link{background:var(--soc-t);color:var(--soc-x)}
+
+/* "Finding your two picks": the plan board turns into steps while Sidekick works (design T2) */
+.orb.think{animation:think 1.6s ease-in-out infinite} /* a gentle pulse while it thinks; still with reduced motion */
+@keyframes think{50%{transform:scale(1.08);box-shadow:0 0 0 5px rgba(169,122,242,.18)}}
+.steps-wrap{padding:2px 14px 14px;display:flex;flex-direction:column;gap:10px}
+.steps-h{font-size:15px;line-height:20px}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.step{display:flex;gap:10px;align-items:center;font-size:14px;line-height:20px;color:var(--t1)}
+.step .si{width:22px;height:22px;border-radius:999px;display:grid;place-items:center;flex:none}
+.step.done .sl{color:var(--t2)}
+.step.done .si{background:var(--ok-t);color:var(--ok)}
+.step.now .sl{font-weight:500}
+.step.now .si{background:var(--pri-t);box-shadow:0 0 0 4px rgba(169,122,242,.18)}
+.step.now .si i{width:8px;height:8px;border-radius:999px;background:var(--acc)}
+.step.next .sl{color:var(--t3)}
+.step.next .si{background:var(--raise)}
+.step.tick{animation:tick .22s var(--ease)}
+@keyframes tick{from{opacity:.4;transform:translateY(3px)}}
+/* the steps give way to the picks */
+.land{animation:land .28s var(--ease)}
+@keyframes land{from{opacity:0;transform:translateY(8px)}}
