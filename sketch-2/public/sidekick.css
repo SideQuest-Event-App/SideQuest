@@ -36,7 +36,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-weight:600}
 .orb.live{animation:breathe 2.4s var(--ease) infinite} /* only while Sidekick is listening (leading a live call) */
 @keyframes breathe{50%{transform:scale(1.1)}}
 .av{position:relative;width:30px;height:30px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:12px;color:#13101b;flex:none}
-.av.xs{width:22px;height:22px;font-size:10px}
+.av.xs{width:22px;height:22px;font-size:12px}
 .av.talk{box-shadow:0 0 0 2px var(--base),0 0 0 4px var(--soc)}
 .av.away{opacity:.45}
 .c0{background:#c2a5f6}.c1{background:#82dcec}.c2{background:#f5a8d3}.c3{background:#f2c94c}.c4{background:#6cc48a}.c5{background:#f2a65a}
@@ -53,7 +53,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-weight:600}
 .r{display:grid;grid-template-columns:96px minmax(0,1fr);gap:4px 10px;padding:10px 14px;border-top:1px solid rgba(255,255,255,.08);align-items:baseline}
 .r dt{font-size:12px;color:var(--t3)}
 .r dd{margin:0;font-weight:600}
-.r .who{grid-column:2;font-size:11px;color:var(--soc-x);font-weight:500}
+.r .who{grid-column:2;font-size:12px;color:var(--soc-x);font-weight:500}
 .r.todo dd{color:var(--t3);font-weight:500}
 .r.priv-row .who{color:var(--acc)}
 .r.conflict dd{color:var(--hot-x)}
@@ -192,3 +192,39 @@ label.f{display:flex;flex-direction:column;gap:6px;font-weight:600}
 /* the steps give way to the picks */
 .land{animation:land .28s var(--ease)}
 @keyframes land{from{opacity:0;transform:translateY(8px)}}
+
+/* A conversation, not a form: progress the way the talk goes, "what I heard" chips, voice-first cards,
+   the typed chat thread with quick replies, and the closing recap */
+.prog{display:flex;align-items:center;gap:6px;font-size:12px;line-height:16px;font-weight:500;color:var(--t3);white-space:nowrap}
+.pg.done{color:var(--ok)}
+.pg.now{color:var(--t1);font-weight:600}
+.pg-sep{color:var(--t3)}
+.heard{display:flex;flex-wrap:wrap;gap:8px;padding:0 14px 12px}
+.hc{display:inline-flex;align-items:center;gap:2px;min-height:44px;padding:0 4px 0 12px;border-radius:999px;background:var(--soc-t);color:var(--t1);font-size:13px}
+.hc.new{animation:hc-in .22s var(--ease)}
+.hc b{color:var(--soc-x);font-weight:600}
+.hc-x{width:36px;height:36px;margin:4px 0;border-radius:999px;display:grid;place-items:center;color:var(--soc-x);position:relative}
+.hc-x::after{content:"";position:absolute;inset:-4px} /* a 44 px target */
+.hc-x svg{width:14px;height:14px}
+@keyframes hc-in{from{opacity:0;transform:translateY(4px)}}
+.plan-toggle{display:flex;align-items:center;min-height:44px;width:100%;padding:0 14px;border-top:1px solid rgba(255,255,255,.08);font-size:13px;font-weight:600;color:var(--acc)}
+.q.listen{animation:none}
+.q.listen h2{color:var(--t1)}
+.q.reveal{animation:card-in .3s var(--ease)}
+@keyframes card-in{from{opacity:0}}
+.chat{display:flex;flex-direction:column;gap:8px}
+.thread{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto}
+.msg{display:flex;flex-direction:column;gap:2px;max-width:86%;padding:8px 12px;border-radius:16px;background:var(--surf);font-size:14px;line-height:20px}
+.msg-who{font-size:12px;line-height:16px;font-weight:600;color:var(--soc-x)}
+.msg.sk{background:#241a3a;border:1px solid var(--pri-e);border-bottom-left-radius:6px}
+.msg.sk .msg-who{color:var(--acc)}
+.msg.me{align-self:flex-end;background:var(--pri-t);border-bottom-right-radius:6px}
+.msg.me .msg-who{color:var(--acc)}
+.msg.them{border-bottom-left-radius:6px}
+.msg.sys{color:var(--t2);max-width:100%}
+.chips.quick .chip{font-size:14px}
+.recap-b{padding:0 14px 16px}
+.recap-k{color:var(--acc);font-weight:600}
+.recap-who{color:var(--t2)}
+.recap-act{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.recap-act .btn{width:100%;padding:0 12px}

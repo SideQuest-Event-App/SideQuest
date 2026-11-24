@@ -1,0 +1,70 @@
+{
+  "savedAt": "2026-11-24T18:02:29.899Z",
+  "keywords": {
+    "a_reflect_pct": 26,
+    "b_repeats": 0,
+    "c_avg_words": 16.5,
+    "c_over_2_sentences": 20,
+    "d_multi_question": 6,
+    "e_named_pct": 0,
+    "f_picks_ok_pct": 0,
+    "g_private_leaks": 3,
+    "h_opener_ok_pct": 25,
+    "turns": 42
+  },
+  "fakeAI": {
+    "a_reflect_pct": 13,
+    "b_repeats": 0,
+    "c_avg_words": 7.7,
+    "c_over_2_sentences": 5,
+    "d_multi_question": 0,
+    "e_named_pct": 0,
+    "f_picks_ok_pct": 0,
+    "g_private_leaks": 0,
+    "h_opener_ok_pct": 0,
+    "turns": 42
+  },
+  "all": {
+    "a_reflect_pct": 19,
+    "b_repeats": 0,
+    "c_avg_words": 12.1,
+    "c_over_2_sentences": 25,
+    "d_multi_question": 6,
+    "e_named_pct": 0,
+    "f_picks_ok_pct": 0,
+    "g_private_leaks": 3,
+    "h_opener_ok_pct": 13,
+    "turns": 84,
+    "checkin_opener_ok": false
+  },
+  "samples": {
+    "friend": [
+      "Sidekick: Hey, y'all, let's get the ball rolling for our next side quest. What day works best for everyone?",
+      "Maya: Saturday works for me, anything after 6",
+      "Jay: sat is good, after 6 too",
+      "Sidekick: Okay, two good ones, and both are shows: Dumb Crush, indie gigs in Little Italy, about 28 dollars. Or 54.40. Vote away.",
+      "Asia: same, I'd love live music",
+      "Jay: live music works"
+    ],
+    "concierge": [
+      "Sidekick: Hi everyone, I'm Sidekick. I'll keep track, so you can just talk. Which night works best?",
+      "Maya: Saturday works for me, anything after 6",
+      "Jay: sat is good, after 6 too",
+      "Sidekick: I've found two that suit everyone; both are ticketed shows. Dumb Crush, indie gigs in Little Italy, about 28 dollars. Or 54.40, indie gigs in Danforth. Take your time.",
+      "Asia: same, I'd love live music",
+      "Jay: live music works"
+    ]
+  },
+  "openers": [
+    {
+      "persona": "friend",
+      "line": "Hey y'all, welcome to SideQuest! This is your call to plan the next night out. Want me to jump in and run the planning, or hang back while you fill in the plan yourselves?",
+      "ok": false
+    },
+    {
+      "persona": "concierge",
+      "line": "Welcome to SideQuest, everyone. Shall I guide the planning, or would you prefer to fill in the plan yourselves while I stay in the background?",
+      "ok": false
+    }
+  ]
+}

@@ -10,6 +10,7 @@ const path = require("path");
 const P = require("./plan");
 const factsOf = (room) => Object.assign(P.facts(room), { relax: room.relax });
 const personas = require("./personas");
+const talk = require("./talk");
 const claude = require("./claude");
 const ai = require("../ai");
 const places = require("./places");
@@ -22,6 +23,7 @@ const QUIET_MS = 900; // wait this long after the last line before thinking, so 
 const QUIET_ASKED_MS = 400; // shorter when someone just spoke to Sidekick ("Sidekick, ..."): they're waiting on it
 const MIN_GAP_MS = 5000; // at least this long between Sidekick's lines, unless someone asks it something
 const NUDGE_AFTER_MS = 20000;
+const SILENT_MS = () => Number(process.env.SIDEKICK_SILENT_MS || 20000); // quiet this long in the call: invited in by name, once
 const IDLE_MS = 3 * 3600 * 1000;
 const PROMPTS = { night: "Which night works?", time: "What time works?", origin: "Where are you starting from?", vibe: "What kind of night?", budget: "Your max for the night?", nos: "Anything that's a no?", kind: "A ticketed event, or just somewhere good to go?" };
 
@@ -71,6 +73,10 @@ function createRoom({ crew, planner, nights, persona }) {
     modeVotes: {},
     modeHow: null,
     signalQueue: new Map(), // in-app audio signalling for people whose stream is reconnecting
+    heard: [], // public facts as they land, with names, for saying back and the "what I heard" chips (memory only)
+    unclear: null, // one person's unclear answer ("maybe Friday, or Saturday?"), asked about by name
+    aside: null, // off-topic chatter to react to briefly before steering back
+    invited: {}, // people invited in by name after going quiet (once each)
   };
   if (!room.nights.length) room.nights = suggestNights().slice(0, 2).map((n) => n.date);
   rooms.set(room.id, room);
@@ -111,7 +117,9 @@ function setAnswer(room, person, slot, value, source) {
   const valid = P.optionsFor(slot, room).map(([v]) => v);
   let v = def.multi ? [].concat(value).map(String).filter((x) => valid.includes(x)) : valid.includes(String(value)) ? String(value) : null;
   if (v == null || (Array.isArray(v) && !v.length && slot !== "nos")) return false;
+  const prev = room.answers[person.id][slot];
   room.answers[person.id][slot] = { value: v, source, at: now() };
+  noteHeard(room, person, slot, prev, source);
   track("response_submitted", { sessionId: room.id, persona: room.persona, slot, source, visibility: def.private ? "private" : "group" });
   return true;
 }
@@ -135,9 +143,31 @@ function setOrigin(room, person, value, source) {
     if (!mine.location) return false;
     loc = mine.location;
   } else if (!P.optionsFor("origin", room).some(([v]) => v === String(value))) return false;
+  const prev = mine.origin;
   mine.origin = loc ? { value: loc.station, here: true, near: loc.near, source, at: now() } : { value: String(value), source, at: now() };
   track("response_submitted", { sessionId: room.id, persona: room.persona, slot: "origin", source, visibility: "group" });
+  noteHeard(room, person, "origin", prev, source);
   return true;
+}
+// A public answer that changed: kept (in memory, this call only) so Sidekick can say it back with the
+// person's name, and so a "what I heard" chip can show it with an undo. Private slots never get here.
+function noteHeard(room, person, slot, prev, source) {
+  if (!talk.PUBLIC.includes(slot)) return;
+  const a = room.answers[person.id][slot];
+  if (!a) return;
+  if (prev && JSON.stringify(prev.value) === JSON.stringify(a.value) && Boolean(prev.here) === Boolean(a.here)) return;
+  const values = [].concat(a.value);
+  room.heard.push({ id: id(4), pid: person.id, name: person.name, slot, values, here: Boolean(a.here), label: a.here ? "their location" : talk.chipLabel(room, slot, values), source, at: a.at, prev: prev || null });
+  if (room.heard.length > 40) room.heard.shift();
+}
+// Take back a heard answer (the chip's undo): the person's answer goes back to what it was
+function unhear(room, h) {
+  const cur = (room.answers[h.pid] || {})[h.slot];
+  if (cur && cur.at === h.at) {
+    if (h.prev) room.answers[h.pid][h.slot] = h.prev;
+    else delete room.answers[h.pid][h.slot];
+  }
+  h.undone = true;
 }
 // A person's own answers as their phone may see them: no coordinates, just whether they shared
 function ownAnswers(answers) {
@@ -338,6 +368,11 @@ const FACTS_TOOL = {
           required: ["person", "slot", "values", "confidence"],
         },
       },
+      unclear: {
+        type: "array",
+        description: "Someone gave two options for one fact and it isn't clear which they meant (\"maybe Friday, or Saturday?\"). List them here instead of in updates. \"Friday or Saturday both work\" is clear: that goes in updates.",
+        items: { type: "object", properties: { person: { type: "string" }, slot: { type: "string", enum: ["night", "time"] }, values: { type: "array", items: { type: "string" } } }, required: ["person", "slot", "values"] },
+      },
       addressed_sidekick: { type: "boolean", description: "True if someone spoke to Sidekick directly" },
       question: { type: "string", description: "If someone asked Sidekick something, the question in a few words; else empty" },
     },
@@ -365,6 +400,7 @@ const HOME = /\b(i'?m at home|at home|from home|leaving from home|where i am|whe
 // No AI: simple keyword reading, good enough to test the flow
 function extractKeywords(room, lines) {
   const updates = [];
+  const unclear = [];
   let addressed = false;
   for (const l of lines) {
     const t = l.text.toLowerCase();
@@ -375,7 +411,10 @@ function extractKeywords(room, lines) {
       if (!re.test(t)) return false;
       return !new RegExp(`(not|no|can'?t|bad) +(\\w+ +){0,2}(${wd}|${wd.slice(0, 3)})\\b|\\b(${wd}|${wd.slice(0, 3)}) +(\\w+ +){0,2}(is bad|doesn'?t work|no good|is out)`).test(t);
     });
-    add("night", days);
+    // "maybe Friday, or Saturday?": ask that person about just that, instead of guessing
+    const unsure = talk.unclearNight(room, l.text);
+    if (unsure) unclear.push({ person: l.name, slot: "night", values: unsure });
+    else add("night", days);
     const times = [];
     if (/after (5|6|7|five|six|seven)\b|evening|dinner/.test(t)) times.push("evening");
     if (/after (8|9|10|eight|nine|ten)\b|late/.test(t)) times.push("late");
@@ -387,9 +426,10 @@ function extractKeywords(room, lines) {
     const o = /union|downtown/.test(t) ? "union" : /finch|north york/.test(t) ? "finch" : /kennedy|scarborough/.test(t) ? "kennedy" : /kipling|etobicoke/.test(t) ? "kipling" : HOME.test(t) ? "here" : null;
     if (o) add("origin", [o]);
     const vibes = [];
+    const tv = t.replace(/\b(leafs|raptors|jays|hockey|basketball|the|that|last night'?s?)\s+games?\b/g, " "); // "the leafs game" isn't a games night
     if (/music|jazz|band|gig|concert/.test(t)) vibes.push("music");
     if (/comedy|stand-?up/.test(t)) vibes.push("comedy");
-    if (/games?|trivia|arcade/.test(t)) vibes.push("games");
+    if (/games?|trivia|arcade/.test(tv)) vibes.push("games");
     if (/danc|club/.test(t)) vibes.push("dance");
     if (/\bart\b|gallery|film|movie/.test(t)) vibes.push("arts");
     add("vibe", vibes);
@@ -397,7 +437,7 @@ function extractKeywords(room, lines) {
     add("nos", nos);
     if (/\bside ?kick\b/.test(t)) addressed = true;
   }
-  return { updates, addressed_sidekick: addressed, question: addressed ? lines[lines.length - 1].text : "" };
+  return { updates, unclear, addressed_sidekick: addressed, question: addressed ? lines[lines.length - 1].text : "" };
 }
 
 function applyUpdates(room, out, lines) {
@@ -412,6 +452,11 @@ function applyUpdates(room, out, lines) {
     if (u.slot === "nos") values = [...new Set([...((room.answers[person.id].nos || {}).value || []), ...values])];
     const ok = setAnswer(room, person, u.slot, def.multi ? values : values[0], line && line.kind === "typed" ? "call_text" : "call_speech");
     if (!ok && u.slot === "origin" && values[0] === "here") room.askOrigin = true; // they didn't share it: ask the usual card
+  }
+  for (const u of out.unclear || []) {
+    const person = P.crew(room).find((p) => p.name.toLowerCase() === String(u.person || "").toLowerCase());
+    const values = (u.values || []).map(String).filter((v) => P.optionsFor(u.slot, room).some(([x]) => x === v));
+    if (person && P.SLOTS[u.slot] && !P.SLOTS[u.slot].private && values.length >= 2) room.unclear = { pid: person.id, name: person.name, slot: u.slot, values, at: now() };
   }
 }
 
@@ -434,12 +479,15 @@ function eventBrief(e, origins) {
 async function speak(room, move, c = {}) {
   const f = factsOf(room);
   const people = P.crew(room);
+  c = { ...c, ...talkFor(room, move, c, f) };
   const ctx = lineContext(room, f, c);
+  const keyOf = (late) => (late && c.lateKey ? c.lateKey : move === "welcome" ? "hello" : move === "ask" ? `ask_${c.slot}` : move === "conflict" ? "clash" : move === "none" ? "loosen" : move);
+  const recentSaid = room.said.filter((x) => !x.system).slice(-3).map((x) => x.text);
   if (room.agentMode) {
     // The ElevenLabs agent leads and speaks. The engine never speaks for itself: it keeps the move for
     // the agent's get_next_move tool, and passes on only what the agent can't know (picks on screen, a lock).
-    const key = c.late && c.lateKey ? c.lateKey : move === "welcome" ? "hello" : move === "ask" ? `ask_${c.slot}` : move === "conflict" ? "clash" : move === "none" ? "loosen" : move;
-    const suggestion = personas.fallbackLine(room.persona, key, ctx, room.said.filter((x) => !x.system).slice(-3).map((x) => x.text));
+    const key = keyOf(c.late);
+    const suggestion = personas.fallbackLine(room.persona, key, ctx, recentSaid);
     room.nextMove = { move, slot: c.slot || null, todo: moveText(room, move, c), example: suggestion, at: now() };
     if (move === "picks") agentNote(room, `[app] Two picks are on everyone's screens now. ${moveText(room, move, c)} Present them at the next natural pause.`);
     if (move === "locked") agentNote(room, `[app] The planner locked the plan: ${c.pick}. Confirm it warmly in one short sentence.`);
@@ -450,47 +498,51 @@ async function speak(room, move, c = {}) {
   let text = null;
   let usedAI = false;
   let late = Boolean(c.late);
+  // The line book's line for this move: said as is without the AI, and given to the AI as a draft
+  const draft = personas.fallbackLine(room.persona, keyOf(late), ctx, recentSaid);
   if (claude.available() && !late) {
     const origins = Array.isArray(f.origin.value) && f.origin.value.length ? f.origin.value : ["union"];
     const list = (c.events || []).slice(0, 4).map((e) => `- ${eventBrief(e, origins)}`).join("\n");
     const opts = c.slot ? P.optionsFor(c.slot, room).map(([, l]) => l).join(", ") : "";
     const moves = {
-      welcome: `This is the first time you speak on this call. Welcome the crew, then ask: ${PROMPTS[c.slot]} (options on screen: ${opts}).`,
-      ask: c.slot === "budget" ? `Ask everyone to tap their max spend on their own screen, and say only you see it.` : `Ask the group: ${PROMPTS[c.slot]} (options on screen: ${opts}). Briefly read back what's settled first if it helps.`,
-      conflict: `Name this disagreement without taking sides and offer a way forward: ${c.a} vs ${c.b}.`,
-      nudge: `Gently invite ${c.person} in to answer: ${PROMPTS[c.slot]}`,
-      picks: `Introduce these two picks and ask everyone to vote. Say which kind each one is (${c.kinds || "both fit the plan"}): a show has a start time and tickets, a place they can drop into any time it's open. You may add one local detail from the event data.\n1) ${(c.picks || [])[0]}\n2) ${(c.picks || [])[1]}`,
+      welcome: `This is the first time you speak on this call. Open with the room (the crew name, who's here, the nights), then ask one open question: what kind of night are they after? They can answer with anything: night, time, vibe.`,
+      ask: c.slot === "budget" ? `Ask everyone to tap their max spend on their own screen, and say only you see it.` : `Say back what you just heard (below) in a few words, with names, then ask${c.to ? ` ${c.to}` : " the group"}: ${PROMPTS[c.slot]} (options on screen: ${opts}).`,
+      conflict: `Name this split without taking sides, with who's on each side, and offer a way forward: ${c.a} vs ${c.b}.`,
+      clarify: `${c.person} gave two options and it's not clear which they meant. Ask just them, just that: ${c.aLabel} or ${c.bLabel}? One short question.`,
+      nudge: `${c.person} has been quiet. Gently invite them in by name: ${PROMPTS[c.slot]}`,
+      picks: `Present these two picks like a DJ, not a list: a hook, why it fits named people, one vivid detail (venue, start time, or that it's free), then invite the vote. Say which kind each one is (${c.kinds || "both fit the plan"}): a show has a start time and tickets, a place they can drop into any time it's open. Clean names and reasons to use: 1) ${(c.story || [])[0] || ""} 2) ${(c.story || [])[1] || ""}\n1) ${(c.picks || [])[0]}\n2) ${(c.picks || [])[1]}`,
       none: c.relax ? `Nothing fits everything they've said. Say that ${c.relax} would open up ${c.n} options, and ask if they want to see them. Don't say whose answer is the tight one.` : `Nothing fits everything they've said. Ask whether anyone could be flexible on the time or the night.`,
-      checkin: `This is the first time you speak. Welcome everyone to SideQuest, say this call is for planning their next night out, and ask whether they want you to lead the planning or sit back while they fill in the plan on their screens. Keep it to two short sentences.`,
-      mode_lead: `The crew wants you to lead. Say you've got it, then ask: ${c.slot ? QUESTION_SPOKEN[c.slot] : "what works for everyone?"}`,
-      mode_default: `Nobody answered, so you're taking the lead. Say so lightly (they can tell you to step back anytime), then ask: ${c.slot ? QUESTION_SPOKEN[c.slot] : "what works for everyone?"}`,
+      checkin: `This is the first time you speak. Welcome ${room.crew} to SideQuest by name (who's here: ${ctx.names}), and ask whether they want you to lead the planning or sit back while they fill in the plan on their screens. Keep it to two short sentences.`,
+      mode_lead: `The crew wants you to lead. Say you've got it, then ask one open question: what kind of night are they after, and what day works best for everyone?`,
+      mode_default: `Nobody answered, so you're taking the lead. Say so lightly (they can tell you to step back anytime), then ask one open question: what kind of night are they after (${ctx.nights})?`,
       mode_sidelines: `The crew wants you to sit back. Say you'll stay quiet, the plan is on their screens, and they can say "Sidekick" if they need you.`,
       mode_stalled: `You're sitting back and things have gone quiet with the plan half done. Gently ask if they'd like you to jump in.`,
       switch_lead: `Someone asked you to take over. Say you're on it and ask: ${c.slot ? QUESTION_SPOKEN[c.slot] : "what's left to decide?"}`,
       switch_sidelines: `Someone asked you to step back. Say you'll stay quiet until they need you.`,
       guide: `People seem unsure about this: ${PROMPTS[c.slot]} Help them answer by offering these concrete options from what's actually on: ${c.options}. Keep it light and end with a question.`,
       locked: `The planner just locked the plan: ${c.pick}. Confirm it warmly in one short sentence.`,
-      wrap: `Point everyone to the two quick survey questions on their screen, in one short sentence.`,
+      wrap: `Say one warm goodbye (the plan's set for ${ctx.night || "the night"}), and point everyone to the two quick survey questions on their screen. Two short sentences at most.`,
       answer: `${c.person} just spoke to you: "${redact(c.question || "")}". Reply briefly, using only the facts and events here. If picks aren't ready yet, say what you still need.`,
     };
     const user = `Crew: ${room.crew}. On the call: ${people.map((p) => `${p.name} (${p.mode})`).join(", ")}.
 What's settled so far (what the group can see): ${publicFacts(room, f)}.
 Recent conversation:
 ${room.lines.slice(-6).map((l) => `${l.name}: ${redact(l.text)}`).join("\n") || "(nobody has spoken yet)"}
-${list ? `Events that fit (the only facts you may use about places):\n${list}\n` : ""}${room.said.length ? `Your last lines (start differently from these):\n${room.said.slice(-3).map((s) => `- ${s.text}`).join("\n")}\n` : ""}
+${list ? `Events that fit (the only facts you may use about places):\n${list}\n` : ""}${room.said.length ? `Your last lines (start differently from these):\n${room.said.slice(-3).map((s) => `- ${s.text}`).join("\n")}\n` : ""}${c.heardList ? `What you just heard (say it back first, briefly, with names): ${c.heardList}\n` : ""}${c.to ? `Hand the question to: ${c.to}\n` : ""}Draft line (use it, or say the same in your own words; at most 2 sentences and one question): ${draft}
 Your move: ${moves[move]}`;
     try {
       const asked = claude.say(personas.systemPrompt(room.persona), user, 120);
       const out = c.deadline ? await beforeDeadline(asked, c.deadline) : await asked;
       if (out === LATE) late = true;
-      else if (personas.acceptable(out)) { text = out.replace(/^["']|["']$/g, ""); usedAI = true; }
+      else if (personas.acceptable(out, move) && (["picks", "fallback"].includes(move) || !/\$\s?\d|\b\d+\s?(bucks|dollars)\b/i.test(out))) { text = out.replace(/^["']|["']$/g, ""); usedAI = true; }
     } catch (err) {
       console.error(err.message);
     }
   }
-  const lineKey = late && c.lateKey ? c.lateKey : move === "welcome" ? "hello" : move === "ask" ? `ask_${c.slot}` : move === "conflict" ? "clash" : move === "none" ? "loosen" : move;
-  if (!text) text = personas.fallbackLine(room.persona, lineKey, ctx, room.said.filter((s) => !s.system).slice(-3).map((s) => s.text));
-  const line = { id: id(4), text, move, at: now() };
+  const lineKey = keyOf(late);
+  if (!text) text = late && c.lateKey ? personas.fallbackLine(room.persona, lineKey, ctx, recentSaid) : draft;
+  // The typed chat thread gets a shorter version, and quick replies for the question just asked
+  const line = { id: id(4), text, move, at: now(), chat: personas.chatLine(room.persona, lineKey, ctx) || talk.chatText(text), quick: quickFor(room, move, c) };
   room.said.push(line);
   if (room.said.length > 20) room.said.shift();
   room.lastSaidAt = now();
@@ -502,6 +554,61 @@ const DAY = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", 
 const spokenDay = (label) => DAY[String(label).slice(0, 3)] || label;
 const WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight"];
 const cleanTitle = (t) => String(t || "").replace(/^Free event\.\s*/i, "").replace(/\s+[|@]\s.*$/, "").trim();
+
+// ---------- Talking like someone on the call ----------
+// Sidekick's last real line (not a progress line): what people said since then is what it says back
+function lastSaidAt(room) {
+  const l = room.said.filter((x) => !x.system && !["progress", "still"].includes(x.move)).slice(-1)[0];
+  return l ? l.at : 0;
+}
+const heardSince = (room) => { const t = lastSaidAt(room); return (room.heard || []).filter((h) => h.at >= t && !h.undone); };
+const SAY_BACK = ["ask", "guide", "answer"];
+// What this turn says back ({heard}), who it hands the question to ({to}), and the same for the AI prompt.
+// Signature moves are used sparingly (by turn count). Never a private answer: heard holds public slots only.
+function talkFor(room, move, c, f) {
+  const out = {};
+  const turn = room.said.filter((x) => !x.system).length;
+  const fresh = heardSince(room);
+  let heard = SAY_BACK.includes(move) ? talk.heardPhrase(room, fresh, { persona: room.persona, f, turn }) : null;
+  if (heard && room.persona === "concierge" && turn % 3 === 2) {
+    const sum = talk.summary(room, f);
+    if (sum && fresh.every((h) => ["night", "time", "vibe"].includes(h.slot) && f[h.slot].known)) heard = sum;
+  }
+  // Nothing to ask about budget: say so once, instead of asking ("Budget's sorted, I've got everyone's privately")
+  if (move === "ask" && c.slot !== "budget" && !room.sortedSaid && f.budget.answered >= P.crew(room).length) {
+    room.sortedSaid = true;
+    const note = room.persona === "friend" ? "budget's sorted privately" : "budgets are in, privately";
+    heard = heard ? `${heard}, and ${note}` : note.charAt(0).toUpperCase() + note.slice(1);
+  }
+  if (room.aside && SAY_BACK.includes(move)) {
+    const a = talk.asideFor(room.persona, room.aside.topic);
+    heard = heard ? `${a}; ${heard}` : a;
+    room.aside = null;
+  }
+  out.heard = heard;
+  out.heardList = fresh.filter((h) => !h.here).map((h) => `${h.name}: ${h.label}`).join("; ");
+  if (["ask", "guide"].includes(move) && c.slot && !c.person) {
+    const got = new Set(P.answersFor(room, c.slot).map((x) => x.person.id));
+    let p = null;
+    if (!heard) { // someone spoke but said nothing for the plan: the question goes back to them
+      const since = lastSaidAt(room);
+      const pid = room.lines.filter((l) => l.at >= since && !got.has(l.pid)).map((l) => l.pid).pop();
+      p = pid ? P.crew(room).find((x) => x.id === pid && x.mode !== "form") : null;
+    }
+    if (!p) p = talk.handTo(room, c.slot, { skip: fresh.map((h) => h.pid) });
+    if (p) { out.to = p.name; room.handedTo = p.id; }
+  }
+  return out;
+}
+// Quick replies for the typed chat thread: the open question's options, or the two options in a clarify or split
+function quickFor(room, move, c) {
+  const label = (slot, v, l) => (slot === "night" ? spokenDay(l || P.labelOf(slot, v, room)) : l || P.labelOf(slot, v, room));
+  if (["clarify", "conflict"].includes(move) && c.slot && c.values) return { slot: c.slot, options: c.values.map((v) => ({ value: v, label: label(c.slot, v) })) };
+  if (!["ask", "welcome", "mode_lead", "mode_default", "switch_lead", "guide", "nudge"].includes(move)) return null;
+  const slot = c.slot || (room.card && room.card.slot);
+  if (!slot || !P.SLOTS[slot] || P.SLOTS[slot].private) return null;
+  return { slot, options: P.optionsFor(slot, room).map(([value, l]) => ({ value, label: label(slot, value, l) })) };
+}
 
 // The facts the line book's {placeholders} need
 function lineContext(room, f, c) {
@@ -522,6 +629,12 @@ function lineContext(room, f, c) {
     missing: missing.length ? missing.slice(0, 2).join(" and ") : null,
     options: c.options,
     question: c.slot ? QUESTION_SPOKEN[c.slot] : null,
+    heard: c.heard || null,
+    to: c.to ? `, ${c.to}` : "",
+    names: talk.andList(P.crew(room).filter((p) => p.mode !== "form").map((p) => p.name).slice(0, 4)),
+    story1: c.story && c.story[0], story2: c.story && c.story[1],
+    a_who: c.aWho, b_who: c.bWho,
+    hot: c.hot,
   };
 }
 
@@ -541,6 +654,22 @@ function ideasFor(room, f, slot, events) {
   if (slot === "time") return "an early dinner-and-a-show kind of night, or a later one after eight";
   if (slot === "origin") return "Union, Finch, Kennedy or Kipling, whichever's closest";
   if (slot === "kind") return "a ticketed show, or just a good bar, arcade or karaoke spot you can drop into";
+  return null;
+}
+
+// A signature move for the guide line: the Friend's opinion ("Saturday's the move"), the Concierge's two choices
+function hotFor(room, f, slot, events) {
+  const pool = P.filterEvents(events, room, f);
+  if (slot === "night") {
+    const per = room.nights.map((d) => [spokenDay(P.nightLabel(d)), pool.filter((e) => P.localDay(e.startsAt) === d).length]).sort((a, b) => b[1] - a[1]);
+    if (per.length < 2) return null;
+    return room.persona === "friend" ? `${per[0][0]}'s the move, it's got the most going on` : `${per[0][0]} or ${per[1][0]}`;
+  }
+  if (slot === "vibe") {
+    const ranked = Object.keys(P.VIBES).map((v) => [v, pool.filter((e) => (e.vibes || []).some((t) => P.VIBES[v].includes(t))).length]).filter(([, n]) => n).sort((a, b) => b[1] - a[1]).map(([v]) => talk.say(room, "vibe", v));
+    if (ranked.length < 2) return null;
+    return room.persona === "friend" ? `${ranked[0]}'s the move tonight` : `${ranked[0]} or ${ranked[1]}`;
+  }
   return null;
 }
 
@@ -593,7 +722,8 @@ const MOVE_HINT = {
   switch_lead: "Someone asked you to take over. Confirm, then ask this question",
   switch_sidelines: "Someone asked you to step back. Confirm in a few words",
   ask: "Ask the group this one question",
-  conflict: "Name this clash kindly, without taking sides, and offer a way forward",
+  conflict: "Name this split kindly, with who's on each side, without taking sides, and offer a way forward",
+  clarify: "Ask just this person about just the one unclear thing",
   nudge: "Gently invite this person in",
   guide: "People seem unsure. Offer these ideas and ask which sounds good",
   picks: "Present these two picks, with a reason for each, and ask everyone to vote",
@@ -606,9 +736,10 @@ function moveText(room, move, c) {
   const opts = c.slot && c.slot !== "budget" ? P.optionsFor(c.slot, room).map(([, l]) => l).join(", ") : "";
   const detail = ["mode_lead", "mode_default", "switch_lead"].includes(move) && c.slot ? `Question: ${QUESTION_SPOKEN[c.slot]}`
     : move === "ask" || move === "welcome" ? `${PROMPTS[c.slot] || ""}${opts ? ` Options on screen: ${opts}.` : ""}${c.slot === "budget" ? " Everyone answers privately on their own screen." : ""}`
-    : move === "picks" ? `${(c.picks || []).map((x, i) => `${i + 1}) ${x}`).join(" ")}${c.kinds ? ` Say which is which: ${c.kinds}.` : ""}`
+    : move === "picks" ? `${(c.story || c.picks || []).map((x, i) => `${i + 1}) ${x}`).join(" ")}${c.kinds ? ` Say which is which: ${c.kinds}.` : ""} A hook, why it fits named people, one vivid detail, then invite the vote.`
     : move === "guide" ? `Ideas: ${c.options}.`
     : move === "conflict" ? `${c.a} vs ${c.b}.`
+    : move === "clarify" ? `Person: ${c.person}. ${c.aLabel} or ${c.bLabel}?`
     : move === "nudge" ? `Person: ${c.person}. Question: ${PROMPTS[c.slot] || ""}`
     : move === "none" && c.relax ? `${c.relax} would open up ${c.n} options.`
     : move === "answer" ? `${c.person} asked: "${redact(c.question || "")}"`
@@ -645,6 +776,12 @@ async function think(room) {
       }
       applyUpdates(room, out, lines);
       if (out.addressed_sidekick && !room.addressed) room.addressed = lines[lines.length - 1];
+      // Chatter about something else ("did you see the leafs game"): a quick reaction, then back to the plan
+      for (const l of lines) {
+        const topic = talk.offTopic(l.text);
+        const said = Object.values(room.answers[l.pid] || {}).some((x) => x && x.at >= l.at - 50);
+        if (topic && !said && !/\bside ?kick\b/i.test(l.text)) room.aside = { topic, at: now() };
+      }
       if (room.card && P.SLOTS[room.card.slot] && !P.SLOTS[room.card.slot].private) {
         const slot = room.card.slot;
         for (const l of lines) {
@@ -752,8 +889,24 @@ async function decideNow(room, { forcePicks = false } = {}) {
     room.card = { slot, at: now() };
     const label = (v) => `${P.labelOf(slot, v, room)} (${(f[slot].supporters[v] || []).join(", ")})`;
     const plain = (v) => (slot === "night" ? spokenDay(P.labelOf(slot, v, room)) : P.labelOf(slot, v, room).toLowerCase());
-    await speak(room, "conflict", { slot, a: label(c[0]), b: label(c[1]), aLabel: plain(c[0]), bLabel: plain(c[1]), aCount: (f[slot].supporters[c[0]] || []).length, bCount: (f[slot].supporters[c[1]] || []).length });
+    const who = (v) => talk.andList((f[slot].supporters[v] || []).slice(0, 2));
+    await speak(room, "conflict", { slot, values: c.slice(0, 2), a: label(c[0]), b: label(c[1]), aLabel: plain(c[0]), bLabel: plain(c[1]), aWho: who(c[0]), bWho: who(c[1]), aCount: (f[slot].supporters[c[0]] || []).length, bCount: (f[slot].supporters[c[1]] || []).length });
     return;
+  }
+
+  // One person's answer was unclear ("maybe Friday, or Saturday?"): ask just them, just that
+  if (!quiet && room.unclear) {
+    const u = room.unclear;
+    room.unclear = null;
+    const a = (room.answers[u.pid] || {})[u.slot];
+    if (!(a && a.at > u.at)) {
+      if (!canSpeak()) { room.unclear = u; return schedule(room, MIN_GAP_MS); }
+      room.card = { slot: u.slot, at: now() };
+      const plain = (v) => (u.slot === "night" ? spokenDay(P.labelOf(u.slot, v, room)) : P.labelOf(u.slot, v, room).toLowerCase());
+      track("sk_clarify", { sessionId: room.id, persona: room.persona, slot: u.slot });
+      await speak(room, "clarify", { slot: u.slot, person: u.name, aLabel: plain(u.values[0]), bLabel: plain(u.values[1]), values: u.values.slice(0, 2) });
+      return;
+    }
   }
 
   if (!quiet && room.wantGuide && room.card && room.card.slot === room.wantGuide && !room.card.guided) {
@@ -762,7 +915,8 @@ async function decideNow(room, { forcePicks = false } = {}) {
     const options = ideasFor(room, f, room.card.slot, events);
     if (options) {
       track("sk_guided", { sessionId: room.id, persona: room.persona, slot: room.card.slot });
-      await speak(room, "guide", { slot: room.card.slot, options });
+      const turn = room.said.filter((x) => !x.system).length;
+      await speak(room, "guide", { slot: room.card.slot, options, hot: turn % 3 === 0 ? hotFor(room, f, room.card.slot, events) : null });
       return;
     }
   }
@@ -823,6 +977,18 @@ function nudgeTick() {
       continue;
     }
     if (room.mode !== "lead") continue;
+    // Someone in the call who hasn't said or tapped anything for about 20 s, while others talk:
+    // invite them in gently by name, at most once each
+    if (P.SLOTS[room.card.slot] && !P.SLOTS[room.card.slot].private && (!room.lastSaidAt || now() - room.lastSaidAt > 6000) && room.lines.some((l) => now() - l.at < 60000)) {
+      const lastFrom = (p) => Math.max(p.joinedAt, p.lastSpokeAt || 0, ...Object.values(room.answers[p.id] || {}).map((x) => (x && x.at) || 0));
+      const silent = P.crew(room).find((p) => p.mode !== "form" && !room.invited[p.id] && (!room.streams.size || room.streams.has(p.id)) && now() - lastFrom(p) > SILENT_MS());
+      if (silent) {
+        room.invited[silent.id] = true;
+        track("sk_invited", { sessionId: room.id, persona: room.persona });
+        speak(room, "nudge", { slot: room.card.slot, person: silent.name }).then(() => broadcast(room));
+        continue;
+      }
+    }
     const slot = room.card.slot;
     if (now() - room.card.at < NUDGE_AFTER_MS || (room.lastSaidAt && now() - room.lastSaidAt < NUDGE_AFTER_MS)) continue;
     const got = P.answersFor(room, slot).map((x) => x.person.id);
@@ -832,9 +998,10 @@ function nudgeTick() {
       if (!room.card.guided && now() - quietSince > 30000) { room.wantGuide = slot; schedule(room, 10); }
       continue;
     }
-    const quiet = P.crew(room).find((p) => p.mode !== "form" && !got.includes(p.id) && !(room.nudged[slot] || []).includes(p.id));
+    const quiet = P.crew(room).find((p) => p.mode !== "form" && !got.includes(p.id) && !(room.nudged[slot] || []).includes(p.id) && !room.invited[p.id]);
     if (!quiet) continue;
     room.nudged[slot] = [...(room.nudged[slot] || []), quiet.id];
+    room.invited[quiet.id] = true;
     speak(room, "nudge", { slot, person: quiet.name }).then(() => broadcast(room));
   }
 }
@@ -1012,10 +1179,10 @@ async function pickTwo(room, list, deadline) {
       const b = f.time.known && f.time.value.length ? f.time.value[0] : "evening";
       const hours = places.closesLabel(e.hours, new Date(night + "T12:00:00").getDay(), { early: 15, evening: 19, late: 21 }[b]);
       // A place: no start time and no ticket. Drop in while it's open; price is a rough spend per person.
-      return { id: e.id, kind: "place", title: e.title, when: `${hours} · drop in any time`, night: spokenDay(P.nightLabel(night)), stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `${e.priceNote ? `${e.priceNote} · ` : ""}about $${e.price} each` : e.priceNote || "Price not listed", where: e.neighbourhood || "", rating: e.rating || null, ratingCount: e.ratingCount || 0, placeType: places.placeType(e.tags), reason: m.reason || "", fits: m.fits || {}, url: e.mapsUrl, attribution: "Google Maps" };
+      return { id: e.id, kind: "place", date: night, title: e.title, when: `${hours} · drop in any time`, night: spokenDay(P.nightLabel(night)), stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `${e.priceNote ? `${e.priceNote} · ` : ""}about $${e.price} each` : e.priceNote || "Price not listed", where: e.neighbourhood || "", rating: e.rating || null, ratingCount: e.ratingCount || 0, placeType: places.placeType(e.tags), reason: m.reason || "", fits: m.fits || {}, url: e.mapsUrl, attribution: "Google Maps" };
     }
     // An event: a day and a start time, and a ticket price
-    return { id: e.id, kind: "event", title: e.title, when: e.startsAt ? `${startDay(e.startsAt)} · starts ${startTime(e.startsAt)}` : e.date, stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `$${e.price} ticket` : "Price not listed", where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), startsAt: e.startsAt || null, reason: m.reason || "", fits: m.fits || {}, url: e.sourceUrl || null };
+    return { id: e.id, kind: "event", date: e.startsAt ? P.localDay(e.startsAt) : null, title: e.title, when: e.startsAt ? `${startDay(e.startsAt)} · starts ${startTime(e.startsAt)}` : e.date, stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `$${e.price} ticket` : "Price not listed", where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), startsAt: e.startsAt || null, reason: m.reason || "", fits: m.fits || {}, url: e.sourceUrl || null };
   });
   const whyOf = (p) => {
     const e = pool.find((x) => x.id === p.id);
@@ -1027,7 +1194,10 @@ async function pickTwo(room, list, deadline) {
   const kinds = personas.kindsLine(room.persona, picks.map((p) => ({ kind: p.kind, time: p.startsAt ? startTime(p.startsAt, true) : null, type: p.placeType })));
   // The line is written before the cards go up, so both land together. Past the deadline it's the
   // line book's plain "here's what I've got so far" with the two names.
-  await speak(room, "picks", { kinds, why: picks.map(whyOf), short: picks.map((p) => cleanTitle(p.title)), picks: picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => picks.some((p) => p.id === e.id)), deadline, late, lateKey: "fallback" });
+  // Each pick as a short story: a hook, a vivid detail, why it fits named people
+  const story = talk.stories(room, picks.map((p) => ({ ...pool.find((x) => x.id === p.id), placeType: p.placeType })), room.persona, f);
+  const spokenName = (p) => { const e = pool.find((x) => x.id === p.id); return talk.spokenTitle(p.title, e && e.venue && e.venue.name); };
+  await speak(room, "picks", { kinds, story, why: picks.map(whyOf), short: picks.map(spokenName), picks: picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => picks.some((p) => p.id === e.id)), deadline, late, lateKey: "fallback" });
   if (room.status !== "live") return;
   room.picks = picks;
   room.card = null;
@@ -1043,6 +1213,9 @@ function endRoom(room, why) {
   room.status = "ended";
   room.lines = []; // the transcript is never kept
   room.pending = [];
+  room.heard = []; // nor what Sidekick heard, with names
+  room.unclear = null;
+  room.aside = null;
   for (const a of Object.values(room.answers)) delete a.location; // shared locations go with it
   const f = factsOf(room);
   const summary = {
@@ -1135,6 +1308,11 @@ function cardFor(room, person) {
   return { slot, private: false, prompt: PROMPTS[slot], multi: P.SLOTS[slot].multi, options: slotOptions(room, person, slot) };
 }
 
+// The card says when it went up, so phones can wait a moment for a spoken answer before showing it
+function withCardAt(room, card) {
+  if (card && room.card && !card.form) { card.at = room.card.at; card.lead = room.mode === "lead"; }
+  return card;
+}
 function viewFor(room, pid) {
   const me = room.people.find((p) => p.id === pid);
   const f = factsOf(room);
@@ -1155,7 +1333,11 @@ function viewFor(room, pid) {
     boot: BOOT,
     rows: r,
     known: r.filter((x) => x.state === "done").length,
-    card: me ? cardFor(room, me) : null,
+    card: me ? withCardAt(room, cardFor(room, me)) : null,
+    // "What I heard": public facts that just landed from speech or typing, with an undo (never a private answer)
+    heard: (room.heard || []).filter((h) => !h.undone && !h.here && (h.source === "call_speech" || h.source === "call_text") && now() - h.at < 15000).slice(-4).map((h) => ({ id: h.id, name: h.name, label: h.label, age: now() - h.at, canUndo: Boolean(me && (me.id === h.pid || me.role === "planner")) })),
+    // The typed chat thread: captions and Sidekick's lines (the shorter text version), oldest first
+    chat: [...room.lines.slice(-8).map((l) => ({ id: l.id, who: l.name, pid: l.pid, text: l.text, kind: l.kind, at: l.at })), ...room.said.filter((x) => !x.system && !["progress", "still"].includes(x.move)).slice(-6).map((x) => ({ id: x.id, sk: true, text: x.chat || x.text, at: x.at, quick: x.quick || null }))].sort((a, b) => a.at - b.at).slice(-8),
     captions: room.lines.slice(-5).map((l) => ({ id: l.id, pid: l.pid, name: l.name, text: l.text, kind: l.kind })),
     agentNotes: me && me.role === "planner" && room.agentMode ? room.agentNotes.slice(-8) : [],
     voiceAgent: Boolean(me && me.role === "planner" && agentIdFor(room)),
@@ -1292,7 +1474,24 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       schedule(room, 400);
       return sendJSON(res, ok ? 200 : 400, ok ? { ok } : { error: "That answer isn't one of the options." });
     }
+    if (action === "unhear") {
+      const h = (room.heard || []).find((x) => x.id === String(body.id || ""));
+      if (!h || h.undone) return sendJSON(res, 400, { error: "That's already been taken back." });
+      if (h.pid !== person.id && person.role !== "planner") return sendJSON(res, 403, { error: "Only that person or the planner can take it back." });
+      unhear(room, h);
+      track("sk_heard_undo", { sessionId: room.id, persona: room.persona, slot: h.slot });
+      agentNote(room, `[app] ${person.name} took back what you heard: ${h.name}, ${h.label}. Don't count it.`);
+      broadcast(room);
+      schedule(room, 400);
+      return sendJSON(res, 200, { ok: true });
+    }
     if (action === "line") {
+      // A quick reply under Sidekick's question in the chat thread: the answer, then the line as typed
+      const q = body.quick && typeof body.quick === "object" ? body.quick : null;
+      if (q && P.SLOTS[q.slot] && !P.SLOTS[q.slot].private && q.slot !== "nos") {
+        const cur = ((room.answers[person.id] || {})[q.slot] || {}).value;
+        setAnswer(room, person, q.slot, P.SLOTS[q.slot].multi ? [...new Set([...[].concat(cur || []), String(q.value)])] : String(q.value), "call_text");
+      }
       const out = addLine(room, person, body.text, body.kind);
       if (out && out.dropped) return sendJSON(res, 200, { ok: true, dropped: out.dropped });
       broadcast(room);
@@ -1423,7 +1622,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       for (const ev of Object.values(room.votes)) tally[ev] = (tally[ev] || 0) + 1;
       const chosen = Number(body.eventId) || Number(Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0]) || room.picks[0].id;
       room.locked = room.picks.find((p) => p.id === chosen) || room.picks[0];
-      speak(room, "locked", { pick: cleanTitle(room.locked.title) }).then(() => {
+      speak(room, "locked", { pick: talk.spokenTitle(room.locked.title, String(room.locked.where || "").split(",")[0]) }).then(() => {
         broadcast(room);
         setTimeout(() => speak(room, "wrap", {}).then(() => broadcast(room)), 6000).unref();
       });
@@ -1489,6 +1688,8 @@ function planState(room) {
     } : null,
     answer_options: Object.fromEntries(PUBLIC_SLOTS.filter((s) => s !== "kind" || (room.places && room.places.length)).map((s) => [s, P.optionsFor(s, room).map(([, l]) => l)])),
     mode: room.mode === "sidelines" ? "sitting back (stay quiet unless someone says Sidekick)" : "leading",
+    // What people just said (public facts, with names), so the agent can say it back before its next question
+    just_heard: (room.heard || []).filter((h) => !h.undone && !h.here && now() - h.at < 60000).slice(-6).map((h) => `${h.name}: ${h.label}`),
     picks: room.picks && room.picks.length ? room.picks.map((x) => ({ title: x.title, kind: x.kind, when: x.when, price: x.price, where: x.where, reason: x.reason || undefined })) : null,
     locked: room.locked ? room.locked.title : null,
   };
@@ -1604,4 +1805,4 @@ function init({ events }) {
   eventsSource = events;
 }
 
-module.exports = { init, handle, preview, BOOT, _test: { rooms, createRoom, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS } };
+module.exports = { init, handle, preview, BOOT, _test: { rooms, createRoom, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates } };

@@ -101,6 +101,12 @@ Pass marks (starting suggestions for the team to set):
 - median questions before picks: 4 or fewer;
 - in the private-limits test, every private limit surfaces.
 
-## 11. Screen design
+## 11. Sounding like a conversation (built Nov 2026)
+
+- Sidekick says back what it heard (with names) before each question, opens with the room, asks one open question and then fills only the gaps, invites quiet people once each, answers chatter briefly, asks about the one unclear thing, and tells picks as a short story. See `reference/sidekick-personas.md` and `lib/sidekick/talk.js`.
+- On screen: "what I heard" chips with an undo (public facts only), the question card waits about 5 s for a spoken answer on voice phones (straight away when typing), a group-chat thread with quick replies for typed lines, progress as "Night · Vibe · Picks" with the full board one tap away, and a closing recap with "Add to calendar" (.ics) and "Share to chat".
+- The judge: `node test/sidekick-conversation.js` (before/after scores against `test/sidekick-conversation.baseline.json`); the screens: `test/sidekick-conversation.e2e.js`.
+
+## 12. Screen design
 
 Five proposals and the user journey are in the "Sidekick Call Proposals" design canvas: https://claude.ai/artifact/LDK1LKHcXNNdiUMemPQViS

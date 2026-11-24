@@ -452,8 +452,16 @@
   }
 
   function boardHead(extra = "") {
-    const dots = [0, 1, 2, 3, 4].map((i) => `<span class="dot ${i < view.known ? "done" : ""}"></span>`).join("");
-    return `<div class="bh"><span class="row"><span class="orb ${orbState()}"></span><h2 style="font-size:15px">${esc(view.crew)}'s plan</h2></span>${extra || `<span class="dots" role="img" aria-label="${view.known} of 5 known">${dots}</span>`}</div>`;
+    return `<div class="bh"><span class="row"><span class="orb ${orbState()}"></span><h2 style="font-size:15px">${esc(view.crew)}'s plan</h2></span>${extra || progressHTML()}</div>`;
+  }
+  // Progress the way the conversation goes ("Night ✓ · Vibe · Picks"), not a slot checklist
+  function progressHTML() {
+    const row = (slot) => view.rows.find((r) => r.slot === slot) || {};
+    const nightDone = (view.nights.length === 1 || row("night").state === "done") && row("time").state === "done";
+    const stages = [["Night", nightDone], ["Vibe", row("vibe").state === "done"], ["Picks", Boolean(view.picks)]];
+    const at = stages.findIndex(([, done]) => !done);
+    const label = stages.map(([n, done], i) => `${n} ${done ? "done" : i === at ? "now" : "next"}`).join(", ");
+    return `<span class="prog" role="img" aria-label="Progress: ${esc(label)}">${stages.map(([n, done], i) => `<span class="pg ${done ? "done" : i === at ? "now" : ""}">${esc(n)}${done ? " ✓" : ""}</span>`).join('<span class="pg-sep" aria-hidden="true">·</span>')}</span>`;
   }
   const listening = () => phase === "call" && view.mode === "lead" && view.status === "live";
   const thinking = () => phase === "call" && view.thinking && view.thinking.steps && view.thinking.steps.length ? view.thinking : null;
@@ -593,10 +601,14 @@
       renderTicks();
       return;
     }
-    const card = view.card && !view.card.form ? view.card : null;
+    const card0 = view.card && !view.card.form ? view.card : null;
     const form = view.card && view.card.form ? view.card : null;
+    // Voice first: a question Sidekick just asked out loud waits about 5 s for a spoken answer before
+    // its card shows. Straight away for people typing or answering by form, and for private cards.
+    const waitCard = card0 && !card0.private && cardWaits(card0);
+    const card = waitCard ? null : card0;
     const rows = view.rows.map((r) => {
-      if (card && !card.private && card.slot === r.slot) return cardHTML(card);
+      if (card && !card.private && card.slot === r.slot) return "";
       const value = r.state === "conflict" ? r.conflict.join(" vs. ") : r.value || (r.state === "asking" ? "Asking now" : "Not yet");
       if (form) {
         // Sitting back: the board is the form. Each row has its question's chips in place.
@@ -620,15 +632,73 @@
     }
     const invite = view.me.planner && view.people.length < 2 ? invitePanel() : "";
     const formNote = form ? `<p class="small">Fill it in together. Sidekick suggests two picks once everyone's in.</p>` : "";
-    body.innerHTML = `${invite}<div class="board ${form ? "as-form" : ""}">${boardHead()}${rows}</div>${formNote}${priv}`;
+    // The card fades in once, when it first shows (not on every update)
+    const cardKey = card && `${card.slot}:${card.at}`;
+    const fresh = cardKey && !shownCards.has(cardKey);
+    if (fresh) shownCards.add(cardKey);
+    const ask = card && !card.private ? cardHTML(card).replace('<div class="q">', `<div class="q${fresh && waitedCards.has(cardKey) ? " reveal" : ""}">`) : waitCard ? `<div class="q listen" aria-live="polite"><span class="small">Sidekick is asking · just say it</span><h2>${esc(card0.prompt)}</h2><span class="small">Tap options show in a moment.</span></div>` : "";
+    // The full board stays one tap away; sitting back, the board is the form and always open
+    const open = form || boardOpen;
+    const full = form ? rows : `<button class="plan-toggle" id="planToggle" aria-expanded="${open}" aria-controls="planRows">${open ? "Hide the full plan" : "See the full plan"}</button><div id="planRows" ${open ? "" : "hidden"}>${rows}</div>`;
+    body.innerHTML = `${invite}<div class="board ${form ? "as-form" : ""}">${boardHead()}${heardHTML()}${ask}${full}</div>${formNote}${priv}`;
     renderTicks();
   }
+
+  // "What I heard": a fact that just landed from speech or typing shows briefly, with an undo
+  const HEARD_MS = 6000;
+  const heardShown = {};
+  let heardTimer = null;
+  function heardHTML() {
+    const list = (view.heard || []).filter((h) => {
+      if (!heardShown[h.id]) heardShown[h.id] = Date.now() - Math.min(h.age || 0, HEARD_MS);
+      return Date.now() - heardShown[h.id] < HEARD_MS;
+    });
+    clearTimeout(heardTimer);
+    if (list.length) heardTimer = setTimeout(() => view && phase === "call" && renderCall(), Math.max(200, HEARD_MS - (Date.now() - Math.min(...list.map((h) => heardShown[h.id]))) + 50));
+    const live = list.map((h) => `${h.name}: ${h.label}`).join(", ");
+    return `<div class="heard" ${list.length ? "" : "hidden"}><span class="sr" role="status">${live ? `Heard ${esc(live)}` : ""}</span>${list.map((h) => `<span class="hc${Date.now() - heardShown[h.id] < 300 ? " new" : ""}"><span class="hc-t"><b>${esc(h.name)}:</b> ${esc(h.label)}</span>${h.canUndo ? `<button class="hc-x" data-unhear="${esc(h.id)}" aria-label="Undo: ${esc(h.name)}, ${esc(h.label)}">${ICON.x}</button>` : ""}</span>`).join("")}</div>`;
+  }
+  // Voice first: how long a just-asked question waits for a spoken answer before its card shows
+  const CARD_WAIT_MS = Number(params.get("cardwait") || window.SK_CARD_WAIT_MS || 5000);
+  const cardSeen = {};
+  let cardTimer = null;
+  const shownCards = new Set();
+  const waitedCards = new Set();
+  function cardWaits(card) {
+    if (!card.lead || view.me.mode !== "voice" || typing || capsOff) return false;
+    const key = `${card.slot}:${card.at}`;
+    waitedCards.add(key);
+    if (!cardSeen[key]) cardSeen[key] = Date.now();
+    const left = CARD_WAIT_MS - (Date.now() - cardSeen[key]);
+    clearTimeout(cardTimer);
+    if (left > 0) { cardTimer = setTimeout(() => view && phase === "call" && renderCall(), left + 20); return true; }
+    return false;
+  }
+  let boardOpen = store.get("sk:boardOpen") !== false; // open unless this phone folded it
 
   function renderTicks() {
     const t = document.getElementById("ticks");
     if (!t || !view) return;
     if (phase !== "call") { t.innerHTML = ""; return; }
+    if (chatMode()) { t.innerHTML = chatHTML(); const th = t.querySelector(".thread"); if (th) th.scrollTop = th.scrollHeight; return; }
     t.innerHTML = view.captions.slice(-2).map((c) => `<div class="tick"><b>${esc(c.name)}${c.kind === "typed" ? " · typed" : ""}</b><span>${esc(c.text)}</span></div>`).join("") + (interim ? `<div class="tick me"><b>You</b><span>${esc(interim)}</span></div>` : "");
+  }
+
+  // Typing: the call reads like a group chat. Sidekick's replies are the shorter text versions, and its
+  // latest question has quick replies under it (a tap answers and posts it in the thread).
+  const chatMode = () => view && view.me && (view.me.mode === "text" || typing || capsOff);
+  function chatHTML() {
+    const items = view.chat || [];
+    // Quick replies stay under Sidekick's latest question while that question is still open
+    const lastSk = [...items].reverse().find((m) => m.sk);
+    const open = view.card && !view.card.form && !view.card.private ? view.card.slot : null;
+    const quick = lastSk && lastSk.quick && lastSk.quick.slot === open && !voting() && view.status === "live" ? lastSk.quick : null;
+    const bubbles = items.map((m) => {
+      const mine = m.pid === view.me.id;
+      return `<li class="msg ${m.sk ? "sk" : mine ? "me" : "them"}"><span class="msg-who">${m.sk ? "Sidekick" : mine ? "You" : esc(m.who)}${!m.sk && m.kind === "spoken" ? " · said" : ""}</span><span class="msg-t">${esc(m.text)}</span></li>`;
+    }).join("");
+    const chips = quick ? `<div class="chips quick" role="group" aria-label="Quick replies">${quick.options.map((o) => `<button class="chip" data-quick="${esc(quick.slot)}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join("")}</div>` : "";
+    return `<section class="chat" aria-label="Call chat"><ol class="thread" aria-live="polite">${bubbles || '<li class="msg sys"><span class="msg-t">Type to the call. Sidekick replies here.</span></li>'}</ol>${chips}</section>`;
   }
 
   function renderPicks() {
@@ -672,9 +742,7 @@
 
   function renderDone() {
     const L = view.locked;
-    const plan = L
-      ? `<div class="board">${boardHead('<span class="tag ok">Locked</span>')}<div style="padding:0 14px 14px" class="stack"><h1>${esc(L.title)}</h1><p class="muted">${esc([L.when, L.price, L.where].filter(Boolean).join(" · "))}</p>${L.url ? `<a class="small" style="color:var(--soc-x)" href="${esc(L.url)}" target="_blank" rel="noopener">${L.kind === "place" ? "Directions" : "See tickets"}</a>` : ""}${L.attribution ? `<span class="small">Place info from ${esc(L.attribution)}</span>` : ""}</div></div>`
-      : `<h1>Call ended</h1><p class="muted">The transcript has been deleted.</p>`;
+    const plan = L ? recapHTML(L) : `<h1>Call ended</h1><p class="muted">The transcript has been deleted.</p>`;
     const survey = view.surveyed
       ? `<div class="priv" style="border-style:solid;border-color:var(--bs)"><p>Thanks, that helps us improve Sidekick.</p></div>`
       : `<div class="priv" style="border-style:solid;border-color:var(--bs)" id="survey">
@@ -691,6 +759,55 @@
       : `<div class="priv" style="border-style:solid;border-color:var(--bs)"><h2>Voice ${esc(STUDY_V)} done</h2><p class="muted">Four quick taps about this call, back on the checklist.</p><a class="btn pri" href="/study?s=${encodeURIComponent(STUDY)}#call${esc(STUDY_V)}">Answer 4 quick questions</a></div>`;
     document.getElementById("body").innerHTML = plan + (STUDY ? studyNext : survey); // in the study, its own questions replace these
     renderTicks();
+  }
+
+  // ---------- The closing moment: a recap card, add to calendar, share to the group chat ----------
+  const nightOf = (L) => (L.date ? new Date(L.date + "T12:00:00").toLocaleDateString("en-CA", { weekday: "long", month: "short", day: "numeric" }) : "");
+  function planText() {
+    const L = view.locked;
+    if (!L) return "";
+    return `${view.crew}'s plan: ${L.title}, ${nightOf(L) || L.when}${L.kind === "place" ? "" : ` · ${L.when.split("·").pop().trim()}`}${L.where ? ` · ${L.where}` : ""}.${L.url ? ` ${L.url}` : ""} Planned on SideQuest.`;
+  }
+  function recapHTML(L) {
+    const who = view.people.map((p) => p.name).join(", ");
+    const enc = encodeURIComponent;
+    const msg = planText();
+    const sms = `sms:${IOS ? "&" : "?"}body=${enc(msg)}`;
+    return `<section class="board recap" aria-labelledby="recapTitle">${boardHead('<span class="tag ok">Locked</span>')}
+      <div class="recap-b stack"><span class="small recap-k">${L.kind === "place" ? "Drop in" : "Tickets"} · ${esc(nightOf(L))}</span>
+        <h1 id="recapTitle">${esc(L.title)}</h1>
+        <p class="muted">${esc([L.when, L.price, L.where].filter(Boolean).join(" · "))}</p>
+        <p class="small recap-who">Going: ${esc(who)}</p>
+        ${L.url ? `<a class="small" style="color:var(--soc-x)" href="${esc(L.url)}" target="_blank" rel="noopener">${L.kind === "place" ? "Directions" : "See tickets"}<span class="sr"> (opens in a new tab)</span></a>` : ""}${L.attribution ? `<span class="small">Place info from ${esc(L.attribution)}</span>` : ""}
+        <div class="recap-act"><button class="btn sm pri" id="addCal">Add to calendar</button><button class="btn sm out" id="sharePlanBtn" aria-expanded="false" aria-controls="planShare">Share to chat</button></div>
+        <div id="planShare" class="stack" hidden>
+          <div class="row"><input class="in" readonly value="${esc(msg)}" aria-label="Plan to share" style="font-size:13px"><button class="btn sm out" id="copyPlan">Copy</button></div>
+          ${navigator.share ? '<button class="btn sm pri" id="nativeSharePlan" style="width:100%">Share to the group chat</button>' : ""}
+          <div class="share"><a href="https://wa.me/?text=${enc(msg)}" target="_blank" rel="noopener">WhatsApp</a><a href="${esc(sms)}">Messages</a><a href="https://t.me/share/url?url=${enc(L.url || location.origin)}&text=${enc(msg)}" target="_blank" rel="noopener">Telegram</a><button type="button" id="copyPlan2" class="wide" data-copyplan>Copy for Instagram or Messenger</button></div>
+        </div></div></section>`;
+  }
+  // An .ics file built here in the page: events at their start time (UTC), places at 7 PM that night
+  function icsText() {
+    const L = view.locked;
+    const pad = (n) => String(n).padStart(2, "0");
+    const utc = (d) => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
+    const escI = (x) => String(x || "").replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\n/g, "\\n");
+    let start, end;
+    if (L.startsAt) { const d = new Date(L.startsAt); start = `DTSTART:${utc(d)}`; end = `DTEND:${utc(new Date(d.getTime() + 3 * 3600000))}`; }
+    else { const day = String(L.date || "").replace(/-/g, ""); start = `DTSTART;TZID=America/Toronto:${day}T190000`; end = `DTEND;TZID=America/Toronto:${day}T220000`; }
+    return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//SideQuest//Sidekick//EN", "CALSCALE:GREGORIAN", "BEGIN:VEVENT", `UID:${roomId}-${L.id}@sidequest`, `DTSTAMP:${utc(new Date())}`, start, end, `SUMMARY:${escI(L.title)}`, `LOCATION:${escI(L.where)}`, `DESCRIPTION:${escI(`${view.crew}'s plan, made with Sidekick. ${L.price || ""}${L.url ? ` ${L.url}` : ""}`)}`, ...(L.url ? [`URL:${L.url}`] : []), "END:VEVENT", "END:VCALENDAR"].join("\r\n") + "\r\n";
+  }
+  function downloadICS() {
+    if (!view || !view.locked) return;
+    const url = URL.createObjectURL(new Blob([icsText()], { type: "text/calendar" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${String(view.locked.title).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "plan"}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast("Calendar file downloaded. Open it to add the plan.");
   }
 
   // Sidekick's latest line, as one speaker strip right under the people
@@ -749,6 +866,15 @@
     if (t.closest("#sheet [data-close]")) return void closeSheet();
     if (t.closest("#invitePill")) return void openSheet();
     if (t.closest("#budgetToggle")) { budgetOpen = !budgetOpen; renderCall(); return; }
+    if (t.closest("#planToggle")) { boardOpen = !boardOpen; store.set("sk:boardOpen", boardOpen); renderCall(); const b = document.getElementById("planToggle"); if (b) b.focus(); return; }
+    const un = t.closest("[data-unhear]");
+    if (un) { un.disabled = true; send("unhear", { id: un.dataset.unhear }); toast("Taken back. Say it again or tap the card."); return; }
+    const qr = t.closest("[data-quick]");
+    if (qr) { qr.disabled = true; send("line", { text: qr.textContent.trim(), kind: "typed", quick: { slot: qr.dataset.quick, value: qr.dataset.value } }); return; }
+    if (t.closest("#addCal")) return void downloadICS();
+    if (t.closest("#sharePlanBtn")) { const box = document.getElementById("planShare"); if (box) { box.hidden = !box.hidden; t.closest("#sharePlanBtn").setAttribute("aria-expanded", String(!box.hidden)); } return; }
+    if (t.closest("#copyPlan") || t.closest("[data-copyplan]")) return void copyText(planText(), "Plan copied. Paste it in the group chat.");
+    if (t.closest("#nativeSharePlan")) return void navigator.share({ title: `${view.crew}'s plan`, text: planText() }).catch(() => {});
     const ans = t.closest("[data-answer]");
     if (ans && view && view.card) {
       const card = view.card.form ? (ans.dataset.slot === "budget" ? view.card.budget : view.card.slots.find((c) => c.slot === ans.dataset.slot)) : view.card;
