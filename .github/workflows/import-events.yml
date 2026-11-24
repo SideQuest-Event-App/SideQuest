@@ -1,22 +1,27 @@
-# Imports the next three months of GTA events and puts them in Supabase Storage, where Sketch 2's server picks
-# them up within 6 hours (no commit, no redeploy). See sketch-1/import/run.js.
-#   Monday:   every source.
-#   Thursday: Ticketmaster and Instagram only; everyone else keeps Monday's events.
-# Instagram here is only the events saved by the last `node sketch-1/import/instagram.js` (run by hand);
-# this workflow never uses the AI, so it never touches the paid API key.
-# Needs repository secrets SUPABASE_URL, SUPABASE_SECRET_KEY and TICKETMASTER_API_KEY
-# (GitHub: Settings → Secrets and variables → Actions).
+# Imports the next three months of GTA events into Supabase: the events table ("listings", see
+# sketch-2/supabase/schema.sql) and, during the switch, the file in Supabase Storage. Sketch 2's server checks for a
+# new import every hour (no commit, no redeploy). See sketch-1/import/run.js.
+#   Every day except Monday, 07:17 UTC: the quick sources (Ticketmaster, City of Toronto, Toronto Public Library,
+#     Luma, DICE, Instagram); every other source keeps its events from the last run (MERGE=1).
+#   Monday, 06:23 UTC: every source (Meetup alone takes about 35 minutes).
+# The times are off the hour on purpose: GitHub delays scheduled jobs at :00 the most. Expect them to start late anyway.
+# This workflow never uses the AI (AI=off), so it never touches a paid API key.
+# Secrets (GitHub: Settings → Secrets and variables → Actions):
+#   needed: SUPABASE_URL, SUPABASE_SECRET_KEY, TICKETMASTER_API_KEY
+#   optional: INSTAGRAM_USER_ID and INSTAGRAM_ACCESS_TOKEN (Instagram Graph API; see sketch-1/import/README-instagram.md).
+#     Without them, Instagram uses the events saved by the last by-hand `node sketch-1/import/instagram.js`.
+# If you change a cron line, change the same string in the ONLY/MERGE lines below (and in sketch-1/test/import-pipeline.js).
 
 name: Import events
 
 on:
   schedule:
-    - cron: "0 9 * * 1" # Monday 9:00 UTC (5 AM in Toronto)
-    - cron: "0 9 * * 4" # Thursday
+    - cron: "17 7 * * 0,2-6" # daily quick sources (not Monday)
+    - cron: "23 6 * * 1" # Monday: every source
   workflow_dispatch: # "Run workflow" button on the Actions tab
     inputs:
       only:
-        description: "Only these sources, comma-separated (empty = all)"
+        description: "Only these sources, comma-separated (empty = all); the rest keep their last events"
         required: false
         default: ""
 
@@ -50,9 +55,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
+          INSTAGRAM_USER_ID: ${{ secrets.INSTAGRAM_USER_ID }}
+          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
           AI: "off"
           UPLOAD: "1"
-          # Thursday's run, or a hand-picked set of sources, keeps everyone else's events from the last run
-          ONLY: ${{ github.event.schedule == '0 9 * * 4' && 'Ticketmaster,Instagram' || inputs.only }}
-          MERGE: ${{ (github.event.schedule == '0 9 * * 4' || inputs.only) && '1' || '' }}
+          # The daily run, or a hand-picked set of sources, keeps everyone else's events from the last run
+          ONLY: ${{ github.event.schedule == '17 7 * * 0,2-6' && 'Ticketmaster,City of Toronto,Toronto Public Library,Luma,DICE,Instagram' || inputs.only }}
+          MERGE: ${{ (github.event.schedule == '17 7 * * 0,2-6' || inputs.only) && '1' || '' }}
         run: node import/run.js
