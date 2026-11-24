@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-24T18:12:58.165Z",
+  "generatedAt": "2026-11-24T19:38:46.290Z",
   "note": "Generated from lib/sidekick/personas.js by tools/elevenlabs-agents.js",
   "agents": [
     {
@@ -165,7 +165,7 @@
           }
         },
         "tts": {
-          "voice_id": "21m00Tcm4TlvDq8ikWAM",
+          "voice_id": "UgBBYS2sOqTuMpoF3BR0",
           "model_id": "eleven_flash_v2",
           "stability": 0.45,
           "similarity_boost": 0.8,
@@ -393,7 +393,7 @@
           }
         },
         "tts": {
-          "voice_id": "21m00Tcm4TlvDq8ikWAM",
+          "voice_id": "Qggl4b0xRMiqOwhPtVWT",
           "model_id": "eleven_flash_v2",
           "stability": 0.45,
           "similarity_boost": 0.8,
