@@ -16,6 +16,8 @@ const ai = require("../ai");
 const places = require("./places");
 const usage = require("./usage");
 const { track } = require("../analytics");
+const weather = require("../search/weather"); // context for the plan engine: rain or deep cold puts indoor picks first
+const rank = require("../search/rank"); // who-it's-for, crew match and the Wildcard on the picks
 
 const rooms = new Map();
 const SUMMARY_FILE = path.join(__dirname, "..", "..", "data", "sidekick-summaries.jsonl");
@@ -77,7 +79,11 @@ function createRoom({ crew, planner, nights, persona }) {
     unclear: null, // one person's unclear answer ("maybe Friday, or Saturday?"), asked about by name
     aside: null, // off-topic chatter to react to briefly before steering back
     invited: {}, // people invited in by name after going quiet (once each)
+    context: { weather: weather.at }, // read by plan.js score(); no forecast cached means no effect
+    history: [], // each pick shown, with everyone's fit, so later picks favour whoever was served least
+    wildcard: null, // one labelled pick from outside the crew's vibes (shown, not voted on)
   };
+  weather.refresh().catch(() => {}); // fetched at most hourly; skipped when unreachable
   if (!room.nights.length) room.nights = suggestNights().slice(0, 2).map((n) => n.date);
   rooms.set(room.id, room);
   const person = addPerson(room, { name: planner, mode: "voice", role: "planner" });
@@ -1199,6 +1205,20 @@ async function pickTwo(room, list, deadline) {
   const spokenName = (p) => { const e = pool.find((x) => x.id === p.id); return talk.spokenTitle(p.title, e && e.venue && e.venue.name); };
   await speak(room, "picks", { kinds, story, why: picks.map(whyOf), short: picks.map(spokenName), picks: picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => picks.some((p) => p.id === e.id)), deadline, late, lateKey: "fallback" });
   if (room.status !== "live") return;
+  // Who each pick is for and a crew match %, from each person's own vibe answers (never budgets or areas)
+  const members = P.answersFor(room, "vibe").map((x) => ({ id: x.person.id, name: x.person.name }));
+  for (const p of picks) {
+    const e = pool.find((x) => x.id === p.id);
+    if (!e || !members.length) continue;
+    const fits = P.crewFits(e, room).fits;
+    room.history.push({ fits });
+    p.who = rank.whoFor(fits, members);
+    p.crewMatch = rank.crewMatch(fits);
+  }
+  // The Wildcard: an event outside the vibes the crew asked for that still fits every hard limit, by Thompson sampling
+  const asked = new Set(picks.flatMap((p) => ((pool.find((x) => x.id === p.id) || {}).vibes || []).slice(0, 1)));
+  const wc = rank.wildcard(list.slice(2, 60).filter((e) => e.type !== "place" && !picks.some((p) => p.id === e.id)), { avoid: [...asked], rand: rank.rng(room.createdAt % 100000), scoreOf: (e) => -list.indexOf(e) });
+  room.wildcard = wc ? { id: wc.event.id, title: wc.event.title, when: wc.event.startsAt ? `${startDay(wc.event.startsAt)} · starts ${startTime(wc.event.startsAt)}` : wc.event.date, price: wc.event.price === 0 ? "Free" : wc.event.price != null ? `$${wc.event.price} ticket` : "Price not listed", where: [wc.event.venue && wc.event.venue.name, wc.event.neighbourhood].filter(Boolean).join(", "), why: wc.why.replace("your usual", "what the crew asked for"), url: wc.event.sourceUrl || null } : null;
   room.picks = picks;
   room.card = null;
   broadcast(room); // the cards replace the steps now, even when a tool started this and stopped waiting
@@ -1346,6 +1366,7 @@ function viewFor(room, pid) {
     modeCloseAt: room.mode === "voting" ? room.modeCloseAt || null : null,
     sidekick: room.said.slice(-3),
     picks: room.picks && room.picks.length ? room.picks : null, // [] while they're being found
+    wildcard: room.picks && room.picks.length ? room.wildcard : null,
     thinking: thinkingView(room), // "Finding your two picks": { steps: [{ label, state }], startedAt }, or null
     votes,
     myVote: me ? room.votes[me.id] || null : null,

@@ -701,6 +701,16 @@
     return `<section class="chat" aria-label="Call chat"><ol class="thread" aria-live="polite">${bubbles || '<li class="msg sys"><span class="msg-t">Type to the call. Sidekick replies here.</span></li>'}</ol>${chips}</section>`;
   }
 
+  // The Wildcard: labelled, outside what the crew asked for, shown for a look (the vote stays between the two picks)
+  function wildHTML(w) {
+    if (!w) return "";
+    const link = w.url ? `<a class="pk-link" href="${esc(w.url)}" target="_blank" rel="noopener">See tickets<span class="sr"> for ${esc(w.title)} (opens in a new tab)</span></a>` : "";
+    return `<div class="pick-card ev wild"><div class="pick wild-in"><span class="row sb"><span class="tag pri kt wild">${ICON.ticket}Wildcard</span></span>
+      <h2>${esc(w.title)}</h2><span class="pk-when">${esc(w.when)}</span>
+      ${[w.price, w.where].filter(Boolean).map((m) => `<span class="pk-meta">${esc(m)}</span>`).join("")}
+      <span class="small" style="color:var(--acc)">${esc(w.why)}</span></div>${link ? `<div class="pk-foot">${link}</div>` : ""}</div>`;
+  }
+
   function renderPicks() {
     const crewSize = view.people.length;
     const summary = view.rows.filter((r) => r.value).map((r) => r.value).join(" · ");
@@ -720,6 +730,7 @@
         <span class="pk-when">${esc(p.when)}</span>
         ${meta.filter(Boolean).map((m) => `<span class="pk-meta">${esc(m)}</span>`).join("")}
         ${p.reason ? `<span class="small" style="color:var(--acc)">${esc(p.reason)}</span>` : ""}
+        ${p.who ? `<span class="pk-who"><b>${p.crewMatch}% crew match</b> · ${esc(p.who)}</span>` : ""}
         ${fits ? `<span class="fits">${fits}</span>` : ""}
         ${p.stretch && p.stretch.length ? `<span class="small">Stretches: ${esc(p.stretch.join(", "))}</span>` : ""}
         <span class="meter"><i style="width:${Math.round((voters.length / crewSize) * 100)}%"></i></span>
@@ -735,6 +746,7 @@
     announceThinking(null);
     document.getElementById("body").innerHTML = `<div class="board${land}">${boardHead('<span class="tag ok">All set</span>')}<p class="small" style="padding:0 14px 12px;color:var(--t2)">${esc(summary)}</p></div>
       <div class="q${land}" style="border-radius:22px;border:1px solid var(--pri-e)"><span class="small">${mixed ? "A show to go to, or a spot to drop in. Tap one to vote." : "Two picks fit everyone · tap one to vote"}</span>${picks}</div>
+      ${wildHTML(view.wildcard)}
       <p class="small">Picked for your crew's budget, distance and vibe. Venues can't pay to appear here.</p>
       ${lock}`;
     renderTicks();
