@@ -3,9 +3,14 @@
 // No public search API exists, and /api/v3/destination/events/ is off-limits in robots.txt.
 // A listing query stops at 49 pages (980 events), so busy date ranges are split until each fits.
 
-const { get, jsonLdEvents, embeddedObject, sleep } = require("../fetch");
+// Prices (only 18 of 1,608 listings had one in the 15 Oct import): the event pages were read one after another, and
+// the first 429 from www.eventbrite.com blocked the host for the rest of the run, so ~1,590 pages were never read.
+// Now (1) the listing's own ticket_availability gives a price before any event page is read, (2) a 429 on an event
+// page waits and tries again instead of blocking the host, and (3) every JSON-LD event on the page is read for
+// offers (nested AggregateOffers, "CA$25.00" strings), with the page's own "is free" flag as a last resort.
 
-const USD_TO_CAD = 1.37; // Eventbrite sometimes shows prices converted to USD; convert back
+const { get, jsonLdEvents, embeddedObject, sleep } = require("../fetch");
+const { parsePrice, offersPrice, toCad } = require("../price");
 const PAGE_CAP = 49;
 const PAGE_SIZE = 20;
 
@@ -23,17 +28,56 @@ const ymd = (d) => d.toLocaleDateString("sv-SE", { timeZone: "America/Toronto" }
 const addDays = (s, n) => ymd(new Date(Date.parse(`${s}T12:00:00Z`) + n * 86400000));
 const daysBetween = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400000);
 
+// The price on a listing card, when Eventbrite includes it (ticket_availability, or an is_free flag)
+function listingPrice(r) {
+  const ta = (r && r.ticket_availability) || {};
+  if (ta.is_free === true || r.is_free === true) return { low: 0, high: 0, currency: null };
+  const low = parsePrice(ta.minimum_ticket_price);
+  if (low == null) return null;
+  const high = parsePrice(ta.maximum_ticket_price);
+  const cur = (ta.minimum_ticket_price && ta.minimum_ticket_price.currency) || null;
+  return { low, high: high != null ? high : low, currency: cur && String(cur).toUpperCase() };
+}
+
 // Only what we use from an event page, so the cache stays small
 function eventPageInfo(html) {
-  const ld = jsonLdEvents(html).find((x) => x.offers || x.organizer) || {};
-  const offers = [].concat(ld.offers || []);
+  const lds = jsonLdEvents(html);
+  const ld = lds.find((x) => x.offers || x.organizer) || {};
+  // Offers from this page's own event first, then any other event object on the page that carries them
+  let price = offersPrice(ld.offers);
+  if (!price) for (const x of lds) if (!price && x.offers && (!x.name || !ld.name || x.name === ld.name)) price = offersPrice(x.offers);
+  if (!price) {
+    // The page's app data: an explicit free flag, or a minimum ticket price object
+    if (/"(?:is_free|isFree)"\s*:\s*true/.test(html)) price = { low: 0, high: 0, currency: null };
+    else {
+      const m = html.match(/"(?:minimum_ticket_price|minimumTicketPrice|minPrice)"\s*:\s*\{[^{}]*?"(?:major_value|majorValue|value)"\s*:\s*"?([\d.]+)"?[^{}]*?\}/);
+      const cur = m && (m[0].match(/"currency"\s*:\s*"([A-Z]{3})"/) || [])[1];
+      const n = m && parsePrice(m[1]);
+      // "value" (no "major") is in cents on Eventbrite's own objects
+      if (n != null) price = { low: /"value"/.test(m[0]) && !/major/i.test(m[0]) ? n / 100 : n, high: null, currency: cur || null };
+      if (price && price.high == null) price.high = price.low;
+    }
+  }
   const org = ld.organizer && (ld.organizer.name || (ld.organizer[0] && ld.organizer[0].name));
   return {
-    offers: offers.map((o) => ({ low: o.lowPrice != null ? o.lowPrice : o.price, high: o.highPrice != null ? o.highPrice : o.price, currency: o.priceCurrency })),
+    price,
     organizer: org || null,
     description: ld.description || "",
     image: [].concat(ld.image || [])[0] || null,
   };
+}
+
+// An event page, waiting out rate limits (1, 2, 4 minutes) instead of giving up on Eventbrite for the whole run
+async function readEventPage(url, log) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await get(url, { extract: eventPageInfo, rateLimit: "throw" });
+    } catch (err) {
+      if (!err.rateLimited || attempt >= 4) throw err;
+      if (log) log(`  eventbrite: event pages rate limited, waiting ${2 ** (attempt - 1)} min`);
+      await sleep(2 ** (attempt - 1) * 60000);
+    }
+  }
 }
 
 async function fetchEventbrite({ start, end, max, log }) {
@@ -109,21 +153,18 @@ async function fetchEventbrite({ start, end, max, log }) {
     let price = null;
     let priceHigh = null;
     let priceNote = null;
-    let organizer = null;
+    let organizer = (r.primary_organizer && r.primary_organizer.name) || null;
     let description = r.summary || "";
     let image = r.image && r.image.image_sizes && (r.image.image_sizes.large || r.image.image_sizes.medium);
+    const fromListing = listingPrice(r);
+    if (fromListing) ({ price, priceHigh, priceNote } = toCad(fromListing));
     try {
-      const info = await get(r.url, { extract: eventPageInfo });
+      const info = await readEventPage(r.url, log);
       if (info) {
-        const lows = info.offers.map((o) => Number(o.low)).filter(Number.isFinite);
-        const highs = info.offers.map((o) => Number(o.high)).filter(Number.isFinite);
-        const usd = info.offers.some((o) => o.currency === "USD");
-        if (lows.length) {
-          price = Math.min(...lows) * (usd ? USD_TO_CAD : 1);
-          priceHigh = Math.max(...highs) * (usd ? USD_TO_CAD : 1);
-          if (usd && price > 0) priceNote = `About $${Math.ceil(price)}${priceHigh > price + 1 ? "+" : ""} (converted)`;
-        }
-        organizer = info.organizer;
+        // Older cached pages kept a list of offers; newer ones keep the price itself
+        const p = info.price || (info.offers && offersPrice(info.offers.map((o) => ({ lowPrice: o.low, highPrice: o.high, priceCurrency: o.currency }))));
+        if (p && price == null) ({ price, priceHigh, priceNote } = toCad(p));
+        organizer = info.organizer || organizer;
         if (info.description.length > description.length) description = info.description;
         image = image || info.image;
       }
@@ -152,4 +193,4 @@ async function fetchEventbrite({ start, end, max, log }) {
   return out;
 }
 
-module.exports = { fetchEventbrite, torontoISO };
+module.exports = { fetchEventbrite, torontoISO, eventPageInfo, listingPrice };

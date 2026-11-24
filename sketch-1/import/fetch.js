@@ -86,7 +86,9 @@ async function checkRobots(url) {
 
 // extract: optional (body) => JSON-able value. Only that value is cached, so big pages we read
 // thousands of (Eventbrite and Meetup event pages) don't fill the disk.
-async function get(url, { json = false, headers = {}, extract = null, timeoutMs = 30000 } = {}) {
+// rateLimit: "block" (default) stops asking a host that rate-limits us twice; "throw" hands the 429 straight back
+// (without blocking the host) so the caller can wait and try again, as the Eventbrite event pages do.
+async function get(url, { json = false, headers = {}, extract = null, timeoutMs = 30000, rateLimit = "block" } = {}) {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
   const file = path.join(CACHE_DIR, crypto.createHash("sha1").update(url).digest("hex") + (extract ? ".x" : ""));
   try {
@@ -113,6 +115,7 @@ async function get(url, { json = false, headers = {}, extract = null, timeoutMs 
       const res = await fetch(url, { headers: { "user-agent": UA, "accept-language": "en-CA,en;q=0.8", ...headers }, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
       if (res.status === 429) {
         lastErr = new Error(`429 rate limited: ${url}`);
+        if (rateLimit === "throw") throw Object.assign(lastErr, { rateLimited: true });
         if (attempt) blocked[host] = "is rate-limiting us (429), so we stopped asking it this run";
         else await sleep(30000);
         continue;
@@ -130,7 +133,7 @@ async function get(url, { json = false, headers = {}, extract = null, timeoutMs 
       return json ? JSON.parse(body) : body;
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
-      if (blocked[host]) break;
+      if (blocked[host] || lastErr.rateLimited) break;
       await sleep(2000);
     }
   }

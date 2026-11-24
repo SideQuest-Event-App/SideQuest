@@ -1,0 +1,4 @@
+{
+  "note": "Public iCalendar feeds from Toronto venues and groups, read by import/sources/ics.js. Add a feed only after opening it, checking it is a public subscribe-able calendar, and noting where its terms allow reuse. Shape: { \"name\": \"Venue name (calendar)\", \"url\": \"https://.../events.ics\", \"page\": \"https://... (the venue's events page)\", \"terms\": \"where reuse is allowed\", \"venue\": { \"name\": \"...\", \"address\": \"...\", \"lat\": 43.65, \"lng\": -79.4 }, \"categories\": [\"music\"] }",
+  "feeds": []
+}
