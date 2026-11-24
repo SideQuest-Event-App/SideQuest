@@ -252,7 +252,7 @@ async function speak(room, move, c = {}) {
 What's settled so far (what the group can see): ${publicFacts(room, f)}.
 Recent conversation:
 ${room.lines.slice(-6).map((l) => `${l.name}: ${redact(l.text)}`).join("\n") || "(nobody has spoken yet)"}
-${list ? `Events that fit (the only facts you may use about places):\n${list}\n` : ""}
+${list ? `Events that fit (the only facts you may use about places):\n${list}\n` : ""}${room.said.length ? `Your last lines (start differently from these):\n${room.said.slice(-3).map((s) => `- ${s.text}`).join("\n")}\n` : ""}
 Your move: ${moves[move]}`;
     try {
       const out = await claude.say(personas.systemPrompt(room.persona), user, 120);
@@ -261,7 +261,7 @@ Your move: ${moves[move]}`;
       console.error(err.message);
     }
   }
-  if (!text) text = personas.fallbackLine(room.persona, move, ctx);
+  if (!text) text = personas.fallbackLine(room.persona, move, ctx, room.said.filter((s) => !s.system).slice(-3).map((s) => s.text));
   const line = { id: id(4), text, move, at: now() };
   room.said.push(line);
   if (room.said.length > 20) room.said.shift();
@@ -352,7 +352,9 @@ async function decide(room, { forcePicks = false } = {}) {
     room.card = { slot, at: now() };
     room.asked.push(slot);
     track("sk_question_asked", { sessionId: room.id, persona: room.persona, slot, pool: r.pool, n: room.asked.length });
-    const recap = rows(room, f).filter((x) => x.state === "done" && !P.SLOTS[x.slot].private).map((x) => x.value).join(", ");
+    // A recap that sounds spoken: "Saturday, after 6, live music", not "Sat, Nov 28, After 6, Live music"
+    const spoken = (r) => (r.slot === "night" ? r.value.replace(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*,?\s+\w+\s+\d+/g, (m) => ({ Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" })[m.slice(0, 3)]) : r.slot === "origin" ? "" : r.value.toLowerCase());
+    const recap = rows(room, f).filter((x) => x.state === "done" && !P.SLOTS[x.slot].private).map(spoken).filter(Boolean).join(", ");
     await speak(room, first ? "welcome" : "ask", { slot, recap, events: slot === "origin" ? r.list : [] });
   }
 }
@@ -491,7 +493,8 @@ function viewFor(room, pid) {
     myVote: me ? room.votes[me.id] || null : null,
     locked: room.locked,
     surveyed: Boolean(me && room.surveys[me.id]),
-    voice: room.persona === "host" ? { rate: 1.06, pitch: 1.1 } : { rate: 0.97, pitch: 1 }, // read-aloud settings; the persona itself is never shown (blind test)
+    // Read-aloud settings. `slot` lets the planner's phone give each persona its own voice; it's never shown (blind test)
+    voice: room.persona === "host" ? { slot: "host", rate: 1.05, pitch: 1.08 } : { slot: "facilitator", rate: 0.98, pitch: 1 },
   };
 }
 

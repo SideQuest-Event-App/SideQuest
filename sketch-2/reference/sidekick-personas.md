@@ -31,6 +31,23 @@ The prompts are in `lib/sidekick/personas.js`.
 | Local detail | "Leslieville's a quick streetcar ride east, and people say the jazz trio there is properly cosy." | "The jazz trio's in Leslieville, about 15 minutes east of Union, and reviews say it's relaxed." |
 | Read-aloud | Slightly faster and higher (rate 1.06, pitch 1.1) | Steady (rate 0.97, pitch 1.0) |
 
+## How it sounds
+
+Both personas follow rules for writing for the ear (`EAR` in `personas.js`), drawn from Google's, Amazon's and Apple's voice-design guides:
+- **One breath:** about 20 words.
+- **Spoken numbers:** "about twenty bucks", "Saturday", not "$20.00" or "Sat, Nov 28".
+- **Varied openers:** the model is shown its last three lines so it doesn't start the same way, and the fallback lines come in several versions.
+- **Small linking words:** "So", "Alright". Never "um".
+- **Clear handoff:** each line ends with a question to someone.
+
+**On the planner's phone:**
+- **Best voice first:** Sidekick uses the most natural voice the device has. In order: Edge's "Online (Natural)" voices, then Apple's "Premium"/"Enhanced" voices, then Google's.
+- **A voice per persona:** the host and the facilitator get different voices.
+- **Clean-up before speaking:** brackets are dropped, and abbreviations are read out in full.
+- **Stops for people:** Sidekick stops talking as soon as anyone else starts.
+
+A planner can choose the voice for each persona; the choice is saved on that phone. The browser demo has a voice picker for trying them. Paid voices from OpenAI or ElevenLabs would be a server-side step on top of this.
+
 ## How the A/B test works
 
 - **Assignment:** each new call is randomly given one persona, 50/50.

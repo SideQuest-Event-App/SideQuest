@@ -432,23 +432,82 @@
   }
 
   // ---------- Reading Sidekick aloud: the planner's phone only, and only in a pause ----------
+  // Picks the most natural voice this device has (Edge "Online (Natural)", Apple "Premium"/"Enhanced",
+  // Google), gives each persona its own voice, cleans text for speech, and stops when someone talks.
+  const NOVELTY = /Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Deranged|Good News|Hysterical|Jester|Junior|Kathy|Organ|Princess|Ralph|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|eSpeak/i;
+  const GOOD_NAMES = /\b(Ava|Emma|Andrew|Brian|Jenny|Aria|Guy|Michelle|Christopher|Eric|Steffan|Clara|Liam|Samantha|Zoe|Allison|Evan|Nathan|Joelle|Noelle|Tom|Susan|Serena|Daniel|Karen|Moira|Tessa)\b/;
+  const Voice = {
+    score(v) {
+      if (!/^en(-|_|$)/i.test(v.lang) || NOVELTY.test(v.name)) return -1;
+      let s = 10;
+      if (/natural/i.test(v.name)) s += 60;
+      if (/premium/i.test(v.name)) s += 50;
+      if (/enhanced/i.test(v.name)) s += 40;
+      if (/^Google/i.test(v.name)) s += 25;
+      if (GOOD_NAMES.test(v.name)) s += 10;
+      if (/en[-_](CA|US)/i.test(v.lang)) s += 5;
+      if (/compact/i.test(v.name)) s -= 20;
+      return s;
+    },
+    quality(v) {
+      return /natural/i.test(v.name) ? "Natural" : /premium/i.test(v.name) ? "Premium" : /enhanced/i.test(v.name) ? "Enhanced" : /^Google/i.test(v.name) ? "Google" : "Standard";
+    },
+    list() {
+      if (!("speechSynthesis" in window)) return [];
+      return speechSynthesis.getVoices().map((v) => ({ v, s: Voice.score(v) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s || a.v.name.localeCompare(b.v.name)).map((x) => x.v);
+    },
+    // slot: "host" or "facilitator". A saved choice wins; otherwise the best voice, and the
+    // facilitator takes the next best one so the two personas sound different.
+    pick(slot) {
+      const all = Voice.list();
+      const saved = store.get(`sk:voice:${slot}`);
+      const chosen = saved && all.find((v) => v.name === saved);
+      if (chosen) return chosen;
+      return slot === "facilitator" ? all[1] || all[0] : all[0];
+    },
+    speakable(text) {
+      const days = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
+      return String(text)
+        .replace(/\([^)]*\)/g, "")
+        .replace(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}\b/g, (m, d) => days[d])
+        .replace(/\$(\d+)(\.00)?\b/g, "$1 dollars")
+        .replace(/\bw\//gi, "with ")
+        .replace(/\s@\s/g, " at ")
+        .replace(/&/g, " and ")
+        .replace(/^Free event\.\s*/i, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+    },
+    // Say a line now. Returns the utterance (used by the demo's voice picker too).
+    say(text, { slot = "facilitator", rate = 1, pitch = 1, voice } = {}) {
+      const u = new SpeechSynthesisUtterance(Voice.speakable(text));
+      const v = voice || Voice.pick(slot);
+      if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-CA";
+      u.rate = rate;
+      u.pitch = /natural|premium|enhanced/i.test((v && v.name) || "") ? 1 : pitch; // good voices sound worse when pitch-shifted
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+      return u;
+    },
+  };
+  window.SidekickVoice = Voice;
+  if ("speechSynthesis" in window) { speechSynthesis.getVoices(); speechSynthesis.addEventListener?.("voiceschanged", () => {}); }
+
   let aloud = store.get("sk:aloud") !== false;
   let lastRead = null;
   function readAloud(tries = 0) {
-    if (!view.me.planner || !aloud || !("speechSynthesis" in window)) return;
+    if (!("speechSynthesis" in window)) return;
+    // Barge-in: if anyone else starts talking while Sidekick is speaking, stop at once
+    if (speechSynthesis.speaking && view.people.some((p) => p.talking && p.id !== view.me.id)) speechSynthesis.cancel();
+    if (!view.me.planner || !aloud) return;
     const last = view.sidekick.slice(-1)[0];
     if (!last || last.system || last.id === lastRead) return;
     if (lastRead === null && Date.now() - last.at > 15000) { lastRead = last.id; return; } // don't replay old lines after a reload
     if (view.people.some((p) => p.talking) && tries < 6) return void setTimeout(() => readAloud(tries + 1), 1200);
     lastRead = last.id;
-    const u = new SpeechSynthesisUtterance(last.text);
-    u.lang = "en-CA";
-    u.rate = view.voice.rate;
-    u.pitch = view.voice.pitch;
+    const u = Voice.say(last.text, view.voice);
     u.onstart = () => { if (micOn && rec) { paused = true; try { rec.stop(); } catch {} } }; // don't caption Sidekick's own voice
-    u.onend = () => { if (paused) { paused = false; if (micOn) try { rec.start(); } catch {} } };
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
+    u.onend = u.onerror = () => { if (paused) { paused = false; if (micOn) try { rec.start(); } catch {} } };
   }
 
   // ---------- Start ----------
