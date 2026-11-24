@@ -300,7 +300,7 @@
 
   function renderSay() {
     const last = view.sidekick.slice(-1)[0];
-    document.getElementById("say").innerHTML = last && phase !== "locked" && phase !== "ended"
+    document.getElementById("say").innerHTML = last && phase !== "ended"
       ? `<div class="say ${last.system ? "sys" : ""}"><span class="orb" style="margin-top:4px"></span><p>${esc(last.text)}</p></div>`
       : "";
   }
@@ -456,14 +456,14 @@
       if (!("speechSynthesis" in window)) return [];
       return speechSynthesis.getVoices().map((v) => ({ v, s: Voice.score(v) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s || a.v.name.localeCompare(b.v.name)).map((x) => x.v);
     },
-    // slot: "host" or "facilitator". A saved choice wins; otherwise the best voice, and the
+    // slot: "friend" or "concierge". A saved choice wins; otherwise the best voice, and the
     // facilitator takes the next best one so the two personas sound different.
     pick(slot) {
       const all = Voice.list();
       const saved = store.get(`sk:voice:${slot}`);
       const chosen = saved && all.find((v) => v.name === saved);
       if (chosen) return chosen;
-      return slot === "facilitator" ? all[1] || all[0] : all[0];
+      return slot === "concierge" ? all[1] || all[0] : all[0];
     },
     speakable(text) {
       const days = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
@@ -479,7 +479,7 @@
         .trim();
     },
     // Say a line now. Returns the utterance (used by the demo's voice picker too).
-    say(text, { slot = "facilitator", rate = 1, pitch = 1, voice } = {}) {
+    say(text, { slot = "concierge", rate = 1, pitch = 1, voice } = {}) {
       const u = new SpeechSynthesisUtterance(Voice.speakable(text));
       const v = voice || Voice.pick(slot);
       if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-CA";

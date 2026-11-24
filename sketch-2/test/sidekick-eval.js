@@ -127,7 +127,7 @@ async function run(script, persona) {
 (async () => {
   console.log(`Nights: ${FRI} and ${SAT}. Understanding speech with: ${process.env.ANTHROPIC_API_KEY ? "AI" : "keywords"}\n`);
   const results = [];
-  for (const persona of ["host", "facilitator"])
+  for (const persona of ["friend", "concierge"])
     for (const s of SCRIPTS) {
       const r = await run(s, persona);
       results.push(r);

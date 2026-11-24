@@ -36,7 +36,7 @@ function createRoom({ crew, planner, nights, persona }) {
     id: id(),
     crew: String(crew || "The crew").slice(0, 40),
     nights: (Array.isArray(nights) ? nights : []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 4),
-    persona: personas.PERSONA_IDS.includes(persona) ? persona : personas.PERSONA_IDS[crypto.randomInt(personas.PERSONA_IDS.length)],
+    persona: persona ? personas.resolve(persona) : personas.PERSONA_IDS[crypto.randomInt(personas.PERSONA_IDS.length)],
     createdAt: now(),
     touched: now(),
     people: [],
@@ -109,6 +109,11 @@ function addLine(room, person, text, kind) {
   room.pending.push(line);
   person.lastSpokeAt = now();
   if (/\bside ?kick\b/i.test(text)) room.addressed = line;
+  const slot = room.card && room.card.slot;
+  if (slot && !P.SLOTS[slot].private && FLEX.test(text) && P.SLOTS[slot].multi) {
+    setAnswer(room, person, slot, P.optionsFor(slot, room).map(([v]) => v), kind === "typed" ? "call_text" : "call_speech");
+    line.flex = true;
+  } else if (slot && UNSURE.test(text)) room.wantGuide = slot;
   if (room.offer && /\b(yes|yeah|yep|sure|ok(ay)?|show (us|me)|do it|go for it|sounds good)\b/i.test(text)) acceptOffer(room);
 }
 
@@ -119,6 +124,10 @@ function acceptOffer(room) {
   room.offer = null;
   return true;
 }
+
+// "Anything works" is an answer (all options); "not sure" is a cue for Sidekick to offer ideas
+const FLEX = /\b(anything|whatever|either|any of (them|those)|don'?t mind|up to you|no preference|all good|i'?m easy|i'?m down for whatever)\b/i;
+const UNSURE = /\b(idk|i don'?t know|not sure|dunno|no idea|can'?t decide|no clue|hmm+)\b/i;
 
 // ---------- Understanding what people said ----------
 
@@ -232,7 +241,7 @@ function eventBrief(e, origins) {
 async function speak(room, move, c = {}) {
   const f = factsOf(room);
   const people = P.crew(room);
-  const ctx = { crew: room.crew, slot: c.slot, recap: c.recap, a: c.a, b: c.b, person: c.person, picks: c.picks || [], short: c.short || [], relax: c.relax, n: c.n };
+  const ctx = lineContext(room, f, c);
   let text = null;
   let usedAI = false;
   if (claude.available()) {
@@ -246,6 +255,9 @@ async function speak(room, move, c = {}) {
       nudge: `Gently invite ${c.person} in to answer: ${PROMPTS[c.slot]}`,
       picks: `Introduce these two picks and ask everyone to vote. You may add one local detail from the event data.\n1) ${c.picks[0]}\n2) ${c.picks[1]}`,
       none: c.relax ? `Nothing fits everything they've said. Say that ${c.relax} would open up ${c.n} options, and ask if they want to see them. Don't say whose answer is the tight one.` : `Nothing fits everything they've said. Ask whether anyone could be flexible on the time or the night.`,
+      guide: `People seem unsure about this: ${PROMPTS[c.slot]} Help them answer by offering these concrete options from what's actually on: ${c.options}. Keep it light and end with a question.`,
+      locked: `The planner just locked the plan: ${c.pick}. Confirm it warmly in one short sentence.`,
+      wrap: `Point everyone to the two quick survey questions on their screen, in one short sentence.`,
       answer: `${c.person} just spoke to you: "${redact(c.question || "")}". Reply briefly, using only the facts and events here. If picks aren't ready yet, say what you still need.`,
     };
     const user = `Crew: ${room.crew}. On the call: ${people.map((p) => `${p.name} (${p.mode})`).join(", ")}.
@@ -261,13 +273,58 @@ Your move: ${moves[move]}`;
       console.error(err.message);
     }
   }
-  if (!text) text = personas.fallbackLine(room.persona, move, ctx, room.said.filter((s) => !s.system).slice(-3).map((s) => s.text));
+  const lineKey = move === "welcome" ? "hello" : move === "ask" ? `ask_${c.slot}` : move === "conflict" ? "clash" : move === "none" ? "loosen" : move;
+  if (!text) text = personas.fallbackLine(room.persona, lineKey, ctx, room.said.filter((s) => !s.system).slice(-3).map((s) => s.text));
   const line = { id: id(4), text, move, at: now() };
   room.said.push(line);
   if (room.said.length > 20) room.said.shift();
   room.lastSaidAt = now();
   track("sk_said", { sessionId: room.id, persona: room.persona, move, ai: usedAI, words: text.split(/\s+/).length });
   return line;
+}
+
+const DAY = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
+const spokenDay = (label) => DAY[String(label).slice(0, 3)] || label;
+const WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight"];
+const cleanTitle = (t) => String(t || "").replace(/^Free event\.\s*/i, "").replace(/\s+[|@]\s.*$/, "").trim();
+
+// The facts the line book's {placeholders} need
+function lineContext(room, f, c) {
+  const nights = room.nights.map((d) => spokenDay(P.nightLabel(d)));
+  const agreed = f.night.known && f.night.value.length ? spokenDay(P.nightLabel(f.night.value[0])) : null;
+  const missing = [];
+  if (!(room.nights.length === 1 || f.night.known)) missing.push("which night");
+  if (f.budget.answered < P.need(room)) missing.push("everyone's budget");
+  if (!f.origin.known) missing.push("where everyone's starting");
+  return {
+    crew: room.crew,
+    nights: nights.length > 1 ? `${nights.slice(0, -1).join(", ")} or ${nights[nights.length - 1]}` : nights[0],
+    night: agreed,
+    name: c.person,
+    a: c.aLabel, b: c.bLabel, a_count: c.aCount != null ? WORDS[c.aCount] || c.aCount : null, b_count: c.bCount != null ? WORDS[c.bCount] || c.bCount : null,
+    loosen: c.relax, n: c.n != null ? WORDS[c.n] || c.n : null,
+    pick1: c.short && c.short[0], pick2: c.short && c.short[1], why1: c.why && c.why[0], why2: c.why && c.why[1], pick: c.pick,
+    missing: missing.length ? missing.slice(0, 2).join(" and ") : null,
+    options: c.options,
+  };
+}
+
+// Concrete ideas for an open question, from what's actually on (used when the group is unsure)
+function ideasFor(room, f, slot, events) {
+  const pool = P.filterEvents(events, room, f);
+  const count = (pred) => pool.filter(pred).length;
+  if (slot === "vibe") {
+    const names = { music: "live music", comedy: "comedy", games: "a games night", dance: "dancing", arts: "art or a film" };
+    const ranked = Object.keys(P.VIBES).map((v) => [v, count((e) => (e.vibes || []).some((t) => P.VIBES[v].includes(t)))]).filter(([, n]) => n).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([v]) => names[v]);
+    return ranked.length ? (ranked.length > 1 ? `${ranked.slice(0, -1).join(", ")}, or ${ranked[ranked.length - 1]}` : ranked[0]) : null;
+  }
+  if (slot === "night") {
+    const per = room.nights.map((d) => [spokenDay(P.nightLabel(d)), count((e) => P.localDay(e.startsAt) === d)]).sort((a, b) => b[1] - a[1]);
+    return per.length ? `the most going on ${per[0][0]}${per[1] ? `, a bit less on ${per[1][0]}` : ""}` : null;
+  }
+  if (slot === "time") return "an early dinner-and-a-show kind of night, or a later one after eight";
+  if (slot === "origin") return "Union, Finch, Kennedy or Kipling, whichever's closest";
+  return null;
 }
 
 // ---------- The loop: listen, update, decide ----------
@@ -292,6 +349,14 @@ async function think(room) {
       }
       applyUpdates(room, out, lines);
       if (out.addressed_sidekick && !room.addressed) room.addressed = lines[lines.length - 1];
+      if (room.card && !P.SLOTS[room.card.slot].private) {
+        const slot = room.card.slot;
+        for (const l of lines) {
+          const answeredSomething = Object.values(room.answers[l.pid] || {}).some((x) => x && x.at >= l.at - 50);
+          if (!l.flex && !answeredSomething) room.card.idle = (room.card.idle || 0) + 1;
+        }
+        if (room.card.idle >= 2) room.wantGuide = slot; // two lines of chatter and nobody answered
+      }
     }
     await decide(room);
   } finally {
@@ -328,9 +393,22 @@ async function decide(room, { forcePicks = false } = {}) {
     room.conflictsSaid[key] = true;
     room.card = { slot, at: now() };
     const label = (v) => `${P.labelOf(slot, v, room)} (${(f[slot].supporters[v] || []).join(", ")})`;
-    await speak(room, "conflict", { slot, a: label(c[0]), b: label(c[1]) });
+    const plain = (v) => (slot === "night" ? spokenDay(P.labelOf(slot, v, room)) : P.labelOf(slot, v, room).toLowerCase());
+    await speak(room, "conflict", { slot, a: label(c[0]), b: label(c[1]), aLabel: plain(c[0]), bLabel: plain(c[1]), aCount: (f[slot].supporters[c[0]] || []).length, bCount: (f[slot].supporters[c[1]] || []).length });
     return;
   }
+
+  if (room.wantGuide && room.card && room.card.slot === room.wantGuide && !room.card.guided) {
+    room.card.guided = true;
+    room.wantGuide = null;
+    const options = ideasFor(room, f, room.card.slot, events);
+    if (options) {
+      track("sk_guided", { sessionId: room.id, persona: room.persona, slot: room.card.slot });
+      await speak(room, "guide", { slot: room.card.slot, options });
+      return;
+    }
+  }
+  room.wantGuide = null;
 
   if (r.ready) return makePicks(room, r.list);
   if (r.reason === "too-few" && (f.night.known || room.nights.length === 1) && f.budget.known) {
@@ -367,7 +445,12 @@ function nudgeTick() {
     const slot = room.card.slot;
     if (now() - room.card.at < NUDGE_AFTER_MS || (room.lastSaidAt && now() - room.lastSaidAt < NUDGE_AFTER_MS)) continue;
     const got = P.answersFor(room, slot).map((x) => x.person.id);
-    if (!got.length || P.SLOTS[slot].private) continue;
+    if (P.SLOTS[slot].private) continue;
+    if (!got.length) {
+      const quietSince = Math.max(room.card.at, ...room.lines.map((l) => l.at));
+      if (!room.card.guided && now() - quietSince > 30000) { room.wantGuide = slot; schedule(room, 10); }
+      continue;
+    }
     const quiet = P.crew(room).find((p) => p.mode !== "form" && !got.includes(p.id) && !(room.nudged[slot] || []).includes(p.id));
     if (!quiet) continue;
     room.nudged[slot] = [...(room.nudged[slot] || []), quiet.id];
@@ -400,7 +483,12 @@ async function makePicks(room, list) {
   room.card = null;
   track("call_facts_complete", { sessionId: room.id, persona: room.persona, secs: Math.round((now() - room.createdAt) / 1000), questions: room.asked.length });
   track("picks_shown", { sessionId: room.id, persona: room.persona, pool: list.length });
-  await speak(room, "picks", { short: room.picks.map((p) => p.title), picks: room.picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => room.picks.some((p) => p.id === e.id)) });
+  const whyOf = (p) => {
+    const e = pool.find((x) => x.id === p.id);
+    const vibe = (e.vibes || [])[0];
+    return [[vibe && vibe.toLowerCase(), e.neighbourhood && `in ${e.neighbourhood}`].filter(Boolean).join(" "), e.price === 0 ? "and it's free" : e.price != null ? `about ${e.price} dollars` : null].filter(Boolean).join(", ");
+  };
+  await speak(room, "picks", { why: room.picks.map(whyOf), short: room.picks.map((p) => cleanTitle(p.title)), picks: room.picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => room.picks.some((p) => p.id === e.id)) });
 }
 
 // ---------- Ending, saving the summary ----------
@@ -494,7 +582,7 @@ function viewFor(room, pid) {
     locked: room.locked,
     surveyed: Boolean(me && room.surveys[me.id]),
     // Read-aloud settings. `slot` lets the planner's phone give each persona its own voice; it's never shown (blind test)
-    voice: room.persona === "host" ? { slot: "host", rate: 1.05, pitch: 1.08 } : { slot: "facilitator", rate: 0.98, pitch: 1 },
+    voice: room.persona === "friend" ? { slot: "friend", rate: 1.02, pitch: 1.04 } : { slot: "concierge", rate: 0.95, pitch: 1 },
   };
 }
 
@@ -582,6 +670,10 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       for (const ev of Object.values(room.votes)) tally[ev] = (tally[ev] || 0) + 1;
       const chosen = Number(body.eventId) || Number(Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0]) || room.picks[0].id;
       room.locked = room.picks.find((p) => p.id === chosen) || room.picks[0];
+      speak(room, "locked", { pick: cleanTitle(room.locked.title) }).then(() => {
+        broadcast(room);
+        setTimeout(() => speak(room, "wrap", {}).then(() => broadcast(room)), 6000).unref();
+      });
       room.status = "locked";
       track("plan_locked", { sessionId: room.id, persona: room.persona, eventId: room.locked.id, secs: Math.round((now() - room.createdAt) / 1000), votes: Object.keys(room.votes).length });
       broadcast(room);

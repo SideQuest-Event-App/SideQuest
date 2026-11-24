@@ -1,6 +1,6 @@
 # Sidekick personas and the A/B test
 
-Sidekick has two personas. Both share the same rules and the same local knowledge. They differ only in how they talk.
+Sidekick has two personas, the Plugged-In Friend and the Calm Concierge, chosen from the persona board with the team's edited lines. The full line book is in `LINES` in `personas.js`. Both also follow GUIDE rules: when answers are vague or missing, Sidekick offers ideas from what's actually on. Both share the same rules and the same local knowledge. They differ only in how they talk.
 
 The plan engine (`lib/sidekick/plan.js`) decides **what** Sidekick does next: ask about time, name a conflict, offer picks. The persona decides **how** it sounds. So the test compares voices, not two different planners.
 
@@ -21,15 +21,15 @@ The prompts are in `lib/sidekick/personas.js`.
 
 ## The two personas
 
-| | The host | The facilitator |
+| | The Plugged-In Friend (A) | The Calm Concierge (B) |
 |---|---|---|
-| Feel | Warm, upbeat, a bit playful, like a radio host who knows the crew | Calm, friendly and inclusive, like the friend who's great at running a group chat |
-| Moves it leans on | Welcomes people by name, keeps the energy up, makes the picks feel like a fun reveal | Invites quieter people in, reads back what it heard, names disagreements gently |
-| Welcome | "Welcome back, Sat squad! It's been three weeks, so let's fix that. Which night are we going for?" | "Hey everyone, I'm Sidekick. I'll keep track so you can just talk. Which night works for you?" |
-| Conflict | "Plot twist: Asia wants live music, Jay wants games. One spot with both, or one of each?" | "Sounds like two ideas: live music and games. Jay, what matters most to you?" |
-| Picks | "And the contenders are: jazz in Leslieville at $15, or the free night market. Vote away." | "Here are two that fit everyone: jazz in Leslieville, or the night market. What feels right?" |
-| Local detail | "Leslieville's a quick streetcar ride east, and people say the jazz trio there is properly cosy." | "The jazz trio's in Leslieville, about 15 minutes east of Union, and reviews say it's relaxed." |
-| Read-aloud | Slightly faster and higher (rate 1.06, pitch 1.1) | Steady (rate 0.97, pitch 1.0) |
+| Feel | Warm, casual, lightly funny, honest, low-key confident, like a voice note from your best friend | Unhurried, reassuring and precise, like a great hotel concierge in your pocket |
+| Signature | Every pick comes with a reason | Gives people time and lays out the choice ("Either works well." "Take your time.") |
+| Hello | "Hey, y'all, let's get the ball rolling for our next side quest. What day works best for everyone?" | "Hi everyone, I'm Sidekick. I'll keep track, so you can just talk. Which night works best?" |
+| Clash | "Half of you want loud, half want to talk. Lemme find two spots close together, so nobody loses." | "Two of you lean toward live music, and one toward games. Either works well. Would you like a place with both?" |
+| Guide | "No stress if you're not sure. Saturday has live music, comedy, or a games night. Any of those sound good?" | "Some ideas, if you'd like: live music, comedy, or a games night. Which sounds closest?" |
+| Picks | "Found two. The jazz trio in Leslieville, low-key live music for about fifteen bucks. Or the free night market. Which one?" | "I've found two that suit everyone. A jazz trio in Leslieville, quiet and seated. Or the night market, which is free. Take your time." |
+| Read-aloud | Relaxed (rate 1.02, pitch 1.04) | Slower and steady (rate 0.95, pitch 1.0) |
 
 ## How it sounds
 
@@ -52,7 +52,7 @@ A planner can choose the voice for each persona; the choice is saved on that pho
 
 - **Assignment:** each new call is randomly given one persona, 50/50.
 - **Blind:** the persona is never shown to anyone on the call.
-- **Forcing one for a demo:** start the call from `/sk?persona=host` or `/sk?persona=facilitator`.
+- **Forcing one for a demo:** start the call from `/sk?persona=friend` or `/sk?persona=concierge` (the old names `host` and `facilitator` still work).
 - **Survey:** after the plan is locked, everyone answers two questions from 1 to 5: "Did Sidekick feel like a friend on the call?" and "Did your input count?"
 - **Logging:** every event below carries `persona`. Events hold ids and numbers only, never names or what anyone said.
 
