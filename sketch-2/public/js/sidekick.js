@@ -705,7 +705,7 @@
   function wildHTML(w) {
     if (!w) return "";
     const link = w.url ? `<a class="pk-link" href="${esc(w.url)}" target="_blank" rel="noopener">See tickets<span class="sr"> for ${esc(w.title)} (opens in a new tab)</span></a>` : "";
-    return `<div class="pick-card ev wild"><div class="pick wild-in"><span class="row sb"><span class="tag pri kt wild">${ICON.ticket}Wildcard</span></span>
+    return `<div class="wild-card"><div class="wild-in"><span class="row sb"><span class="tag pri kt wild">${ICON.ticket}Wildcard</span></span>
       <h2>${esc(w.title)}</h2><span class="pk-when">${esc(w.when)}</span>
       ${[w.price, w.where].filter(Boolean).map((m) => `<span class="pk-meta">${esc(m)}</span>`).join("")}
       <span class="small" style="color:var(--acc)">${esc(w.why)}</span></div>${link ? `<div class="pk-foot">${link}</div>` : ""}</div>`;

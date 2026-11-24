@@ -231,6 +231,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-weight:600}
 /* Who each pick is for and the crew match (names and fits only); the labelled Wildcard under the two picks */
 .pk-who{font-size:13px;line-height:18px;color:var(--t2)}
 .pk-who b{font-weight:600;color:var(--acc)}
-.pick-card.wild{margin-top:12px;border-style:dashed;border-color:var(--pri-e)}
-.pick-card .wild-in{display:flex;flex-direction:column;gap:8px;padding:14px}
+.wild-card{display:flex;flex-direction:column;margin-top:12px;border-radius:20px;background:var(--surf);border:1px dashed var(--pri-e);overflow:hidden}
+.wild-card .wild-in{display:flex;flex-direction:column;gap:8px;padding:14px;text-align:left}
+.wild-card h2{margin:0}
 .kt.wild{background:var(--pri);color:var(--base)}

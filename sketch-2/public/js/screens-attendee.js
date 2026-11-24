@@ -506,7 +506,8 @@
     const pls = L.show.places ? L.places || [] : [];
     const sel = L.sel;
     const pins = [
-      ...evs.slice(0, 60).map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, kind: "event", tier: pick(e) ? SQ.matchTier(matchOf(e)) : "low", selected: sel === `e${e.id}`, act: "lxPin", arg: `e${e.id}`, label: e.title })),
+      // The map draws the best matches (by match, as before); the list below follows the feed's varied order
+      ...[...evs].sort((a, b) => matchOf(b) - matchOf(a) || a.startsAt.localeCompare(b.startsAt)).slice(0, 60).map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, kind: "event", tier: pick(e) ? SQ.matchTier(matchOf(e)) : "low", selected: sel === `e${e.id}`, act: "lxPin", arg: `e${e.id}`, label: e.title })),
       ...pls.map((p) => ({ lat: p.lat, lng: p.lng, kind: "place", selected: sel === p.id, act: "lxPin", arg: p.id, label: p.title })),
     ];
     // Cards: the best matches, with a place after every two events
