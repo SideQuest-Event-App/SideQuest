@@ -1,11 +1,13 @@
-// Import real GTA events for the next three months into seed/events.json (and, with UPLOAD=1, Supabase Storage,
-// where the apps' servers pick it up). Runs every week by itself (.github/workflows/import-events.yml).
+// Import real GTA events for the next three months into seed/events.json (and, with UPLOAD=1, Supabase: the events
+// table "listings" and the Storage file, where the apps' servers pick it up). Runs every day by itself (quick sources;
+// every source on Mondays): .github/workflows/import-events.yml.
 //   node import/run.js            (from sketch-1/)
 //   ONLY=Ticketmaster,Instagram MERGE=1 node import/run.js
 //                                 (fetch just those sources and keep everyone else's events from last time)
 // Sources, in the order they win a tie between duplicates:
-//   Ticketmaster (official Discovery API, needs TICKETMASTER_API_KEY), Instagram (the events saved by the last
-//   `node import/instagram.js`; this never calls the AI), then the sites: DICE (published sitemaps + event pages),
+//   Ticketmaster (official Discovery API, needs TICKETMASTER_API_KEY), Instagram (the Graph API with
+//   INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN, read by saved AI readings and caption rules, else the events saved by
+//   the last `node import/instagram.js`; no AI unless IG_AI=1), then the sites: DICE (published sitemaps + event pages),
 //   Meetup (Toronto groups' event pages), Luma (Toronto discover list), City of Toronto and Toronto Public Library
 //   (open data), Eventbrite (listing + event pages).
 // Every site is read within its robots.txt (import/fetch.js). Not imported: see NOT_IMPORTED.

@@ -74,6 +74,9 @@ const readJSON = (file, fallback) => {
 const norm = (s) => String(s || "").toLowerCase().replace(/^the /, "").replace(/[^a-z0-9]/g, "");
 const sameVenue = (a, b) => !!norm(a) && !!norm(b) && (norm(a).includes(norm(b)) || norm(b).includes(norm(a)));
 
+// Graph API version: each is supported for about two years, and a call to a retired one is answered by the oldest
+// version still running. IG_GRAPH_VERSION overrides it when Meta retires this one.
+const GRAPH_VERSION = process.env.IG_GRAPH_VERSION || "v24.0";
 const FIELDS = "username,name,biography,followers_count,media.limit(40){caption,timestamp,permalink,media_type,media_url,children{media_type,media_url}}";
 const FIELDS_PLAIN = "username,name,biography,followers_count,media.limit(40){caption,timestamp,permalink,media_type,media_url}";
 
@@ -92,7 +95,7 @@ async function downloadPosts(accounts, log) {
   let fields = FIELDS;
   let fresh = 0;
   for (const handle of Object.keys(accounts)) {
-    const fetchAccount = () => get(`https://graph.facebook.com/v21.0/${user}?${new URLSearchParams({ fields: `business_discovery.username(${handle}){${fields}}`, access_token: token })}`, { json: true });
+    const fetchAccount = () => get(`https://graph.facebook.com/${GRAPH_VERSION}/${user}?${new URLSearchParams({ fields: `business_discovery.username(${handle}){${fields}}`, access_token: token })}`, { json: true });
     try {
       let data;
       try {
