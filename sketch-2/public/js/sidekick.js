@@ -3,10 +3,14 @@
 //   /sk/:room    a friend joins: name, private card, then voice, text or form
 //   (in the call) the plan board with the current question card, captions, picks, vote, lock, survey
 // Voice uses the browser's own speech recognition (Chrome, Edge, Safari); everyone can type instead.
+// Optional in-app audio (WebRTC, phone to phone, 2 to 6 people) lets friends who aren't together hear
+// each other; the server only passes the connection messages along.
 (() => {
   const app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  const roomId = location.pathname.split("/")[2] || null;
+  let roomId = location.pathname.split("/")[2] || null;
+  const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const MOBILE = IOS || /Android/i.test(navigator.userAgent);
   const params = new URLSearchParams(location.search);
   const store = {
     get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
@@ -17,6 +21,7 @@
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     send: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
     lock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+    invite: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/></svg>',
     speaker: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
   };
   const PRIVATE_OPTS = {
@@ -38,8 +43,35 @@
   async function api(path, body) {
     const res = await fetch(path, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {});
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Something went wrong. Try again in a moment.");
+    if (!res.ok) throw Object.assign(new Error(data.error || "Something went wrong. Try again in a moment."), { status: res.status, data });
     return data;
+  }
+
+  // iPhones only play speech after a tap. The first tap (Start, Join, or anything) speaks a silent
+  // empty line, which unlocks Sidekick's read-aloud for the rest of the call.
+  let unlocked = false;
+  function unlockAudio() {
+    if (unlocked || !("speechSynthesis" in window)) return;
+    unlocked = true;
+    try { const u = new SpeechSynthesisUtterance(""); u.volume = 0; speechSynthesis.speak(u); } catch {}
+  }
+  for (const ev of ["touchend", "click", "keydown"]) document.addEventListener(ev, unlockAudio, { capture: true, passive: true });
+
+  function copyText(text, done) {
+    const fallback = () => {
+      const t = document.createElement("textarea");
+      t.value = text;
+      t.setAttribute("readonly", "");
+      t.style.cssText = "position:fixed;opacity:0";
+      document.body.appendChild(t);
+      t.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch {}
+      t.remove();
+      toast(ok ? done : text);
+    };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => toast(done), fallback);
+    else fallback();
   }
   const chip = (group, value, label, on, extra = "") => `<button type="button" class="chip" data-group="${group}" data-value="${esc(value)}" aria-pressed="${on}">${esc(label)}${extra}</button>`;
   // Chip groups: data-multi on the container makes them toggle; otherwise one at a time
@@ -75,12 +107,17 @@
       if (!name) return toast("Add your name so your crew knows who's planning.");
       if (!chosen.length) return toast("Pick at least one night.");
       e.target.disabled = true;
+      unlockAudio();
       try {
         const out = await api("/api/sk/rooms", { name, crew, nights: chosen, persona: params.get("persona") || undefined });
         store.set("sk:name", name);
         store.set("sk:crew", crew);
-        store.set(`sk:${out.room}`, { person: out.person });
-        location.href = `/sk/${out.room}`;
+        roomId = out.room;
+        me = { person: out.person, mode: "voice" };
+        store.set(`sk:${roomId}`, me);
+        // Stay on this page (no reload), so the tap that unlocked audio on iPhones still counts
+        history.pushState(null, "", `/sk/${roomId}`);
+        connect();
       } catch (err) {
         e.target.disabled = false;
         toast(err.message);
@@ -92,7 +129,8 @@
   async function joinScreen() {
     let info;
     try { info = await api(`/api/sk/rooms/${roomId}/info`); } catch (err) {
-      app.innerHTML = `<h1>This call isn't available</h1><p class="muted">${esc(err.message)}</p><a class="btn out" href="/sk">Start a new plan</a>`;
+      if (err.status === 404) return goneScreen(err.data);
+      app.innerHTML = `<h1>Can't reach the call</h1><p class="muted">Check your connection and try again.</p><button class="btn out" onclick="location.reload()">Try again</button>`;
       return;
     }
     if (info.status !== "live") {
@@ -101,7 +139,7 @@
     }
     const who = info.people.length ? `${info.people.slice(0, 3).join(", ")}${info.people.length > 3 ? " and others" : ""} ${info.people.length === 1 ? "is" : "are"} on` : "";
     app.innerHTML = `
-      <div class="row sb"><span class="tag pri">Planning call · ${esc(info.crew)}</span><span class="orb live"></span></div>
+      <div class="row sb"><span class="tag pri">Planning call · ${esc(info.crew)}</span><span class="orb"></span></div>
       <h1>${esc(info.people[0] || "Your crew")} is planning a night</h1>
       <p class="muted">${esc(who)}. Sidekick is on the call to keep track. Captions are live and the transcript is deleted when the call ends.</p>
       <label class="f">Your name<input class="in" id="name" autocomplete="given-name" maxlength="24" value="${esc(store.get("sk:name") || "")}"></label>
@@ -123,7 +161,7 @@
       <div class="stack" id="joinBtns">
         <button class="btn pri" data-mode="voice">Join with voice</button>
         <button class="btn out" data-mode="text">Join by text</button>
-        <button class="btn out" id="formMode">Just answer, no call</button>
+        <button class="btn out" id="formMode">Answer without calling</button>
       </div>`;
     const extra = document.getElementById("formExtra");
     document.getElementById("formMode").onclick = (e) => {
@@ -155,10 +193,11 @@
         if (picked("vibe").length) answers.vibe = picked("vibe");
       }
       b.disabled = true;
+      unlockAudio();
       try {
         const out = await api(`/api/sk/rooms/${roomId}/join`, { name, mode: b.dataset.mode, answers });
         store.set("sk:name", name);
-        me = { person: out.person, mode: b.dataset.mode };
+        me = { person: out.person, mode: b.dataset.mode, boot: info.boot };
         store.set(`sk:${roomId}`, me);
         connect();
       } catch (err) {
@@ -177,72 +216,267 @@
   const colour = (id) => `c${Math.max(0, view.people.findIndex((p) => p.id === id)) % 6}`;
   const send = (action, body = {}) => api(`/api/sk/rooms/${roomId}/${action}`, { p: me.person, ...body }).catch((err) => toast(err.message));
 
+  // ---------- Staying connected ----------
+  // Phones lock and networks drop. The browser reconnects the live stream on its own; if it gives up
+  // (or the stream goes silent), we reconnect with a growing wait. You stay in the call the whole time.
+  // A small "Reconnecting…" pill shows only if it takes more than a moment.
+  let lastBeat = 0;
+  let retryTimer = null;
+  let retries = 0;
+  let checking = false;
+  let connTimer = null;
+  function setConn(ok) {
+    const pill = document.getElementById("conn");
+    clearTimeout(connTimer);
+    if (ok) { pill.hidden = true; return; }
+    connTimer = setTimeout(() => { if (phase) pill.hidden = false; }, 2000);
+  }
   function connect() {
+    clearTimeout(retryTimer);
     if (es) es.close();
-    es = new EventSource(`/api/sk/rooms/${roomId}/stream?p=${encodeURIComponent(me.person)}`);
-    let warned = false;
-    es.onmessage = (e) => {
+    lastBeat = Date.now();
+    const stream = new EventSource(`/api/sk/rooms/${roomId}/stream?p=${encodeURIComponent(me.person)}`);
+    es = stream;
+    stream.onmessage = (e) => {
+      if (es !== stream) return;
+      lastBeat = Date.now();
+      retries = 0;
+      setConn(true);
       view = JSON.parse(e.data);
-      warned = false;
+      if (view.boot && me.boot !== view.boot) { me.boot = view.boot; store.set(`sk:${roomId}`, me); }
       render();
       readAloud();
       relayToAgent();
+      Audio.sync();
     };
-    es.onerror = async () => {
-      if (warned) return;
-      warned = true;
-      // Is the call still there, and are we still in it (the server may have restarted)?
-      try {
-        const info = await api(`/api/sk/rooms/${roomId}/info?p=${encodeURIComponent(me.person)}`);
-        if (!info.member) { es.close(); store.set(`sk:${roomId}`, null); me = null; phase = null; joinScreen(); return; }
-        toast("Reconnecting…");
-      } catch {
-        es.close();
-        phase = null;
-        app.innerHTML = `<h1>This call has ended</h1><p class="muted">The transcript was deleted when it ended.</p><a class="btn out" href="/sk">Start a new plan</a>`;
+    stream.addEventListener("ping", () => { lastBeat = Date.now(); });
+    stream.addEventListener("signal", (e) => { lastBeat = Date.now(); try { Audio.onSignal(JSON.parse(e.data)); } catch (err) { console.error(err); } });
+    stream.onerror = () => {
+      if (es !== stream) return;
+      setConn(false);
+      stillThere();
+      if (stream.readyState === EventSource.CLOSED) {
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => es === stream && connect(), Math.min(15000, 1000 * 2 ** retries++));
       }
     };
   }
+  // Is the call still there, and are we still in it? Only a clear answer from the server ends the
+  // call on screen; no answer at all just means we're offline, so we keep trying.
+  async function stillThere() {
+    if (checking || !me) return;
+    checking = true;
+    try {
+      const info = await api(`/api/sk/rooms/${roomId}/info?p=${encodeURIComponent(me.person)}`);
+      if (!info.member) { leaveQuietly(); store.set(`sk:${roomId}`, null); me = null; joinScreen(); }
+    } catch (err) {
+      if (err.status === 404) goneScreen(err.data);
+    } finally {
+      checking = false;
+    }
+  }
+  function leaveQuietly() {
+    clearTimeout(retryTimer);
+    if (es) es.close();
+    es = null;
+    phase = null;
+    setConn(true);
+    if (micOn) stopMic();
+    Audio.stop();
+    if (agent) stopAgent();
+  }
+  function goneScreen(data) {
+    const saved = me || store.get(`sk:${roomId}`);
+    const restarted = Boolean(data && data.boot && saved && saved.boot && data.boot !== saved.boot);
+    leaveQuietly();
+    if (saved) store.set(`sk:${roomId}`, null);
+    me = null;
+    app.innerHTML = restarted
+      ? `<h1>This call ended when the app restarted</h1><p class="muted">Calls live in the app's memory, so a restart ends them. Start a new one and share the new link with your crew.</p><a class="btn pri" href="/sk">Start a new call</a>`
+      : `<h1>This call isn't running anymore</h1><p class="muted">It may have ended, or the app restarted. The transcript was deleted. Ask whoever sent the link to start a new one, or start your own.</p><a class="btn out" href="/sk">Start a new call</a>`;
+  }
+  // A connection can die without an error (a locked phone). The server sends a heartbeat every 15 s.
+  setInterval(() => { if (es && phase && Date.now() - lastBeat > 40000) { setConn(false); connect(); } }, 5000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !es || !me) return;
+    if (Date.now() - lastBeat > 20000) connect();
+    if (micOn) restartRec(0);
+  });
+  window.addEventListener("pagehide", () => {
+    if (Audio.on && me && navigator.sendBeacon) navigator.sendBeacon(`/api/sk/rooms/${roomId}/audio`, JSON.stringify({ p: me.person, on: false }));
+  });
 
   function render() {
     const next = view.locked ? "locked" : view.status === "ended" ? "ended" : view.picks ? "picks" : "call";
     if (view.mode !== lastMode) { lastMode = view.mode; if (phase === next) renderDock(); }
     if (next !== phase) {
       phase = next;
-      app.innerHTML = `<div id="top"></div><div id="body" class="stack"></div><div id="say" class="stack"></div><div id="ticks" class="stack"></div><div class="dock" id="dock"></div>`;
+      app.innerHTML = `<div id="top"></div><div id="say"></div><div id="body" class="stack"></div><div id="ticks" class="stack"></div><div class="dock" id="dock"></div>`;
+      watchDock();
       renderDock();
     }
     renderTop();
+    renderSay();
     if (phase === "call") renderCall();
     if (phase === "picks") renderPicks();
     if (phase === "locked" || phase === "ended") renderDone();
-    renderSay();
+    if (sheetOpen) renderSheet();
   }
 
+  // The dock is fixed to the bottom; the page gets padding of the dock's height so nothing hides under it
+  let dockObserver = null;
+  function watchDock() {
+    const dock = document.getElementById("dock");
+    if (!dock) return;
+    const setH = () => document.documentElement.style.setProperty("--dock-h", `${Math.ceil(dock.getBoundingClientRect().height)}px`);
+    if (dockObserver) dockObserver.disconnect();
+    if (window.ResizeObserver) { dockObserver = new ResizeObserver(setH); dockObserver.observe(dock); }
+    setH();
+  }
+
+  const voting = () => view && view.card && view.card.slot === "mode";
+  const inviteLink = () => `${location.origin}/sk/${roomId}`;
+
   function renderTop() {
-    const people = view.people.map((p) => `<span class="av ${colour(p.id)} ${p.talking ? "talk" : ""} ${p.mode === "form" ? "away" : ""}" title="${esc(p.name)}${p.mode !== "voice" ? ` (${p.mode})` : ""}">${esc(p.initial)}</span>`).join("");
+    if (!view || !document.getElementById("top")) return;
+    const people = view.people.map((p) => {
+      const mine = p.id === view.me.id;
+      const st = mine ? (Audio.on ? "connected" : null) : Audio.on && p.audio ? Audio.stateOf(p.id) || "new" : null;
+      const dot = st === "connected" ? `<span class="adot ${p.muted ? "muted" : ""}" aria-hidden="true"></span>` : st ? '<span class="adot wait" aria-hidden="true"></span>' : "";
+      const label = `${p.name}${p.mode !== "voice" ? ` (${p.mode})` : ""}${!p.online && p.mode !== "form" ? ", reconnecting" : ""}${st === "connected" ? ", in app audio" : st ? ", connecting audio" : ""}${p.muted ? ", muted" : ""}`;
+      return `<span class="av ${colour(p.id)} ${p.talking ? "talk" : ""} ${p.mode === "form" || !p.online ? "away" : ""}" title="${esc(label)}" role="img" aria-label="${esc(label)}">${esc(p.initial)}${dot}</span>`;
+    }).join("");
     const modeTag = view.me.mode === "voice" ? '<span class="tag hot">Live</span>' : `<span class="tag soc">${view.me.mode === "text" ? "Text · mic off" : "Answered by form"}</span>`;
-    document.getElementById("top").innerHTML = `<div class="row sb"><div class="row" style="gap:6px">${people}</div>${modeTag}</div>`;
+    const pill = view.me.planner && (view.people.length >= 2 || voting()) && (phase === "call" || phase === "picks")
+      ? `<button class="pill-hit" id="invitePill" aria-haspopup="dialog" aria-label="Invite people"><span class="pill">${ICON.invite}Invite</span></button>` : "";
+    document.getElementById("top").innerHTML = `<div class="row sb"><div class="row avs">${people}</div><div class="row" style="gap:4px">${pill}${modeTag}</div></div>`;
   }
 
   function boardHead(extra = "") {
     const dots = [0, 1, 2, 3, 4].map((i) => `<span class="dot ${i < view.known ? "done" : ""}"></span>`).join("");
-    return `<div class="bh"><span class="row"><span class="orb ${phase === "call" ? "live" : ""}"></span><h2 style="font-size:15px">${esc(view.crew)}'s plan</h2></span>${extra || `<span class="dots" role="img" aria-label="${view.known} of 5 known">${dots}</span>`}</div>`;
+    return `<div class="bh"><span class="row"><span class="orb ${listening() ? "live" : ""}"></span><h2 style="font-size:15px">${esc(view.crew)}'s plan</h2></span>${extra || `<span class="dots" role="img" aria-label="${view.known} of 5 known">${dots}</span>`}</div>`;
   }
+  const listening = () => phase === "call" && view.mode === "lead" && view.status === "live";
+  const avStack = (vs) => (vs.length ? `<span class="stk">${vs.map((v) => `<span class="av xs c${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(v) % 6}">${esc(v)}</span>`).join("")}</span>` : "");
 
   function cardHTML(card, label) {
-    const opts = card.options.map((o) => `<button class="ans" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="grow">${esc(o.label)}</span>${o.voters.length ? `<span class="stk">${o.voters.map((v) => `<span class="av xs c${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(v) % 6}">${esc(v)}</span>`).join("")}</span>` : ""}</button>`).join("");
+    const opts = card.options.map((o) => `<button class="ans" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="grow">${esc(o.label)}</span>${avStack(o.voters)}</button>`).join("");
     const hint = label || `Sidekick is asking · ${view.me.mode === "voice" ? "say it or tap it" : "tap to answer"}${card.multi ? " · pick any that work" : ""}`;
     return `<div class="q"><span class="small">${esc(hint)}</span><h2>${esc(card.prompt)}</h2>${opts}${card.note ? `<span class="small">${esc(card.note)}</span>` : ""}</div>`;
   }
 
+  // The invite and share options: inline while the planner is alone, in a sheet after that
+  function shareHTML() {
+    const link = inviteLink();
+    const msg = `Help plan our next night! Sidekick's on the call: ${link}`;
+    const enc = encodeURIComponent;
+    const sms = `sms:${IOS ? "&" : "?"}body=${enc(msg)}`;
+    const messenger = MOBILE ? `fb-messenger://share/?link=${enc(link)}` : "https://www.messenger.com/";
+    return `<div class="row"><input class="in" readonly value="${esc(link)}" aria-label="Call link" style="font:500 13px var(--m)"><button class="btn sm out" id="copy">Copy</button></div>
+      ${navigator.share ? '<button class="btn sm pri" id="share" style="width:100%">Share to the group chat</button>' : ""}
+      <div class="share">
+        <a href="https://wa.me/?text=${enc(msg)}" target="_blank" rel="noopener">WhatsApp</a>
+        <a href="${esc(sms)}">Messages</a>
+        <a href="${esc(messenger)}" id="messenger" ${MOBILE ? "" : 'target="_blank" rel="noopener"'}>Messenger</a>
+        <a href="https://t.me/share/url?url=${enc(link)}&text=${enc("Help plan our next night! Sidekick's on the call.")}" target="_blank" rel="noopener">Telegram</a>
+        <button type="button" id="insta" class="wide">Instagram: copy link, then paste in your DM</button>
+      </div>`;
+  }
+  function invitePanel() {
+    return `<div class="priv invite"><p style="font-weight:600">Invite your crew</p><p class="small">Anyone with the link can join from a browser. No app or account needed.</p>${shareHTML()}</div>`;
+  }
+
+  let sheetOpen = false;
+  function openSheet() {
+    sheetOpen = true;
+    renderSheet();
+    const first = document.querySelector("#sheet .sheet-panel button, #sheet .sheet-panel a");
+    (first || document.getElementById("sheet")).focus();
+  }
+  function closeSheet() {
+    sheetOpen = false;
+    const s = document.getElementById("sheet");
+    if (s) s.remove();
+    const pill = document.getElementById("invitePill");
+    if (pill) pill.focus();
+  }
+  function renderSheet() {
+    let s = document.getElementById("sheet");
+    const fresh = !s;
+    if (fresh) {
+      s = document.createElement("div");
+      s.id = "sheet";
+      s.className = "sheet-wrap";
+      document.body.appendChild(s);
+    }
+    if (!fresh) return; // the link doesn't change; don't steal focus by redrawing
+    s.innerHTML = `<div class="sheet-scrim" data-close></div><div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" tabindex="-1">
+      <div class="row sb"><h2 id="sheetTitle">Invite to the call</h2><button class="icon-btn" data-close aria-label="Close">${ICON.x}</button></div>
+      <p class="small">Anyone with the link can join from a browser. No app or account needed.</p>${shareHTML()}</div>`;
+  }
+  document.addEventListener("keydown", (e) => {
+    if (!sheetOpen) return;
+    if (e.key === "Escape") { e.preventDefault(); closeSheet(); return; }
+    if (e.key === "Tab") { // keep focus inside the sheet
+      const items = [...document.querySelectorAll("#sheet .sheet-panel button, #sheet .sheet-panel a, #sheet .sheet-panel input")];
+      if (!items.length) return;
+      const [first, last] = [items[0], items[items.length - 1]];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+
+  function chipsRow(card) {
+    return `<div class="chips" role="group" aria-label="${esc(card.prompt)}">${card.options.map((o) => `<button class="chip" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}">${esc(o.label)}${o.voters.length ? ` <span class="vn">${esc(o.voters.join(""))}</span>` : ""}</button>`).join("")}</div>`;
+  }
+
+  let budgetOpen = false;
+  let voteBar = { closeAt: 0 };
+  function renderVote(card) {
+    const why = { lead: "Sidekick asks one thing at a time", sidelines: "Sidekick stays quiet until picks" };
+    const opts = card.options.map((o) => `<button class="vote-opt" data-slot="mode" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="vt">${esc(o.label)}</span><span class="small">${esc(why[o.value] || "")}</span>${avStack(o.voters) || '<span class="stk empty"></span>'}</button>`).join("");
+    return `<div class="vote"><span class="small">Quick vote · everyone</span><h2>${esc(card.prompt)}</h2><div class="vote-row">${opts}</div>
+      <div class="cd"><div class="cd-bar"><i id="cdBar"></i></div><span class="small">No answer in 3 seconds and Sidekick takes the lead</span></div></div>`;
+  }
+  function runCountdown() {
+    const bar = document.getElementById("cdBar");
+    if (!bar) return;
+    const closeAt = view.modeCloseAt || Date.now() + 3000;
+    if (voteBar.closeAt === closeAt && voteBar.el === bar) return;
+    voteBar = { closeAt, el: bar };
+    const left = Math.max(0, closeAt - Date.now());
+    bar.style.transition = "none";
+    bar.style.width = "100%";
+    void bar.offsetWidth;
+    bar.style.transition = `width ${left}ms linear`;
+    bar.style.width = "0%";
+  }
+
   function renderCall() {
+    const body = document.getElementById("body");
+    if (voting()) {
+      body.innerHTML = renderVote(view.card);
+      runCountdown();
+      renderTicks();
+      return;
+    }
     const card = view.card && !view.card.form ? view.card : null;
     const form = view.card && view.card.form ? view.card : null;
     const rows = view.rows.map((r) => {
       if (card && !card.private && card.slot === r.slot) return cardHTML(card);
-      const cls = r.slot === "budget" ? "priv-row" : "";
       const value = r.state === "conflict" ? r.conflict.join(" vs. ") : r.value || (r.state === "asking" ? "Asking now" : "Not yet");
+      if (form) {
+        // Sitting back: the board is the form. Each row has its question's chips in place.
+        const f = form.slots.find((c) => c.slot === r.slot);
+        if (f) return `<div class="r fr ${r.state}"><div class="row sb"><span class="fl">${esc(r.label)}</span>${r.who ? `<span class="who">${esc(r.who)}</span>` : ""}</div>${chipsRow(f)}</div>`;
+        if (r.slot === "budget") {
+          const b = form.budget;
+          if (!b || b.done) return `<div class="r fr priv-row"><div class="row sb"><span class="fl">${esc(r.label)}</span><span class="who">${esc(r.who || "")}</span></div><span class="small">${ICON.lock} Yours is in. Only Sidekick sees it.</span></div>`;
+          return `<div class="r fr priv-row dashed"><button class="add-priv" id="budgetToggle" aria-expanded="${budgetOpen}"><span class="fl">${esc(r.label)}</span><span class="grow"></span><span class="lk">${budgetOpen ? "Only Sidekick sees this" : "Add yours privately ›"}</span></button>
+            ${budgetOpen ? `<div class="chips">${b.options.map((o) => `<button class="chip" data-slot="budget" data-private="1" data-answer="${esc(o.value)}" aria-pressed="false">${esc(o.label)}</button>`).join("")}</div>` : ""}${r.who ? `<span class="who">${esc(r.who)}</span>` : ""}</div>`;
+        }
+      }
+      const cls = r.slot === "budget" ? "priv-row" : "";
       return `<dl class="r ${r.state} ${cls}" style="margin:0"><dt>${esc(r.label)}</dt><dd>${esc(value)}</dd>${r.who ? `<span class="who">${esc(r.who)}</span>` : ""}</dl>`;
     }).join("");
     let priv = "";
@@ -251,19 +485,17 @@
         ? `<div class="priv"><span class="lock">${ICON.lock}Only Sidekick sees this</span><p class="muted">Thanks. Waiting on the others.</p></div>`
         : `<div class="priv"><span class="lock">${ICON.lock}Just for you · nobody else sees this</span><h2>${esc(card.prompt)}</h2>${card.options.map((o) => `<button class="ans" data-answer="${esc(o.value)}" data-private="1"><span class="grow">${esc(o.label)}</span></button>`).join("")}<p class="small">The group only sees one limit, never whose it is.</p></div>`;
     }
-    const link = `${location.origin}/sk/${roomId}`;
-    const invite = view.me.planner && view.people.length < 4
-      ? `<div class="priv" style="border-style:solid;border-color:var(--soc-t)"><p style="font-weight:600">${view.people.length < 2 ? "Invite your crew" : "Anyone else coming?"}</p><p class="small">Anyone with the link can join from a browser. No app or account needed.</p><div class="row"><input class="in" readonly value="${esc(link)}" aria-label="Call link" style="font:500 13px var(--m)"><button class="btn sm out" id="copy">Copy</button></div>${navigator.share ? '<button class="btn sm out" id="share" style="width:100%">Share to the group chat</button>' : ""}</div>`
-      : "";
-    const vote = card && card.slot === "mode" ? `<div class="board" style="border-color:var(--pri-e)">${cardHTML(card, "Quick vote · everyone")}</div>` : "";
-    const formHTML = form
-      ? `<div class="stack"><p class="small">Sidekick's sitting back. Fill in the plan together; it'll suggest two picks once everyone's in.</p>
-          ${form.slots.map((c) => cardHTML(c, c.multi ? "Pick any that work" : "Pick one")).join("")}
-          ${form.budget && !form.budget.done ? `<div class="priv"><span class="lock">${ICON.lock}Just for you · nobody else sees this</span><h2>${esc(form.budget.prompt)}</h2>${form.budget.options.map((o) => `<button class="ans" data-slot="budget" data-private="1" data-answer="${esc(o.value)}"><span class="grow">${esc(o.label)}</span></button>`).join("")}</div>` : ""}
-        </div>`
-      : "";
-    document.getElementById("body").innerHTML = `${view.people.length < 2 ? invite : ""}${vote}<div class="board">${boardHead()}${rows}</div>${priv}${formHTML}${view.people.length >= 2 ? invite : ""}`;
-    document.getElementById("ticks").innerHTML = view.captions.slice(-2).map((c) => `<div class="tick"><b>${esc(c.name)}${c.kind === "typed" ? " · typed" : ""}</b><span>${esc(c.text)}</span></div>`).join("") + (interim ? `<div class="tick me"><b>You</b><span>${esc(interim)}</span></div>` : "");
+    const invite = view.me.planner && view.people.length < 2 ? invitePanel() : "";
+    const formNote = form ? `<p class="small">Fill it in together. Sidekick suggests two picks once everyone's in.</p>` : "";
+    body.innerHTML = `${invite}<div class="board ${form ? "as-form" : ""}">${boardHead()}${rows}</div>${formNote}${priv}`;
+    renderTicks();
+  }
+
+  function renderTicks() {
+    const t = document.getElementById("ticks");
+    if (!t || !view) return;
+    if (phase !== "call") { t.innerHTML = ""; return; }
+    t.innerHTML = view.captions.slice(-2).map((c) => `<div class="tick"><b>${esc(c.name)}${c.kind === "typed" ? " · typed" : ""}</b><span>${esc(c.text)}</span></div>`).join("") + (interim ? `<div class="tick me"><b>You</b><span>${esc(interim)}</span></div>` : "");
   }
 
   function renderPicks() {
@@ -274,7 +506,7 @@
       const fits = Object.entries(p.fits || {}).filter(([, v]) => v).map(([n, v]) => `<span><b>${esc(n)}</b> ${esc(v)}</span>`).join("");
       return `<button class="pick" data-vote="${p.id}" aria-pressed="${view.myVote === p.id}">
         ${p.kind === "place" ? '<span class="tag soc" style="align-self:flex-start">Place · no tickets</span>' : '<span class="tag pri" style="align-self:flex-start">Event</span>'}
-        <span class="row sb"><h2>${esc(p.title)}</h2>${voters.length ? `<span class="stk">${voters.map((v) => `<span class="av xs c${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(v) % 6}">${esc(v)}</span>`).join("")}</span>` : ""}</span>
+        <span class="row sb"><h2>${esc(p.title)}</h2>${avStack(voters)}</span>
         <span class="small" style="color:var(--t2)">${esc([p.when, p.price, p.where].filter(Boolean).join(" · "))}</span>
         ${p.reason ? `<span class="small" style="color:var(--acc)">${esc(p.reason)}</span>` : ""}
         ${fits ? `<span class="fits">${fits}</span>` : ""}
@@ -290,7 +522,7 @@
       <div class="q" style="border-radius:22px;border:1px solid var(--pri-e)"><span class="small">Two picks fit everyone · tap one to vote</span>${picks}</div>
       <p class="small">Picked for your crew's budget, distance and vibe. Venues can't pay to appear here.</p>
       ${view.picks.filter((p) => p.url && p.kind === "place").map((p) => `<a class="small" style="color:var(--soc-x)" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)} on Google Maps</a>`).join("")}${lock}`;
-    document.getElementById("ticks").innerHTML = "";
+    renderTicks();
   }
 
   function renderDone() {
@@ -310,43 +542,64 @@
           <button class="btn pri" id="sendSurvey" disabled>Send</button>
         </div>`;
     document.getElementById("body").innerHTML = plan + survey;
-    document.getElementById("ticks").innerHTML = "";
+    renderTicks();
   }
 
+  // Sidekick's latest line, as one speaker strip right under the people
+  let sayTimer = null;
   function renderSay() {
+    const el = document.getElementById("say");
+    if (!el) return;
     const last = view.sidekick.slice(-1)[0];
-    document.getElementById("say").innerHTML = last && phase !== "ended"
-      ? `<div class="say ${last.system ? "sys" : ""}"><span class="orb" style="margin-top:4px"></span><p>${esc(last.text)}</p></div>`
-      : "";
+    const sitting = view.mode === "sidelines" && phase === "call";
+    if (!last || phase === "ended") { el.innerHTML = ""; return; }
+    const fresh = !last.system && !sitting && Date.now() - last.at < 20000;
+    clearTimeout(sayTimer);
+    if (fresh) sayTimer = setTimeout(() => view && renderSay(), 20000 - (Date.now() - last.at) + 50);
+    el.innerHTML = `<div class="say ${fresh ? "new" : ""} ${last.system ? "sys" : ""}"><span class="orb sm ${listening() ? "live" : ""}"></span><div class="say-t"><span class="say-l">${sitting ? "Sidekick is sitting back" : "SIDEKICK"}</span><p>${esc(last.text)}</p></div></div>`;
   }
 
   function renderDock() {
     const dock = document.getElementById("dock");
+    if (!dock || !view) return;
     if (phase === "locked" || phase === "ended") {
       dock.innerHTML = view.me.planner && phase === "locked" ? `<button class="btn out" id="endCall">End the call</button>` : "";
+      if (!dock.innerHTML) dock.hidden = true;
       return;
     }
+    dock.hidden = false;
     const voice = view.me.mode === "voice";
     const agentBtn = view.voiceAgent
       ? `<button class="btn ${agent ? "out" : "pri"}" id="agent" style="height:44px">${agent ? "Sidekick's voice is on · Turn off" : agentStarting ? "Connecting Sidekick's voice…" : "Turn on Sidekick's voice"}</button>`
       : "";
-    const modeBtn = view.mode === "sidelines"
-      ? `<button class="btn pri" id="modeSwitch" data-mode="lead" style="height:44px">Ask Sidekick to jump in</button>`
-      : view.mode === "lead" ? `<button class="btn out" id="modeSwitch" data-mode="sidelines" style="height:40px;font-size:13px">Sidekick's leading · Let it sit back</button>` : "";
-    dock.innerHTML = `${modeBtn}${agentBtn}
-      <form class="compose" id="compose" ${voice && !typing ? "hidden" : ""}><label class="sr" for="line">Message the call</label><input class="in" id="line" autocomplete="off" placeholder="${voice ? "Type instead…" : "Type to the call…"}" maxlength="300"><button class="send" aria-label="Send">${ICON.send}</button></form>
+    const vote = view.mode === "voting";
+    const seg = view.mode && phase === "call"
+      ? `<div class="seg ${vote ? "off" : ""}" role="radiogroup" aria-label="How Sidekick helps" ${vote ? 'aria-disabled="true" inert' : ""}>
+          <button role="radio" data-setmode="lead" aria-checked="${view.mode === "lead"}" tabindex="${view.mode === "lead" || vote ? 0 : -1}">Sidekick leads</button>
+          <button role="radio" data-setmode="sidelines" aria-checked="${view.mode === "sidelines"}" tabindex="${view.mode === "sidelines" ? 0 : -1}">Sidekick sits back</button></div>`
+      : "";
+    const audioBtn = voice && Audio.supported
+      ? `<button class="btn out sm wide-btn" id="audioBtn" aria-pressed="${Audio.on}">${Audio.on ? "In-app audio on · Leave audio" : Audio.starting ? "Connecting audio…" : "Talk in the app"}</button>`
+      : "";
+    const capsNote = capsOff ? `<p class="small center">Captions pause on this phone during in-app audio. Type to Sidekick.</p>` : "";
+    const showCompose = !voice || typing || capsOff;
+    dock.innerHTML = `${seg}${agentBtn}${audioBtn}${capsNote}
+      <form class="compose" id="compose" ${showCompose ? "" : "hidden"}><label class="sr" for="line">Message the call</label><input class="in" id="line" autocomplete="off" placeholder="${voice ? "Type instead…" : "Type to the call…"}" maxlength="300"><button class="send" aria-label="Send">${ICON.send}</button></form>
       <div class="ctrls">
         ${voice && !agent ? `<button class="ctrl" id="mic" aria-pressed="${micOn}" aria-label="${micOn ? "Mute" : "Unmute"}">${ICON.mic}</button>` : ""}
         <button class="ctrl" id="ask" aria-label="Ask Sidekick for picks"><span class="orb"></span></button>
-        ${view.me.planner && !agent ? `<button class="ctrl" id="aloud" aria-pressed="${aloud}" aria-label="Read Sidekick aloud">${ICON.speaker}</button>` : ""}
+        ${(view.me.planner && !agent) || Audio.on ? `<button class="ctrl" id="aloud" aria-pressed="${aloud}" aria-label="Read Sidekick aloud">${ICON.speaker}</button>` : ""}
         ${voice ? `<button class="ctrl" id="kb" aria-label="Type instead"><span style="font:600 13px var(--m)">Aa</span></button>` : ""}
         <button class="ctrl end" id="leave" aria-label="${view.me.planner ? "End the call" : "Leave the call"}">${ICON.x}</button>
       </div>`;
   }
 
-  // Taps
-  app.addEventListener("click", (e) => {
+  // Taps (in the call, and in the invite sheet, which lives outside #app)
+  function onTap(e) {
     const t = e.target;
+    if (t.closest("#sheet [data-close]")) return void closeSheet();
+    if (t.closest("#invitePill")) return void openSheet();
+    if (t.closest("#budgetToggle")) { budgetOpen = !budgetOpen; renderCall(); return; }
     const ans = t.closest("[data-answer]");
     if (ans && view && view.card) {
       const card = view.card.form ? (ans.dataset.slot === "budget" ? view.card.budget : view.card.slots.find((c) => c.slot === ans.dataset.slot)) : view.card;
@@ -357,22 +610,29 @@
         value = now.includes(value) ? now.filter((v) => v !== value) : [...now, value];
       }
       ans.setAttribute("aria-pressed", ans.getAttribute("aria-pressed") !== "true");
+      if (card.slot === "budget") budgetOpen = false;
       send("answer", { slot: card.slot, value, source: "call_card" });
       return;
     }
     const vote = t.closest("[data-vote]");
     if (vote) return void send("vote", { eventId: Number(vote.dataset.vote) });
     if (t.closest("#lock")) return void send("lock", {});
-    if (t.closest("#copy")) {
-      const link = `${location.origin}/sk/${roomId}`;
-      (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject()).then(() => toast("Link copied. Paste it in the group chat."), () => toast(link));
+    if (t.closest("#copy")) return void copyText(inviteLink(), "Link copied. Paste it in the group chat.");
+    if (t.closest("#insta")) return void copyText(inviteLink(), "Link copied. Open Instagram and paste it in your DM.");
+    if (t.closest("#messenger")) {
+      // The Messenger app opens from its link on phones. If it isn't installed (or on a computer), copy the link instead.
+      copyText(inviteLink(), "Link copied. Paste it in a Messenger chat.");
       return;
     }
-    if (t.closest("#share")) return void navigator.share({ title: `${view.crew}: help plan our next night`, text: "Sidekick's helping us plan. Hop on or answer in 30 seconds:", url: `${location.origin}/sk/${roomId}` }).catch(() => {});
+    if (t.closest("#share")) return void navigator.share({ title: `${view.crew}: help plan our next night`, text: "Help plan our next night! Sidekick's on the call:", url: inviteLink() }).catch(() => {});
     if (t.closest("#ask")) return void send("ask", {});
     if (t.closest("#agent")) return void (agent ? stopAgent() : startAgent());
-    const ms = t.closest("#modeSwitch");
-    if (ms) return void send("mode", { value: ms.dataset.mode });
+    if (t.closest("#audioBtn")) return void (Audio.on ? Audio.stop() : Audio.start().then(() => { if (Audio.on && !micOn) startMic(); }));
+    const sm = t.closest("[data-setmode]");
+    if (sm) {
+      if (view.mode === "voting" || sm.dataset.setmode === view.mode) return;
+      return void send("mode", { value: sm.dataset.setmode });
+    }
     if (t.closest("#mic")) return void (micOn ? stopMic() : startMic());
     if (t.closest("#kb")) { typing = !typing; renderDock(); if (typing) document.getElementById("line").focus(); return; }
     if (t.closest("#aloud")) { aloud = !aloud; store.set("sk:aloud", aloud); renderDock(); if (!aloud) speechSynthesis.cancel(); return; }
@@ -381,10 +641,8 @@
       if (view.me.planner) {
         if (confirm("End the call for everyone? The transcript will be deleted.")) send("end", {});
       } else {
-        stopMic();
-        if (es) es.close();
+        leaveQuietly();
         app.innerHTML = `<h1>You left the call</h1><p class="muted">You can rejoin with the same link while it's running.</p><button class="btn out" onclick="location.reload()">Rejoin</button>`;
-        phase = null;
       }
       return;
     }
@@ -399,6 +657,17 @@
       const val = (q) => Number(app.querySelector(`.rate[data-q=${q}] [aria-pressed=true]`).dataset.n);
       send("survey", { friend: val("friend"), heard: val("heard") });
     }
+  }
+  app.addEventListener("click", onTap);
+  document.addEventListener("click", (e) => { if (e.target.closest("#sheet")) onTap(e); });
+  // Arrow keys move between the two segments of the mode switch
+  app.addEventListener("keydown", (e) => {
+    const r = e.target.closest(".seg [role=radio]");
+    if (!r || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    e.preventDefault();
+    const other = [...r.parentElement.children].find((x) => x !== r);
+    other.focus();
+    other.click();
   });
   app.addEventListener("submit", (e) => {
     if (e.target.id !== "compose") return;
@@ -488,51 +757,236 @@
   }
 
   // ---------- Voice: captions from this phone's mic ----------
+  // iPhone Safari stops recognition every few seconds (and after each pause), so while the mic is on
+  // we keep starting a fresh recogniser. Anything heard but not yet final when it stops is sent too.
   let rec = null;
   let micOn = false;
   let typing = false;
   let interim = "";
   let paused = false;
+  let recTimer = null;
+  let recFails = 0;
+  let capsOff = false; // this device can't caption while in-app audio is on (iPhones)
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   function startMic() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
+    if (!SR && !Audio.on) {
       toast("Live captions need Chrome, Edge or Safari. You can type instead.");
       typing = true;
       renderDock();
       return;
     }
-    rec = new SR();
-    rec.lang = "en-CA";
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.onresult = (e) => {
+    micOn = true;
+    recFails = 0;
+    if (!capsOff) startRec();
+    Audio.setMuted(false);
+    renderDock();
+  }
+  function startRec() {
+    if (!micOn || paused || capsOff || !SR) return;
+    if (rec) { rec.onend = rec.onresult = rec.onerror = null; try { rec.abort(); } catch {} }
+    const r = new SR(); // a fresh one each time: Safari doesn't reliably restart an old one
+    rec = r;
+    r.lang = "en-CA";
+    r.continuous = true;
+    r.interimResults = true;
+    r.onstart = () => { recFails = 0; };
+    r.onresult = (e) => {
       let partial = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) send("line", { text: r[0].transcript, kind: "spoken" });
-        else partial += r[0].transcript;
+        const x = e.results[i];
+        if (x.isFinal) send("line", { text: x[0].transcript, kind: "spoken" });
+        else partial += x[0].transcript;
       }
       interim = partial;
-      if (phase === "call") renderCall();
+      if (phase === "call") renderTicks();
     };
-    rec.onend = () => { if (micOn && !paused) try { rec.start(); } catch {} };
-    rec.onerror = (e) => {
+    r.onend = () => {
+      if (rec !== r) return;
+      if (interim.trim()) { send("line", { text: interim.trim(), kind: "spoken" }); interim = ""; }
+      restartRec(recFails > 3 ? 2000 : 250);
+    };
+    r.onerror = (e) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         micOn = false;
         toast("The microphone is blocked. You can type instead.");
         typing = true;
         renderDock();
-      }
+      } else if (e.error === "audio-capture" && Audio.on) {
+        captionsUnavailable(); // this phone can't share the mic between captions and in-app audio
+      } else recFails++;
     };
-    try { rec.start(); micOn = true; } catch {}
-    renderDock();
+    try { r.start(); } catch { restartRec(1000); }
+  }
+  function restartRec(ms) {
+    clearTimeout(recTimer);
+    if (micOn && !paused && !capsOff) recTimer = setTimeout(startRec, ms);
+  }
+  function stopRec() {
+    clearTimeout(recTimer);
+    if (rec) { const r = rec; rec = null; r.onend = r.onresult = r.onerror = null; try { r.stop(); } catch {} }
   }
   function stopMic() {
     micOn = false;
     interim = "";
-    if (rec) try { rec.stop(); } catch {}
+    stopRec();
+    Audio.setMuted(true);
     if (phase === "call" || phase === "picks") renderDock();
   }
+  function captionsUnavailable() {
+    if (capsOff) return;
+    capsOff = true;
+    stopRec();
+    interim = "";
+    typing = true;
+    toast("On this phone, captions pause while in-app audio is on. Type to Sidekick instead.");
+    renderDock();
+  }
+
+  // ---------- In-app audio: WebRTC mesh, 2 to 6 people ----------
+  // Each pair of phones connects directly. For each pair, the person whose id sorts first makes the
+  // offer, so two phones never offer at once. Messages go through our server's /signal route and come
+  // back on the live stream as "signal" events.
+  const Audio = {
+    on: false,
+    starting: false,
+    muted: false,
+    ducked: false,
+    local: null,
+    ice: [],
+    peers: new Map(), // pid -> { pc, el, queue: [], tries }
+    supported: Boolean(window.RTCPeerConnection && navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+    box() {
+      let b = document.getElementById("skAudio");
+      if (!b) { b = document.createElement("div"); b.id = "skAudio"; b.hidden = true; document.body.appendChild(b); }
+      return b;
+    },
+    async start() {
+      if (this.on || this.starting || !this.supported) return;
+      this.starting = true;
+      renderDock();
+      try {
+        this.local = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+        const out = await api(`/api/sk/rooms/${roomId}/audio`, { p: me.person, on: true, muted: !micOn });
+        this.ice = out.iceServers || [];
+        this.on = true;
+        this.muted = !micOn;
+        this.apply();
+        if (IOS && SR) captionsUnavailable(); // iPhones can't run captions and a call on the mic together
+        toast(IOS ? "In-app audio is on. Captions pause on iPhone, so type to Sidekick." : "In-app audio is on. Headphones stop echo.");
+        this.sync();
+      } catch (err) {
+        if (this.local) this.local.getTracks().forEach((t) => t.stop());
+        this.local = null;
+        toast(err.name === "NotAllowedError" ? "The microphone is blocked, so in-app audio can't start." : err.message || "In-app audio couldn't start.");
+      } finally {
+        this.starting = false;
+        renderDock();
+        renderTop();
+      }
+    },
+    stop() {
+      if (!this.on && !this.local) return;
+      for (const pid of [...this.peers.keys()]) { this.signal(pid, "bye", null); this.drop(pid); }
+      if (this.local) this.local.getTracks().forEach((t) => t.stop());
+      this.local = null;
+      const wasOn = this.on;
+      this.on = false;
+      if (capsOff) { capsOff = false; if (micOn) startRec(); }
+      if (wasOn && me) api(`/api/sk/rooms/${roomId}/audio`, { p: me.person, on: false }).catch(() => {});
+      if (phase) { renderDock(); renderTop(); }
+    },
+    apply() { if (this.local) this.local.getAudioTracks().forEach((t) => (t.enabled = !this.muted && !this.ducked)); },
+    setMuted(m) {
+      if (!this.on) return;
+      this.muted = m;
+      this.apply();
+      api(`/api/sk/rooms/${roomId}/audio`, { p: me.person, on: true, muted: m }).catch(() => {});
+    },
+    duck(d) { this.ducked = d; this.apply(); }, // quiet our mic while this phone reads Sidekick aloud
+    signal(to, kind, data) { return api(`/api/sk/rooms/${roomId}/signal`, { p: me.person, to, kind, data }).catch(() => {}); },
+    // Called on every update: connect to everyone with audio on, drop anyone who turned it off
+    sync() {
+      if (!view || !me) return;
+      const mine = view.people.find((p) => p.id === me.person);
+      if (!this.on && !this.starting && mine && mine.audio) api(`/api/sk/rooms/${roomId}/audio`, { p: me.person, on: false }).catch(() => {}); // a reload ended our audio
+      if (!this.on) return;
+      const others = new Map(view.people.filter((p) => p.id !== me.person && p.audio).map((p) => [p.id, p]));
+      for (const pid of [...this.peers.keys()]) if (!others.has(pid)) this.drop(pid);
+      for (const pid of others.keys()) if (!this.peers.has(pid) && me.person < pid) this.call(pid);
+    },
+    peer(pid) {
+      const pc = new RTCPeerConnection({ iceServers: this.ice });
+      const el = document.createElement("audio");
+      el.autoplay = true;
+      el.setAttribute("playsinline", "");
+      this.box().appendChild(el);
+      const peer = { pc, el, queue: [], tries: (this.peers.get(pid) || {}).tries || 0 };
+      this.local.getTracks().forEach((t) => pc.addTrack(t, this.local));
+      pc.onicecandidate = (e) => { if (e.candidate) this.signal(pid, "ice", e.candidate.toJSON()); };
+      pc.ontrack = (e) => {
+        el.srcObject = e.streams[0] || new MediaStream([e.track]);
+        el.play().catch(() => toast("Tap anywhere to hear your crew."));
+      };
+      pc.onconnectionstatechange = () => {
+        if (this.peers.get(pid) !== peer) return;
+        if (pc.connectionState === "connected") peer.tries = 0;
+        if (pc.connectionState === "failed") {
+          this.drop(pid, true);
+          if (me.person < pid && peer.tries < 3) setTimeout(() => { if (this.on && !this.peers.has(pid)) { this.call(pid, peer.tries + 1); } }, 2000);
+          else if (me.person < pid) toast("Couldn't connect audio with someone. Their network may need a relay server (see the README).");
+        }
+        renderTop();
+      };
+      this.peers.set(pid, peer);
+      return peer;
+    },
+    drop(pid, keepTries) {
+      const p = this.peers.get(pid);
+      if (!p) return;
+      this.peers.delete(pid);
+      try { p.pc.close(); } catch {}
+      p.el.remove();
+      if (phase) renderTop();
+    },
+    async call(pid, tries = 0) {
+      const peer = this.peer(pid);
+      peer.tries = tries;
+      const offer = await peer.pc.createOffer();
+      await peer.pc.setLocalDescription(offer);
+      this.signal(pid, "offer", { type: offer.type, sdp: offer.sdp });
+    },
+    async onSignal({ from, kind, data }) {
+      if (kind === "bye") return void this.drop(from);
+      if (!this.on) { if (kind === "offer") this.signal(from, "bye", null); return; }
+      if (kind === "offer") {
+        if (this.peers.has(from)) this.drop(from); // a fresh offer replaces any old connection
+        const peer = this.peer(from);
+        await peer.pc.setRemoteDescription(data);
+        for (const c of peer.queue.splice(0)) await peer.pc.addIceCandidate(c).catch(() => {});
+        const answer = await peer.pc.createAnswer();
+        await peer.pc.setLocalDescription(answer);
+        this.signal(from, "answer", { type: answer.type, sdp: answer.sdp });
+        return;
+      }
+      const peer = this.peers.get(from);
+      if (!peer) return;
+      if (kind === "answer" && peer.pc.signalingState === "have-local-offer") {
+        await peer.pc.setRemoteDescription(data);
+        for (const c of peer.queue.splice(0)) await peer.pc.addIceCandidate(c).catch(() => {});
+      }
+      if (kind === "ice" && data) {
+        if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(data).catch(() => {});
+        else peer.queue.push(data);
+      }
+    },
+    stateOf(pid) { const p = this.peers.get(pid); return p ? p.pc.connectionState : null; },
+    state() {
+      const peers = {};
+      for (const [pid, p] of this.peers) peers[pid] = p.pc.connectionState;
+      return { on: this.on, muted: this.muted, captions: !capsOff, peers };
+    },
+  };
+  window.__skAudioState = () => Audio.state();
 
   // ---------- Reading Sidekick aloud: the planner's phone only, and only in a pause ----------
   // Picks the most natural voice this device has (Edge "Online (Natural)", Apple "Premium"/"Enhanced",
@@ -602,15 +1056,22 @@
     if (!("speechSynthesis" in window)) return;
     // Barge-in: if anyone else starts talking while Sidekick is speaking, stop at once
     if (speechSynthesis.speaking && view.people.some((p) => p.talking && p.id !== view.me.id)) speechSynthesis.cancel();
-    if (!view.me.planner || !aloud || agent || agentStarting) return; // the voice agent speaks instead
+    // Who reads aloud: the planner's phone (unless the voice agent is speaking there), and, when the crew
+    // is in in-app audio, every phone in it, so remote friends hear Sidekick too
+    const plannerReads = view.me.planner && !agent && !agentStarting;
+    const remoteReads = Audio.on && !view.me.planner;
+    if (!aloud || !(plannerReads || remoteReads)) return;
     const last = view.sidekick.slice(-1)[0];
     if (!last || last.system || last.id === lastRead) return;
     if (lastRead === null && Date.now() - last.at > 15000) { lastRead = last.id; return; } // don't replay old lines after a reload
     if (view.people.some((p) => p.talking) && tries < 6) return void setTimeout(() => readAloud(tries + 1), 1200);
     lastRead = last.id;
     const u = Voice.say(last.text, view.voice);
-    u.onstart = () => { if (micOn && rec) { paused = true; try { rec.stop(); } catch {} } }; // don't caption Sidekick's own voice
-    u.onend = u.onerror = () => { if (paused) { paused = false; if (micOn) try { rec.start(); } catch {} } };
+    let ended = false;
+    const resume = () => { if (ended) return; ended = true; Audio.duck(false); if (paused) { paused = false; restartRec(150); } };
+    u.onstart = () => { Audio.duck(true); if (micOn) { paused = true; stopRec(); } }; // don't caption (or send) Sidekick's own voice
+    u.onend = u.onerror = resume;
+    setTimeout(resume, 2000 + Voice.speakable(last.text).split(/\s+/).length * 600); // some phones never fire onend
   }
 
   // ---------- Start ----------

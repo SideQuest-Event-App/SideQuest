@@ -5,12 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#13101b">
 <title>Sidekick · plan a night</title>
+<!--og: the server fills in link-preview tags here (lib/sidekick/og.js)-->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/sidekick.css">
 </head>
 <body>
 <main id="app" aria-live="polite"><p class="muted center pad">Loading…</p></main>
+<div class="conn" id="conn" role="status" hidden>Reconnecting…</div>
 <div class="toast" id="toast" role="status"></div>
 <script src="/js/sidekick.js"></script>
 </body>
