@@ -14,6 +14,7 @@ const SLOTS = {
   kind: { label: "Plan", multi: false, private: false, options: [["events", "A ticketed event"], ["places", "Just somewhere good"], ["either", "Either works"]] },
 };
 const placesOpen = require("./places").openAt;
+const rank = require("../search/rank");
 // A representative hour for each time of night, to check a place is open then
 const BUCKET_HOUR = { early: 15, evening: 19, late: 21 };
 // Asked in this order of importance when nothing else decides it; nos is only asked on the join card
@@ -150,16 +151,37 @@ function filterEvents(events, room, f) {
   });
 }
 
-// How well an event suits the crew: vibes people asked for, a fair trip for everyone, good reviews
+// How well an event suits one person, 0 to 1: their vibe answers (a full match for the vibe they asked for, a little
+// more for matching several), or their own taste weights when the room has them (person.fit, from lib/search/taste)
+function personFit(e, room, x) {
+  const p = x.person;
+  if (typeof p.fit === "function") return p.fit(e);
+  const asked = [].concat(x.a.value);
+  const hit = asked.filter((v) => (VIBES[v] || []).some((tag) => (e.vibes || []).includes(tag))).length;
+  return { fit: hit ? 0.75 + (0.25 * hit) / asked.length : 0, strongDislike: false };
+}
+// Everyone's fit for an event: { avg, fits: { personId: 0..1 }, misery }. Average without misery: anyone's strong
+// dislike takes it out of the running (see score); otherwise the crew's fit is the average.
+function crewFits(e, room) {
+  const members = answersFor(room, "vibe").map((x) => ({ id: x.person.id, name: x.person.name, fit: () => personFit(e, room, x) }));
+  return rank.blend(e, members);
+}
+
+// How well an event suits the crew: vibes people asked for (each person's fit, averaged), a fair trip for everyone,
+// good reviews, plus small context bonuses (weather, crew size; lib/search/rank.js) and a penalty for picks this
+// crew was already shown and passed on (room.shown)
 function score(e, room, f) {
   const vibeAnswers = answersFor(room, "vibe");
-  let s = 0;
-  for (const x of vibeAnswers) if ([].concat(x.a.value).some((v) => (VIBES[v] || []).some((tag) => (e.vibes || []).includes(tag)))) s += 10;
+  const b = crewFits(e, room);
+  let s = b.avg * vibeAnswers.length * 10;
+  if (b.misery) s -= 25;
   const origins = Array.isArray(f.origin.value) && f.origin.value.length ? f.origin.value : ["union"];
   const trips = origins.map((o) => (e.travel && e.travel.from && e.travel.from[o] ? e.travel.from[o].minutes : 30));
   s -= Math.max(...trips) / 6;
   s += e.type === "place" ? Math.max(0, (e.rating || 0) - 3.8) * 5 + (e.hours ? 0 : -3) : (e.rating || 0) * 1.5 + Math.min(e.going || 0, 20) / 10;
   if (e.price == null && f.budget.value != null && f.budget.value !== "any") s -= 4;
+  if (room.context) s += rank.contextBonus(e, { ...room.context, crewSize: crew(room).length, night: f.night.known && f.night.value.length ? f.night.value[0] : room.nights[0] }).bonus;
+  if (room.shown) s += rank.seenPenalty(e.id, room.shown, room.now || Date.now());
   return s;
 }
 
@@ -179,11 +201,34 @@ function bestRelax(events, room, f) {
   return best;
 }
 
+// The list in the order picks are made from. The top is re-ordered so the two picks aren't near-duplicates and
+// don't leave anyone out: pick one is the best match; pick two trades score against similarity to pick one (MMR)
+// and gets a boost for whoever pick one (and this crew's earlier picks, room.history) served least.
+const HEAD = 30;
 function ranked(events, room, f) {
-  return filterEvents(events, room, f)
+  const scored = filterEvents(events, room, f)
     .map((e) => ({ e, s: score(e, room, f) }))
-    .sort((a, b) => b.s - a.s || a.e.id - b.e.id)
-    .map((x) => x.e);
+    .sort((a, b) => b.s - a.s || a.e.id - b.e.id);
+  if (scored.length < 3) return scored.map((x) => x.e);
+  const head = scored.slice(0, HEAD);
+  const sOf = new Map(head.map((x) => [x.e, x.s]));
+  const lo = Math.min(...head.map((x) => x.s));
+  const hi = Math.max(...head.map((x) => x.s));
+  // Scaled over at least 10 points (one person's full vibe match), so a pick a few points behind isn't treated as worst
+  const span = Math.max(hi - lo, 10);
+  const norm = (e) => Math.max(0, (sOf.get(e) - (hi - span)) / span);
+  const first = head[0].e;
+  const members = answersFor(room, "vibe").map((x) => ({ id: x.person.id, name: x.person.name }));
+  const fitsOf = (e) => crewFits(e, room).fits;
+  const least = rank.leastServed(members, [...(room.history || []), { fits: fitsOf(first) }]);
+  let second = null;
+  let best = -Infinity;
+  for (const { e } of head.slice(1)) {
+    const v = 0.65 * norm(e) - 0.35 * rank.similarity(e, first) + (least ? 0.3 * (fitsOf(e)[least.id] || 0) : 0);
+    if (v > best + 1e-9) { best = v; second = e; }
+  }
+  const rest = rank.mmr(head.map((x) => x.e).filter((e) => e !== first && e !== second), (e) => sOf.get(e), { lambda: 0.7, range: 10 });
+  return [first, second, ...rest, ...scored.slice(HEAD).map((x) => x.e)];
 }
 
 // Facts as they'd be if the whole crew gave `value` for `slot` (used to look ahead)
@@ -254,4 +299,4 @@ function budgetLabel(f, room) {
 // How Sidekick may describe a loosened constraint out loud: never names a private answer
 const RELAX_WORDS = { time: "a different start time", night: "another night", area: "a wider range of areas", budget: "stretching the spend a little" };
 
-module.exports = { SLOTS, VIBES, ASKABLE, optionsFor, labelOf, nightLabel, facts, groupFact, filterEvents, ranked, nextQuestion, readiness, budgetLabel, bestRelax, RELAX_WORDS, answersFor, crew, need, localDay };
+module.exports = { SLOTS, VIBES, ASKABLE, optionsFor, labelOf, nightLabel, facts, groupFact, filterEvents, ranked, nextQuestion, readiness, budgetLabel, bestRelax, RELAX_WORDS, answersFor, crew, need, localDay, crewFits, score };

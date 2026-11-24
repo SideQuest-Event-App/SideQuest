@@ -29,6 +29,10 @@ const sidekick = require("./lib/sidekick/rooms"); // Sidekick planning calls (li
 const skOg = require("./lib/sidekick/og"); // link previews for call invites
 const skStudy = require("./lib/sidekick/study"); // the voice A/B study (public/study.html, reference/sidekick-ab-study-plan.md)
 const launch = require("./lib/launch"); // the launch map: "You · <neighbourhood>" and nearby places
+const taste = require("./lib/search/taste"); // per-person vibe weights learned from saves, accepts, ratings, "not for me"
+const discover = require("./lib/search/discover"); // feed order (variety, seen penalty), Wildcard, crew blend, data age
+const weather = require("./lib/search/weather"); // Open-Meteo, cached hourly, skipped when unreachable
+const rank = require("./lib/search/rank");
 
 const PORT = process.env.PORT || 3001; // Sketch 1 uses 3000, so both can run at once
 
@@ -205,7 +209,8 @@ function tasteProfile(user) {
 // When any of this changes, the feed is re-scored
 function feedKey(user) {
   const { pool } = applyLimits({ budget: user.budget, origins: user.origin ? [user.origin] : [], maxMinutes: user.maxMinutes });
-  const key = JSON.stringify([tasteProfile(user), user.maxMinutes, pool.map((e) => e.id)]);
+  const w = taste.weights(user);
+  const key = JSON.stringify([tasteProfile(user), user.maxMinutes, pool.map((e) => e.id), Object.entries(w.vibes).map(([v, x]) => [v, Math.round(x)]), user.areas || [], user.whenOut || [], Math.floor(now().getTime() / 3600000)]);
   return crypto.createHash("md5").update(key).digest("hex").slice(0, 12);
 }
 
@@ -216,6 +221,11 @@ function crewPeople(user) {
     { name: user.name || "You", interests: [...me.vibes, ...me.loved.map((l) => l.title)].join(", ") || "anything fun", origin: user.origin, budget: user.budget },
     ...party.members.map((m) => ({ name: m, interests: db.FRIENDS[m].vibes.join(", "), origin: db.FRIENDS[m].origin, budget: db.FRIENDS[m].budget })),
   ];
+}
+// The crew's tastes for fair blending: names and vibe weights only (no budgets, areas or locations)
+function blendPeople(user) {
+  const party = db.data.parties[user.id];
+  return [{ name: user.name || "You", isMe: true, weights: taste.weights(user) }, ...party.members.filter((m) => db.FRIENDS[m]).map((m) => ({ name: m, weights: discover.weightsFromVibes(db.FRIENDS[m].vibes) }))];
 }
 function blendKey(user) {
   return crypto.createHash("md5").update(JSON.stringify([crewPeople(user), user.maxMinutes, db.data.events.length])).digest("hex").slice(0, 12);
@@ -280,7 +290,8 @@ function view(userId, hostId) {
     model: ai.MODEL,
     vocab: { VIBES, ORIGINS, AREAS, WHEN, WHEN_OUT, DAYS, CREW_SIZES, TRANSIT, RATE_TAGS, HOST_TYPES, PAST_SUGGESTIONS, FLAG_FIELDS },
     friends: db.FRIENDS,
-    user: user && { ...user, feedKey: feedKey(user), friendList: friendList(user), highlights: highlights(user), friendRequests: requestsFor(user), pendingFriends: sentTo(user).map(person).filter(Boolean) },
+    dataHealth: discover.dataHealth(d.eventsImportedAt, now().getTime()), // "data is more than 8 days old" on the admin side
+    user: user && { ...user, shown: undefined, taste: taste.summary(user), feedKey: feedKey(user), friendList: friendList(user), highlights: highlights(user), friendRequests: requestsFor(user), pendingFriends: sentTo(user).map(person).filter(Boolean) },
     party: user && { ...d.parties[user.id], blendKey: blendKey(user) },
     host,
     organizers: organizerList(),
@@ -557,7 +568,34 @@ A.follow = (ctx, { host }) => ({ following: toggle(needUser(ctx).following, clea
 A.save = (ctx, { eventId }) => {
   const e = findEvent(eventId);
   if (!e) throw new Error("Unknown quest.");
-  return { saved: toggle(needUser(ctx).saved, e.id) };
+  const u = needUser(ctx);
+  const saved = toggle(u.saved, e.id);
+  if (saved.includes(e.id)) taste.record(u, "save", e);
+  else taste.undo(u, "save", e);
+  return { saved };
+};
+// "More like this" on a card: the event's vibes count for more in this person's taste (tap again to take it back)
+A.moreLikeThis = (ctx, { eventId }) => {
+  const u = needUser(ctx);
+  const e = findEvent(eventId);
+  if (!e) throw new Error("Unknown quest.");
+  u.moreLike = u.moreLike || [];
+  const on = !u.moreLike.includes(e.id);
+  if (on) {
+    u.moreLike.push(e.id);
+    taste.record(u, "more", e);
+    if (u.shown) delete u.shown[e.id];
+  } else {
+    u.moreLike = u.moreLike.filter((x) => x !== e.id);
+    taste.undo(u, "more", e);
+  }
+  return { more: on, vibes: (e.vibes || []).slice(0, 3) };
+};
+// Profile > Your taste: set a vibe's weight (0 takes it out of your taste; null goes back to automatic)
+A.setTaste = (ctx, { vibe, value }) => {
+  const u = needUser(ctx);
+  if (!taste.edit(u, vibe, value)) throw new Error("Unknown vibe.");
+  return { taste: taste.summary(u) };
 };
 // "Accept quest" is intent only. Attendance is asked after the event ("Did you go?").
 A.accept = (ctx, { eventId }) => {
@@ -567,6 +605,8 @@ A.accept = (ctx, { eventId }) => {
   if (u.log[e.id]) return;
   const crewSize = 1 + ctx.party.members.filter((m) => ctx.party.votes[m] === e.id || (e.friends || []).includes(m)).length;
   u.log[e.id] = { status: "going", acceptedAt: now().toISOString(), crewSize };
+  taste.record(u, "accept", e);
+  if (u.feed && u.feed.wildcard && u.feed.wildcard.id === e.id) discover.noteWildcard((db.data.explore = db.data.explore || {}), u.feed.wildcard.vibe, "accepted");
   db.data.logs.going.push({ time: new Date().toISOString(), eventId: e.id, crewSize, userId: u.id });
 };
 A.unaccept = (ctx, { eventId }) => {
@@ -579,13 +619,18 @@ A.notForMe = (ctx, { eventId, person }) => {
   const e = findEvent(eventId);
   if (!e) throw new Error("Unknown quest.");
   if (!person || person === u.name) {
-    if (!u.notForMe.includes(e.id)) u.notForMe.push(e.id);
+    if (!u.notForMe.includes(e.id)) {
+      u.notForMe.push(e.id);
+      taste.record(u, "notForMe", e); // also counts against the event's vibes and organizer, not just this one listing
+    }
   }
   db.data.logs.feedback.push({ time: new Date().toISOString(), eventId: e.id, person: clean(person, 30), userId: u.id });
 };
 A.undoNotForMe = (ctx, { eventId }) => {
   const u = needUser(ctx);
   u.notForMe = u.notForMe.filter((id) => id !== Number(eventId));
+  const e = findEvent(eventId);
+  if (e) taste.undo(u, "notForMe", e);
 };
 
 // --- parties ---
@@ -724,6 +769,8 @@ A.rate = (ctx, { eventId, stars, tags, details, with: withWho, photos }) => {
   l.with = (Array.isArray(withWho) ? withWho : []).map((x) => clean(x, 30)).filter(Boolean).slice(0, 12);
   l.photos = (Array.isArray(photos) ? photos : []).filter((x) => typeof x === "string" && /^data:image\/jpeg;base64,/.test(x) && x.length < 300000).slice(0, 3);
   db.data.logs.attended.push({ time: new Date().toISOString(), eventId: e.id, attended: true, rating: n, tags: l.tags, userId: u.id });
+  if (n >= 4) taste.record(u, "love", e);
+  else if (n <= 2) taste.record(u, "dislike", e);
   // A great night teaches the taste avatar
   const learned = n >= 4 ? (e.vibes || []).filter((v) => !u.vibes.includes(v)) : [];
   u.vibes.push(...learned);
@@ -1444,11 +1491,36 @@ async function apiFeed({ userId, force }) {
   const { pool } = applyLimits({ budget: user.budget, origins: user.origin ? [user.origin] : [], maxMinutes: user.maxMinutes });
   const visible = pool.filter((e) => !user.notForMe.includes(e.id));
   const profile = tasteProfile(user);
-  const lovedVibes = profile.loved.flatMap((l) => l.vibes || []);
-  const candidates = shortlist(visible, (e) => vibeOverlap(e, profile.vibes) * 3 + vibeOverlap(e, lovedVibes) + (e.friends || []).filter((f) => profile.party.includes(f)).length * 2 + (e.price === 0 ? 0.5 : 0) + soonness(e) - (profile.disliked.includes(e.title) ? 5 : 0), 45);
+  // The shortlist the AI reads: taste weights (onboarding vibes, nudged by saves, accepts, ratings, "more like this"
+  // and "not for me", fading over a month), plus areas, times out, saves, weather and friends going
+  await weather.refresh();
+  const weights = taste.weights(user);
+  const savedEvents = user.saved.map(findEvent).filter(Boolean);
+  const ctx = { weights, savedEvents, context: { weather: weather.at } };
+  const scored = new Map(visible.map((e) => [e.id, discover.shortlistScore(user, e, ctx)]));
+  const candidates = shortlist(visible, (e) => scored.get(e.id).s + (e.friends || []).filter((f) => profile.party.includes(f)).length * 2 + (e.price === 0 ? 0.5 : 0) + soonness(e), 45);
   const result = candidates.length ? await ai.feed(profile, candidates) : { mode: ai.mode(), picks: {}, avatar: "" };
+  // Without AI the keyword match only has a few distinct values; the taste fit and context spread them out and the
+  // reason says what actually counted ("you're into jazz; indoors, and rain is forecast")
+  if (result.mode === "keywords") {
+    for (const e of candidates) {
+      const p = result.picks[e.id];
+      const x = scored.get(e.id);
+      if (!p || !x) continue;
+      p.match = Math.max(5, Math.min(97, Math.round(35 + x.fit * 50 + Math.max(-10, Math.min(10, x.s - x.fit * 9)) * 2 + (e.price === 0 ? 2 : 0))));
+      if (x.why.length) p.reason = (x.why.slice(0, 2).join("; ") + ".").replace(/^./, (c) => c.toUpperCase());
+    }
+  }
+  const byId = new Map(visible.map((e) => [e.id, e]));
+  const order = discover.order(user, result.picks, byId, { scores: new Map([...scored].map(([id, x]) => [id, x.s])) });
+  // A labelled Wildcard, outside the person's usual vibes and the top of the feed
+  const explore = (db.data.explore = db.data.explore || {});
+  const wildcard = discover.wildcardFor(user, visible, { counts: explore, exclude: new Set(order.slice(0, 12)) });
+  if (wildcard) discover.noteWildcard(explore, wildcard.vibe, "shown");
+  // Why each pick is here, in a few words, for the card ("indoors, and rain is forecast")
+  const context = Object.fromEntries(order.slice(0, 60).map((id) => [id, (scored.get(id) || { why: [] }).why.filter((w) => !/^you're into/.test(w)).slice(0, 1)[0]]).filter(([, w]) => w));
   // The user may have changed while the AI was thinking; save against the key it was built for
-  user.feed = { key, time: new Date().toISOString(), ...result, eligible: visible.map((e) => e.id) };
+  user.feed = { key, time: new Date().toISOString(), ...result, order, wildcard, context, eligible: visible.map((e) => e.id) };
   db.save();
   return user.feed;
 }
@@ -1496,7 +1568,11 @@ async function apiBlend({ userId, force }) {
   const origins = [...new Set(people.map((p) => p.origin).filter(Boolean))];
   const { pool, excluded } = applyLimits({ budget, origins, maxMinutes: user.maxMinutes });
   const crewVibes = people.map((p) => ai.wordsOf(p.interests));
-  const ranked = shortlist(pool, (e) => crewVibes.filter((w) => wordHits(e, w) > 0).length * 3 + crewVibes.reduce((a, w) => a + wordHits(e, w), 0) * 0.3 + soonness(e) * 0.2, pool.length);
+  // Fair blending: each person's fit from their own taste (yours learned from what you do, friends' from their vibes),
+  // anything someone strongly dislikes left out, then picks take turns serving whoever is least served so far
+  const crewTaste = blendPeople(user);
+  const fair = discover.fairOrder(crewTaste, pool, { n: 20, extra: (e) => soonness(e) * 0.05 });
+  const ranked = [...new Set([...fair, ...shortlist(pool, (e) => crewVibes.filter((w) => wordHits(e, w) > 0).length * 3 + crewVibes.reduce((a, w) => a + wordHits(e, w), 0) * 0.3 + soonness(e) * 0.2, pool.length)])];
   // Each vibe gets its turn at the shortlist. Ranking by word hits alone filled it with music
   // (Live music, Jazz, Indie gigs share words), so the AI never saw the art, comedy or climbing events.
   const themes = [...new Set(people.flatMap((p) => p.interests.split(",").map((v) => v.trim())))].map(ai.wordsOf).filter((w) => w.length);
@@ -1507,6 +1583,8 @@ async function apiBlend({ userId, force }) {
   const candidates = [...picked];
   // 12 picks, so each shared theme on Community has some to show
   const result = candidates.length ? await ai.match(people, candidates, 12) : { mode: ai.mode(), matches: [], unmet: [] };
+  // "Who it's for" and a crew match % on every pick, from fits only: budgets are never part of either
+  result.matches = discover.crewView(crewTaste, result.matches, new Map(candidates.map((e) => [e.id, e])));
   const unmet = result.unmet.map((u) => ({ ...u, reason: unmetReason(u.interest, excluded) }));
   db.data.logs.searches.push({ time: new Date().toISOString(), mode: result.mode, userId, crew: people.length, interests: people.map((p) => p.interests).join(" | "), budget, origins, maxMinutes: user.maxMinutes, matchedIds: result.matches.map((m) => m.id), unmet });
   party.blend = { key, time: new Date().toISOString(), ...result, unmet, limits: { ...limitsSummary(budget, pool, excluded), budgetSetBy } };
@@ -1711,6 +1789,9 @@ async function apiFromLink({ userId, url }) {
 const SAFE_ARGS = ["real", "field", "eventId", "requestId", "stars", "tags", "attended", "audience", "size", "when", "source", "origin", "transit", "budget", "maxMinutes", "registered", "toggleVibe", "type", "area", "submit", "toggleWhen", "days", "adult"];
 const SAFE_RESULT = ["added", "existing", "status", "flags", "eventId", "requestId", "merged", "votes", "learned", "told", "reached", "requesters", "followers"];
 const DEMO_ACTIONS = ["demoLogin", "hostLoginAs", "hostApprove", "skipToAfter", "reset"]; // sketch shortcuts, left out of real numbers
+// Card taps that count toward click-through, logged as card_action rows (ids, the surface and position only)
+const CARD_ACTIONS = { save: "save", accept: "accept", notForMe: "not_for_me", moreLikeThis: "more_like_this", sendToParty: "send_to_party" };
+const SURFACES = /^[a-z-]{2,24}$/;
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj && obj[k] !== undefined).map((k) => [k, obj[k]]));
 function trackAction(type, { userId, hostId, sessionId, args, result, error }) {
   const props = { ...pick(args, SAFE_ARGS), ...pick(result, SAFE_RESULT), ok: !error };
@@ -1720,6 +1801,7 @@ function trackAction(type, { userId, hostId, sessionId, args, result, error }) {
   const id = Number(props.eventId);
   if (user && user.log[id] && (type === "accept" || type === "lockPoll")) props.crewSize = user.log[id].crewSize;
   track(type, { userId, hostId, sessionId, ...props });
+  if (CARD_ACTIONS[type] && !error && args && SURFACES.test(args.surface || "")) track("card_action", { userId, sessionId, eventId: id || null, action: CARD_ACTIONS[type], surface: args.surface, position: Number.isInteger(args.position) ? Math.min(args.position, 500) : null });
 }
 // What the AI was asked for, how long it took, and which backend answered
 function trackAI(route, body, started, out, error) {
@@ -1849,6 +1931,23 @@ const server = http.createServer(async (req, res) => {
         throw err;
       }
     }
+    // Cards the app showed (ids and positions only): card_shown rows for click-through, and the "seen and ignored"
+    // list that nudges repeats down the feed (an action on a card clears it)
+    if (req.method === "POST" && url.pathname === "/api/cards") {
+      const { user: userId, sessionId, surface, ids } = await readBody(req);
+      const list = (Array.isArray(ids) ? ids : []).map(Number).filter((id) => Number.isFinite(id)).slice(0, 20);
+      if (SURFACES.test(surface || "") && list.length) {
+        list.forEach((eventId, position) => track("card_shown", { userId, sessionId, eventId, surface, position }));
+        const u = db.data.users[userId];
+        if (u) {
+          const acted = new Set([...u.saved, ...Object.keys(u.log).map(Number), ...(u.moreLike || [])]);
+          rank.noteShown((u.shown = u.shown || {}), list.filter((id) => !acted.has(id)), now().getTime());
+          db.save();
+        }
+      }
+      res.writeHead(204);
+      return res.end();
+    }
     if (req.method === "POST" && url.pathname === "/api/track") {
       const { user: userId, host: hostId, sessionId, screen, from, eventId } = await readBody(req);
       if (SCREEN_ID.test(screen || "")) track("screen_view", { userId, hostId, sessionId, eventId, screen, from: SCREEN_ID.test(from || "") ? from : null });
@@ -1902,9 +2001,15 @@ db.load().then(() => sidekick.init({ events: () => db.data.events })).then(() =>
   else console.log("Claude Code not found and no API key — using keyword matching (not AI)");
   const upcoming = db.data.events.filter((e) => !isOver(e));
   console.log(`${upcoming.length} upcoming events in the database (imported ${db.data.eventsImportedAt})`);
+  const stale = discover.staleLine(discover.dataHealth(db.data.eventsImportedAt));
+  if (stale) console.warn(stale);
   track("server_start", { aiMode: m, events: db.data.events.length });
   // The weekly import lands in Supabase Storage; look for a new one every 6 hours
-  setInterval(() => db.checkImport().then((took) => took && console.log(`New import loaded (${db.data.eventsImportedAt})`), (err) => console.error("Import check failed:", err.message)), 6 * 3600 * 1000).unref();
+  setInterval(() => db.checkImport().then((took) => {
+    if (took) console.log(`New import loaded (${db.data.eventsImportedAt})`);
+    const line = discover.staleLine(discover.dataHealth(db.data.eventsImportedAt));
+    if (line) console.warn(line); // every 6 hours while the data stays old
+  }, (err) => console.error("Import check failed:", err.message)), 6 * 3600 * 1000).unref();
 })).catch((err) => {
   console.error("Could not load the database:", err.message);
   process.exit(1);
