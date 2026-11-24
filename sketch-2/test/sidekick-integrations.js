@@ -39,6 +39,7 @@ global.fetch = async (url, opts = {}) => {
   url = String(url);
   if (url.startsWith("https://places.googleapis.com/")) {
     calls.google++;
+    calls.lastBody = JSON.parse(opts.body);
     assert(opts.headers["x-goog-fieldmask"].includes("places.regularOpeningHours"), "asks for opening hours");
     assert.strictEqual(opts.headers["x-goog-api-key"], "test-key");
     return { ok: true, json: async () => ({ places: [
@@ -152,6 +153,36 @@ const SAT = days.find((d) => d > FRI && new Date(d + "T12:00:00").getDay() === 6
     assert(room.picks && room.picks.length === 2, "two picks");
     assert(room.picks.every((x) => x.kind === "place"), "both picks are places");
     assert(room.picks.every((x) => x.attribution === "Google Maps" && /maps\.google/.test(x.url)), "attribution and a maps link");
+    T.endRoom(room, "test");
+  });
+
+  await test("Places: searched near the crew's starting points, not always downtown", async () => {
+    const down = places.nearCrew([]);
+    assert.strictEqual(down.radius, 15000, "no starting points: all of Toronto");
+    const east = places.nearCrew(["kennedy"]);
+    assert(east.center.longitude > -79.3 && east.radius === 5000, "one person at Kennedy: a 5 km circle around Scarborough");
+    const split = places.nearCrew(["kipling", "kennedy"]);
+    assert(Math.abs(split.center.longitude - (-79.4)) < 0.05, "Kipling + Kennedy: centred in between");
+    assert(split.radius > 5000 && split.radius <= 15000);
+    usage._reset();
+    await places.search("music", { origins: ["finch", "finch"] });
+    assert(calls.lastBody.locationBias.circle.center.latitude > 43.75, "the request itself is biased to Finch");
+  });
+
+  await test("Call: unless the crew picks one kind, the two picks are one event and one place", async () => {
+    usage._reset();
+    const { room: rid } = T.createRoom({ crew: "Test", planner: "Asia", nights: [FRI, SAT], persona: "concierge" });
+    const room = T.rooms.get(rid);
+    room.mode = "lead";
+    const maya = T.addPerson(room, { name: "Maya", mode: "voice" });
+    const people = [room.people[0], maya];
+    for (const p of people) { T.setAnswer(room, p, "night", [SAT], "call_card"); T.setAnswer(room, p, "budget", "50", "call_card"); T.setAnswer(room, p, "origin", "union", "call_card"); T.setAnswer(room, p, "vibe", ["games", "music"], "call_card"); T.setAnswer(room, p, "time", ["evening", "late"], "call_card"); T.setAnswer(room, p, "kind", "either", "call_card"); }
+    await T.think(room);
+    assert(room.places.length > 0, "places loaded");
+    room.lastSaidAt = 0;
+    await T.decide(room, { forcePicks: true });
+    assert(room.picks && room.picks.length === 2, "two picks");
+    assert.deepStrictEqual(room.picks.map((x) => x.kind).sort(), ["event", "place"], `got ${room.picks.map((x) => x.kind)}`);
     T.endRoom(room, "test");
   });
 

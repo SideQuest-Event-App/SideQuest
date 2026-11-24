@@ -586,7 +586,9 @@ async function ensurePlaces(room, f) {
   if (!(f.vibe.answered > 0 || room.asked.includes("vibe") || room.asked.length >= 3)) return;
   room.placesTried = true;
   if (!(await places.available())) return;
-  const out = await places.forCall(f.vibe.value || []);
+  // Near the crew: everyone's starting points so far (from the join card or the call)
+  const origins = P.crew(room).map((p) => room.answers[p.id] && room.answers[p.id].origin && room.answers[p.id].origin.value).flat().filter(Boolean);
+  const out = await places.forCall(f.vibe.value || [], { origins });
   room.places = out.places;
   track("sk_places_loaded", { sessionId: room.id, persona: room.persona, n: out.places.length, capped: out.capped || null });
 }
@@ -723,6 +725,17 @@ async function makePicks(room, list) {
     console.error(err.message);
   }
   for (const e of pool) if (matches.length < 2 && !matches.some((m) => m.id === e.id)) matches.push({ id: e.id, reason: "", fits: {} });
+  // Unless the crew asked for only events or only places, show one of each when both fit: the
+  // best event from the listings and the best place from Google, so the crew sees both options.
+  const typeOf = (id) => ((pool.find((x) => x.id === id) || {}).type === "place" ? "place" : "event");
+  const mixed = !(f.kind && f.kind.known && f.kind.value.length === 1 && f.kind.value[0] !== "either");
+  if (mixed && matches.length >= 2 && typeOf(matches[0].id) === typeOf(matches[1].id)) {
+    const other = list.find((e) => (e.type === "place" ? "place" : "event") !== typeOf(matches[0].id));
+    if (other) {
+      if (!pool.includes(other)) pool.push(other);
+      matches[1] = { id: other.id, reason: "", fits: {} };
+    }
+  }
   room.picks = matches.slice(0, 2).map((m) => {
     const e = pool.find((x) => x.id === m.id);
     if (e.type === "place") {

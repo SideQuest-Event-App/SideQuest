@@ -17,6 +17,21 @@ const ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const FIELDS = ["id", "displayName", "formattedAddress", "location", "types", "primaryType", "priceLevel", "priceRange", "rating", "userRatingCount", "regularOpeningHours", "googleMapsUri"].map((f) => `places.${f}`).join(",");
 const CITY = () => process.env.SIDEKICK_CITY || "Toronto, ON";
 const CENTER = { latitude: 43.6532, longitude: -79.3832 }; // downtown Toronto; 15 km covers the city
+// Where each starting point is, so places are searched near the crew rather than always downtown
+const STATIONS = { union: [43.6453, -79.3806], finch: [43.7806, -79.4155], kennedy: [43.7323, -79.2637], kipling: [43.6372, -79.5361] };
+const km = (a, b) => {
+  const r = Math.PI / 180, dLat = (b[0] - a[0]) * r, dLng = (b[1] - a[1]) * r;
+  return 12742 * Math.asin(Math.sqrt(Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLng / 2) ** 2));
+};
+// The search circle for a crew: centred between everyone's starting points, wide enough to reach
+// the middle from each of them (5 to 15 km). No known starting points: downtown, 15 km.
+function nearCrew(origins) {
+  const pts = [...new Set(origins || [])].map((o) => STATIONS[o]).filter(Boolean);
+  if (!pts.length) return { center: CENTER, radius: 15000 };
+  const mid = [pts.reduce((t, p) => t + p[0], 0) / pts.length, pts.reduce((t, p) => t + p[1], 0) / pts.length];
+  const reach = Math.max(...pts.map((p) => km(p, mid)));
+  return { center: { latitude: mid[0], longitude: mid[1] }, radius: Math.round(Math.min(15000, Math.max(5000, reach * 1000 * 0.75))) };
+}
 const PER_CALL = () => Number(process.env.SIDEKICK_PLACES_PER_CALL || 2); // most searches one planning call may use
 
 // One search per vibe, worded the way people search
@@ -72,7 +87,7 @@ function toCandidate(p, vibe) {
 }
 
 // Search once. Returns { places, capped } and never throws (a failed search just means no places).
-async function search(vibe, { fetchImpl = fetch } = {}) {
+async function search(vibe, { fetchImpl = fetch, origins } = {}) {
   if (!configured()) return { places: [], capped: "not configured" };
   const ok = await usage.reserve("places_text_search", 1);
   if (!ok.ok) return { places: [], capped: ok.reason };
@@ -83,7 +98,7 @@ async function search(vibe, { fetchImpl = fetch } = {}) {
       method: "POST",
       signal: ctrl.signal,
       headers: { "content-type": "application/json", "x-goog-api-key": process.env.GOOGLE_MAPS_API_KEY, "x-goog-fieldmask": FIELDS },
-      body: JSON.stringify({ textQuery: `${QUERY[vibe] || QUERY.default} in ${CITY()}`, pageSize: 10, locationBias: { circle: { center: CENTER, radius: 15000 } } }),
+      body: JSON.stringify({ textQuery: `${QUERY[vibe] || QUERY.default} in ${CITY()}`, pageSize: 10, locationBias: { circle: nearCrew(origins) } }),
     });
     if (!res.ok) throw new Error(`Google Places search failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
     const data = await res.json();
@@ -96,7 +111,8 @@ async function search(vibe, { fetchImpl = fetch } = {}) {
   }
 }
 
-// Places for one call: up to PER_CALL searches, one per vibe the crew wants (or a default)
+// Places for one call: up to PER_CALL searches, one per vibe the crew wants (or a default), near the
+// crew's starting points (opts.origins)
 async function forCall(vibes, opts) {
   const list = [...new Set([...(vibes || []), "default"])].slice(0, PER_CALL());
   const seen = new Map();
@@ -144,4 +160,4 @@ function closesLabel(periods, day, hour) {
   return "Open that evening";
 }
 
-module.exports = { configured, available, search, forCall, openAt, closesLabel, toCandidate, FIELDS, _numId: numId };
+module.exports = { configured, available, search, forCall, openAt, closesLabel, toCandidate, nearCrew, FIELDS, _numId: numId };
