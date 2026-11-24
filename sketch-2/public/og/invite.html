@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<!--
+  Sidekick invite card: the image messaging apps show under a call link.
+  Design: "Who's in?" over out-of-focus city lights (option E on the design canvas).
+  This file is the design; tools/render-og.js screenshots it to invite.png (1200x630) and
+  invite-square.png (1200x1200, ?square). To change it, edit the text or tokens below and run:
+    node tools/render-og.js
+  Keep it free of names and private answers: the crew name goes in og:title, not in the image.
+  The lights are drawn, not a photo; a real night photo can replace .lights later (keep it dark
+  on the left so the type stays readable).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sidekick invite card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@500;600&display=block" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e0b15;
+    --text: #f6f2ff;
+    --sub: #bcb0d9;
+    --violet: #c2a5f6;
+    --gold: 242, 201, 76;
+    --pink: 242, 141, 200;
+    --teal: 92, 207, 230;
+    --font: "Geist", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: var(--bg); }
+  .card { position: relative; overflow: hidden; width: 1200px; height: 630px; background: var(--bg); color: var(--text); font-family: var(--font); }
+  .square .card { height: 1200px; }
+
+  /* City lights, out of focus: three soft glows, faded to dark behind the type */
+  .lights { position: absolute; inset: 0; }
+  .lights::before {
+    content: ""; position: absolute; inset: 0;
+    background:
+      radial-gradient(540px 420px at 70% 35%, rgba(var(--gold), .55), transparent 70%),
+      radial-gradient(420px 320px at 88% 70%, rgba(var(--pink), .45), transparent 70%),
+      radial-gradient(360px 280px at 55% 80%, rgba(var(--teal), .35), transparent 70%);
+  }
+  .lights::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, var(--bg) 22%, rgba(14, 11, 21, 0) 85%); }
+  .square .lights::before {
+    background:
+      radial-gradient(620px 520px at 68% 24%, rgba(var(--gold), .55), transparent 70%),
+      radial-gradient(480px 400px at 90% 46%, rgba(var(--pink), .45), transparent 70%),
+      radial-gradient(420px 340px at 40% 40%, rgba(var(--teal), .35), transparent 70%);
+  }
+  .square .lights::after { background: linear-gradient(0deg, var(--bg) 42%, rgba(14, 11, 21, 0) 80%); }
+  .grain { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .18; mix-blend-mode: overlay; }
+
+  .mark { position: absolute; left: 56px; top: 48px; display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 36px; letter-spacing: -.01em; }
+  .mark i { width: 28px; height: 28px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #f5d6ff, #a97af2 60%, #452871); }
+  .main { position: absolute; left: 52px; bottom: 56px; display: flex; flex-direction: column; }
+  h1 { font-weight: 600; font-size: 248px; line-height: .9; letter-spacing: -.055em; margin-bottom: 36px; }
+  h1 em { font-style: normal; color: var(--violet); }
+  .lead { font-weight: 600; font-size: 40px; line-height: 1.2; letter-spacing: -.01em; margin-left: 4px; }
+  .sub { font-weight: 500; font-size: 30px; line-height: 1.3; color: var(--sub); margin: 8px 0 0 4px; }
+  .square .mark { left: 72px; top: 72px; font-size: 44px; }
+  .square .mark i { width: 34px; height: 34px; }
+  .square .main { left: 68px; bottom: 88px; }
+  .square h1 { font-size: 300px; margin-bottom: 48px; }
+  .square .lead { font-size: 54px; }
+  .square .sub { font-size: 38px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="lights" aria-hidden="true"></div>
+  <span class="mark"><i></i>sidequest</span>
+  <div class="main">
+    <h1>Who's <em>in?</em></h1>
+    <p class="lead">Help plan our next night</p>
+    <p class="sub">30&nbsp;seconds · no app · Sidekick does the chasing</p>
+  </div>
+</div>
+<script>if (/square/.test(location.search)) document.documentElement.classList.add("square");</script>
+</body>
+</html>
