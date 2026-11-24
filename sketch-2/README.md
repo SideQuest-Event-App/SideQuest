@@ -62,6 +62,7 @@ node test/sidekick-modes.js             # the opening check-in: lead or sit back
 node test/sidekick-multiphone.js        # duplicate and echo lines from several phones, ICE settings
 node test/sidekick-share.js             # link-preview tags, the card image, signalling (starts its own server)
 node test/sidekick-audio.e2e.js         # three Chromium "phones" connect in-app audio (needs Playwright)
+node test/sidekick-study.js             # the voice A/B study, end to end, with one browser tester (needs Playwright)
 ```
 
 ### How to test with friends
@@ -71,6 +72,34 @@ node test/sidekick-audio.e2e.js         # three Chromium "phones" connect in-app
 3. **In the same room:** leave the captions mic on for everyone, but only the planner's phone reads Sidekick aloud (the speaker button). The app drops the duplicate captions. If it's noisy, mute all phones except one and let that phone hear the room.
 4. **Not together:** everyone taps "Talk in the app" (headphones stop echo). Each phone then reads Sidekick aloud. If someone stays on "connecting", set up TURN (above). FaceTime or another call app works too: then leave in-app audio off.
 5. Allow the microphone when asked. On iPhone, use Safari and tap the page once if Sidekick is silent.
+
+## Running the A/B study
+
+The class study (INF2573) compares Sidekick's two call voices. Testers try the app's main features and plan two short nights out, one with each voice. They only ever see "Voice 1" and "Voice 2". The full plan is in `reference/sidekick-ab-study-plan.md`.
+
+**The link to send testers:** `https://<your-app>.onrender.com/study`
+
+Each person who opens it and taps Start is a new crew. The page is a checklist: agree, look around Discover, open Plan, share the call link, call 1, try the form, call 2, and a last short survey. Testers can do the steps in order or jump around. The two calls and the form only open in the order that keeps the test fair. It takes about 15 minutes, and the questions take under a minute and a half.
+
+**Testing with friends:** one person opens `/study` and taps Start. They copy the study link from the bottom of the checklist and send it to the others, who open it, agree, and join the call when it starts. Everyone on one call hears the same voice.
+
+**Testing alone:** on the call's invite card, tap **Add 2 practice friends**. Two practice friends (Robin and Jules) join, vote and tap answers the way real friends would. They wait for you before they answer, and they come back for call 2. They're marked as practice and are never counted as testers.
+
+**Fairness, handled for you:** crews are given an order in turns (Voice 1 is the Calm Concierge for one crew, then the Plugged-In Friend for the next, and so on), so both voices get the same number of crews. Call 1 is the main comparison. Call 2 is short and uses the other voice.
+
+**Where the results are:**
+- Open `https://<your-app>.onrender.com/study/results` and enter the study key. It shows the call 1 comparison, which voice people would keep (with a significance test) and an order check, plus download links.
+- The downloads: one row per call (`/api/sk/study/export?key=<key>`), and one row per tester for the voice preference (`&table=preferences`). They open in Excel or Google Sheets.
+- No names, transcripts, voices or private answers (budget, places to avoid) are ever stored or exported.
+- The raw data is `data/sidekick-study.json` on the server, also copied to Supabase Storage when Supabase is set up. Render wipes its disk on every deploy, so set up Supabase before the study starts.
+
+**Settings on Render** (Environment):
+- `SIDEKICK_STUDY_KEY`: any long password you choose. You need it to see the results. Without it, results stay locked.
+- `SUPABASE_URL` and `SUPABASE_SECRET_KEY`: keep the study data safe across deploys (you probably have these already).
+- Optional: `SIDEKICK_STUDY_FILE` stores the data somewhere other than `data/sidekick-study.json`.
+- Don't redeploy while people are testing: a restart ends live calls. Data that's already saved is kept.
+
+**Check it works:** `node test/sidekick-study.js` runs the whole study against a local server, including one tester in a real browser.
 
 ## Put it online (Render)
 

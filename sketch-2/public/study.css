@@ -1,0 +1,56 @@
+/* The voice study hub (public/study.html). Builds on sidekick.css: the same Sketch 2 dark tokens,
+   violet for Sidekick, the gradient only on the primary button. Two weights: 400 and 600. */
+main{gap:16px;padding-bottom:max(32px,env(safe-area-inset-bottom))}
+.lead-in{display:flex;flex-direction:column;gap:8px}
+.facts{display:grid;gap:10px}
+.fact{background:var(--surf);border:1px solid var(--bs);border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.fact h2{font-size:15px}
+.fact ul{margin:0;padding-left:18px;color:var(--t2);display:flex;flex-direction:column;gap:4px}
+.agree{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-radius:16px;background:var(--surf);border:1px solid var(--bs);cursor:pointer}
+.agree input{width:22px;height:22px;margin:1px 0 0;accent-color:var(--pri);flex:none}
+
+/* progress */
+.prog{display:flex;flex-direction:column;gap:6px}
+.prog .meter i{background:var(--soc)}
+
+/* the checklist */
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.step{background:var(--surf);border:1px solid var(--bs);border-radius:18px;overflow:hidden}
+.step.now{border-color:var(--pri-e)}
+.step-h{display:flex;align-items:center;gap:12px;width:100%;min-height:56px;padding:10px 14px;text-align:left}
+.num{width:28px;height:28px;border-radius:999px;display:grid;place-items:center;flex:none;background:var(--raise);color:var(--t2);font-size:13px;font-weight:600}
+.step.done .num{background:var(--ok-t);color:var(--ok)}
+.step.now .num{background:var(--pri-t);color:var(--acc)}
+.num svg{width:16px;height:16px}
+.step-t{display:flex;flex-direction:column;gap:2px;flex:1}
+.step-t b{font-weight:600}
+.step-t .small{color:var(--t3)}
+.step.done .step-t .small{color:var(--ok)}
+.chev{width:18px;height:18px;color:var(--t3);transition:transform .2s var(--ease);flex:none}
+.step-h[aria-expanded=true] .chev{transform:rotate(180deg)}
+.panel{padding:0 14px 14px;display:flex;flex-direction:column;gap:12px}
+.panel ol,.panel ul{margin:0;padding-left:20px;color:var(--t2);display:flex;flex-direction:column;gap:6px}
+.panel .btn{height:48px}
+.btns{display:flex;flex-direction:column;gap:8px}
+.note{font-size:13px;color:var(--t2);background:var(--raise);border-radius:12px;padding:10px 12px}
+
+/* surveys */
+.likert{display:flex;flex-direction:column;gap:6px}
+.likert p{font-weight:600}
+.likert .rate button{height:48px}
+.ends{display:flex;justify-content:space-between;font-size:12px;color:var(--t3)}
+.rate.seven{grid-template-columns:repeat(7,1fr);gap:6px}
+.rate.seven button{height:44px;font-size:15px}
+.keep{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.keep button{min-height:56px;border-radius:16px;background:var(--raise);font-weight:600}
+.keep button[aria-pressed=true]{background:var(--pri-t);color:var(--t1);box-shadow:inset 0 0 0 1.5px var(--pri)}
+textarea.in{height:auto;min-height:76px;padding:12px 14px;resize:vertical;font:inherit}
+.foot{display:flex;flex-direction:column;gap:8px;padding-top:4px}
+.linkish{color:var(--acc);font-weight:600;text-decoration:none;min-height:44px;display:inline-flex;align-items:center}
+
+/* results page */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th,.tbl td{text-align:left;padding:8px 6px;border-top:1px solid var(--bs);vertical-align:top}
+.tbl th{color:var(--t3);font-weight:600}
+.wrap{overflow-x:auto}
+.rate button,.keep button{text-align:center}

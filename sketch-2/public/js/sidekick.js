@@ -16,6 +16,11 @@
     get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
   };
+  // The voice study (/study): a study call starts through the study (which picks the voice), offers
+  // practice friends, and sends people back to the study checklist at the end. Testers only see "Voice 1/2".
+  const STUDY = params.get("study");
+  const STUDY_V = params.get("v") || "1";
+  const studyApi = (action, body) => api(`/api/sk/study/${encodeURIComponent(STUDY)}/${action}`, { t: store.get(`study:${STUDY}:tid`), ...body });
   const ICON = {
     mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
@@ -109,14 +114,15 @@
       e.target.disabled = true;
       unlockAudio();
       try {
-        const out = await api("/api/sk/rooms", { name, crew, nights: chosen, persona: params.get("persona") || undefined });
+        const out = STUDY ? await studyApi("call", { n: 1, name, crew, nights: chosen }) : await api("/api/sk/rooms", { name, crew, nights: chosen, persona: params.get("persona") || undefined });
+        if (out.join) { location.href = `/sk/${out.room}?study=${encodeURIComponent(STUDY)}&v=1`; return; } // someone in the crew already started it
         store.set("sk:name", name);
         store.set("sk:crew", crew);
         roomId = out.room;
         me = { person: out.person, mode: "voice" };
         store.set(`sk:${roomId}`, me);
         // Stay on this page (no reload), so the tap that unlocked audio on iPhones still counts
-        history.pushState(null, "", `/sk/${roomId}`);
+        history.pushState(null, "", `/sk/${roomId}${STUDY ? `?study=${encodeURIComponent(STUDY)}&v=${out.n || 1}` : ""}`);
         connect();
       } catch (err) {
         e.target.disabled = false;
@@ -383,7 +389,8 @@
       </div>`;
   }
   function invitePanel() {
-    return `<div class="priv invite"><p style="font-weight:600">Invite your crew</p><p class="small">Anyone with the link can join from a browser. No app or account needed.</p>${shareHTML()}</div>`;
+    const practice = STUDY ? `<button class="btn sm out" id="practice" style="width:100%">Add 2 practice friends</button><p class="small">Testing alone? Practice friends join, vote and tap answers like real friends. They're marked as practice and never counted as testers.</p>` : "";
+    return `<div class="priv invite"><p style="font-weight:600">Invite your crew</p><p class="small">Anyone with the link can join from a browser. No app or account needed.</p>${shareHTML()}${practice}</div>`;
   }
 
   let sheetOpen = false;
@@ -541,7 +548,10 @@
           <p class="small">1 = not at all, 5 = completely</p>
           <button class="btn pri" id="sendSurvey" disabled>Send</button>
         </div>`;
-    document.getElementById("body").innerHTML = plan + survey;
+    const studyNext = STUDY_V === "form"
+      ? `<div class="priv" style="border-style:solid;border-color:var(--bs)"><h2>Practice done</h2><p class="muted">Head back to the checklist for the next step.</p><a class="btn pri" href="/study?s=${encodeURIComponent(STUDY)}">Back to the checklist</a></div>`
+      : `<div class="priv" style="border-style:solid;border-color:var(--bs)"><h2>Voice ${esc(STUDY_V)} done</h2><p class="muted">Four quick taps about this call, back on the checklist.</p><a class="btn pri" href="/study?s=${encodeURIComponent(STUDY)}#call${esc(STUDY_V)}">Answer 4 quick questions</a></div>`;
+    document.getElementById("body").innerHTML = plan + (STUDY ? studyNext : survey); // in the study, its own questions replace these
     renderTicks();
   }
 
@@ -569,7 +579,7 @@
     }
     dock.hidden = false;
     const voice = view.me.mode === "voice";
-    const agentBtn = view.voiceAgent
+    const agentBtn = view.voiceAgent && !STUDY // study calls keep the built-in voice, the same in both arms
       ? `<button class="btn ${agent ? "out" : "pri"}" id="agent" style="height:44px">${agent ? "Sidekick's voice is on · Turn off" : agentStarting ? "Connecting Sidekick's voice…" : "Turn on Sidekick's voice"}</button>`
       : "";
     const vote = view.mode === "voting";
@@ -626,6 +636,7 @@
     }
     if (t.closest("#share")) return void navigator.share({ title: `${view.crew}: help plan our next night`, text: "Help plan our next night! Sidekick's on the call:", url: inviteLink() }).catch(() => {});
     if (t.closest("#ask")) return void send("ask", {});
+    if (t.closest("#practice")) { t.closest("#practice").disabled = true; return void studyApi("practice", { room: roomId, p: me.person }).catch((err) => { toast(err.message); renderCall(); }); }
     if (t.closest("#agent")) return void (agent ? stopAgent() : startAgent());
     if (t.closest("#audioBtn")) return void (Audio.on ? Audio.stop() : Audio.start().then(() => { if (Audio.on && !micOn) startMic(); }));
     const sm = t.closest("[data-setmode]");
@@ -1075,6 +1086,13 @@
   }
 
   // ---------- Start ----------
+  if (STUDY) {
+    const bar = document.createElement("nav");
+    bar.setAttribute("aria-label", "Study");
+    bar.style.cssText = "display:flex;justify-content:space-between;align-items:center;max-width:440px;margin:0 auto;padding:max(4px,env(safe-area-inset-top)) 16px 0;font-size:13px;font-weight:600;color:var(--t3)";
+    bar.innerHTML = `<a href="/study?s=${encodeURIComponent(STUDY)}" style="color:var(--acc);text-decoration:none;min-height:44px;display:flex;align-items:center">&larr; Study checklist</a><span>${STUDY_V === "form" ? "Practice" : `Voice ${esc(STUDY_V)}`}</span>`;
+    document.body.insertBefore(bar, app);
+  }
   if (!roomId) startScreen();
   else if (me && me.person) connect();
   else joinScreen();

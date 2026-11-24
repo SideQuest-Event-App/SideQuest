@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#13101b">
+<meta name="robots" content="noindex">
+<title>Sidekick study results</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/sidekick.css">
+<link rel="stylesheet" href="/study.css">
+<style>main{max-width:760px}</style>
+</head>
+<body>
+<main id="app">
+  <div class="row sb"><span class="tag pri">Sidekick study · results</span></div>
+  <h1>Results</h1>
+  <p class="muted">For the research team. Enter the study key (SIDEKICK_STUDY_KEY on the server). Testers never see this page.</p>
+  <form class="row" id="keyForm"><label class="sr" for="key">Study key</label><input class="in" id="key" type="password" autocomplete="off" placeholder="Study key"><button class="btn sm pri" type="submit">Open</button></form>
+  <div id="out" class="stack"></div>
+</main>
+<script src="/js/study-results.js"></script>
+</body>
+</html>

@@ -27,6 +27,7 @@ const { stripHtml, trimText, place, travel: travelTo, vibesOf, NA } = require(".
 const siteName = require("./public/js/sites.js"); // shared with the add-event form
 const sidekick = require("./lib/sidekick/rooms"); // Sidekick planning calls (lib/sidekick, public/sidekick.html)
 const skOg = require("./lib/sidekick/og"); // link previews for call invites
+const skStudy = require("./lib/sidekick/study"); // the voice A/B study (public/study.html, reference/sidekick-ab-study-plan.md)
 
 const PORT = process.env.PORT || 3001; // Sketch 1 uses 3000, so both can run at once
 
@@ -1817,6 +1818,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/host-report") {
       return sendJSON(res, 200, hostReport(db.data.hosts[url.searchParams.get("host")] || null));
     }
+    if (url.pathname.startsWith("/api/sk/study/")) return skStudy.handle(req, res, url, { readBody, sendJSON });
+    if ((req.method === "GET" || req.method === "HEAD") && /^\/study(\/results)?\/?$/.test(url.pathname)) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      return res.end(req.method === "HEAD" ? undefined : fs.readFileSync(path.join(__dirname, "public", url.pathname.includes("results") ? "study-results.html" : "study.html")));
+    }
     if (url.pathname.startsWith("/api/sk/")) return sidekick.handle(req, res, url, { readBody, sendJSON });
     if ((req.method === "GET" || req.method === "HEAD") && /^\/sk(\/[\w-]+)?\/?$/.test(url.pathname)) {
       // Link-preview tags (iMessage, WhatsApp, Slack...) are written into the page for each room
@@ -1903,7 +1909,7 @@ db.load().then(() => sidekick.init({ events: () => db.data.events })).then(() =>
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
     const done = () => process.exit(0);
-    Promise.allSettled([flushAnalytics(), db.saveNow()]).then(done); // a change made in the last half second isn't lost
+    Promise.allSettled([flushAnalytics(), db.saveNow(), skStudy.flush()]).then(done); // a change made in the last half second isn't lost
     setTimeout(done, 3000).unref();
   });
 }
