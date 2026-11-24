@@ -21,8 +21,11 @@
     // While a search is open, Discover goes back to its results (until the search is left with its back button)
     const home = U().searchOpen ? "search" : "discover";
     if (active === "discover") active = home;
-    if (u && u.demo) return tabs([[home, "Discover", "home2"], ["parties", "Community", "crew"], ["questlog", "Sidequests", "ticket"], ["landing", "Exit demo", "out", { act: "signOut" }]], active, { questlog: pending });
-    return tabs([[home, "Discover", "home2"], ["parties", "Community", "crew"], ["requests", "Add Event", "plus"], ["questlog", "Sidequests", "ticket"], ["profile", "Profile", "user"]], active, { questlog: pending, requests: unread });
+    // Plan opens the Sidekick call (its own page); Add Event lives on Sidequests now, as its "+" button
+    const plan = ["plan", "Plan", "orb", { href: "/sk" }];
+    if (active === "requests") active = "questlog";
+    if (u && u.demo) return tabs([[home, "Discover", "home2"], ["parties", "Community", "crew"], plan, ["questlog", "Sidequests", "ticket"], ["landing", "Exit demo", "out", { act: "signOut" }]], active, { questlog: pending });
+    return tabs([[home, "Discover", "home2"], ["parties", "Community", "crew"], plan, ["questlog", "Sidequests", "ticket"], ["profile", "Profile", "user"]], active, { questlog: pending + unread });
   }
   SQ.attendeeTabs = attendeeTabs;
 
@@ -274,7 +277,8 @@
 
   /* ===================== Discover (Figma: 03 Discover) ===================== */
   const TZ = "America/Toronto";
-  const hourOf = (e) => Number(new Date(e.startsAt).toLocaleString("en-US", { hour: "numeric", hourCycle: "h23", timeZone: TZ }));
+  const HOUR = new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone: TZ });
+  const hourOf = (e) => Number(HOUR.format(new Date(e.startsAt)));
   // "Wed 8 PM", or "Today 6:30 PM"
   const dayTime = (e) => {
     const d = new Date(e.startsAt);
@@ -415,10 +419,7 @@
     const n = me().notifications.filter((x) => !x.read).length;
     return `<button class="icon-btn" data-go="notifications" aria-label="Notifications${n ? `, ${n} unread` : ""}">${icon("bell")}${n ? `<span class="count-badge">${n}</span>` : ""}</button>`;
   };
-  const viewToggle = (on) => `<div class="seg">
-    <button class="${on === "list" ? "on" : ""}" data-go="discover" aria-pressed="${on === "list"}">For you</button>
-    <button class="${on === "map" ? "on" : ""}" data-go="discover-map" aria-pressed="${on === "map"}">Map</button></div>`;
-  // The search bar, with Filters at its end (a count shows when any are on). Used on For you, Map and Search.
+  // The search bar, with Filters at its end (a count shows when any are on). Used on Discover and Search.
   const searchBar = () => {
     const n = activeFilters().length;
     return `<form class="search" data-act="search">${icon("search")}<input data-bind="search.q" value="${esc(U().search.q)}" placeholder="What are you up for?" aria-label="Search sidequests" enterkeyhint="search">
@@ -429,63 +430,123 @@
     const on = activeFilters();
     return on.length ? `<div class="chips scroll-x">${on.map(([l, [act, arg]]) => chip(l, true, { "data-act": act, "data-arg": arg }, "x")).join("")}</div>` : "";
   };
-  // The top of Discover, the same on For you and Map: the view switch and bell, the search bar, then any filters
-  const discoverTop = (on) => `<div class="row" style="gap:10px">${viewToggle(on)}${bell()}</div>${searchBar()}${filterChips()}`;
+  SQ.searchBar = searchBar;
+  SQ.filterChips = filterChips;
+  SQ.bell = bell;
 
-  S.discover = { role: "attendee", label: "Discover · list", render: () => {
+  /* Discover, map first (designs LD2 option L2, built on DX): a full map of what's on, event pins (violet, a star) and
+     place pins (teal dots), with a sheet that pulls up from cards (peek) to a list over the map (half) to the list alone
+     (full). The old For you list lives on in the sheet: the Vibe Mixes and every pick, best match first. The sheet,
+     your location and the places search are run by launch.js. */
+  const TIME = (e) => new Date(e.startsAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: TZ }).replace(":00", "");
+  const lxWhen = (e) => `${isToday(e) ? "Today" : new Date(e.startsAt).toLocaleDateString("en-US", { weekday: "short", timeZone: TZ })} · starts ${TIME(e)}`;
+  const lxPrice = (e) => (e.price == null ? "Price on the listing" : e.price === 0 ? "Free" : `$${e.price} ticket`);
+  const TIER_WORD = { strong: "Strong match", close: "Close match", low: "Worth a look" };
+  // Option A cards (PK2), the same design the Sidekick call uses: a tag with an icon, the facts that matter, one link
+  function lxEventCard(e, { row = false, sel = false } = {}) {
+    const t = pick(e) ? SQ.matchTier(matchOf(e)) : null;
+    const link = e.ticketLink || e.sourceUrl;
+    return `<div class="lx-card ev${row ? " row" : ""}${sel ? " on" : ""}" data-id="e${e.id}"${row ? "" : ' role="listitem"'}>
+      <button class="lx-main" data-act="openQuest" data-arg="${e.id}">
+        <span class="lx-top"><span class="kt ev">${icon("ticket", "xs")}Event</span>${t ? `<span class="lx-match ${t}"><i></i>${TIER_WORD[t].replace(" match", "")}</span>` : ""}</span>
+        <span class="lx-title">${esc(e.title)}</span>
+        <span class="lx-when">${esc(lxWhen(e))}</span>
+        <span class="lx-meta">${esc([lxPrice(e), e.neighbourhood].filter(Boolean).join(" · "))}</span>
+        ${pick(e) && pick(e).reason ? `<span class="lx-why">${esc(pick(e).reason)}</span>` : ""}
+      </button>
+      ${link ? `<a class="lx-link" href="${esc(link)}" target="_blank" rel="noopener">See tickets<span aria-hidden="true">›</span><span class="sr-only"> for ${esc(e.title)} (opens in a new tab)</span></a>`
+        : `<button class="lx-link" data-act="openQuest" data-arg="${e.id}">See details<span aria-hidden="true">›</span></button>`}
+    </div>`;
+  }
+  function lxPlaceCard(p, { row = false, sel = false } = {}) {
+    return `<div class="lx-card pl${row ? " row" : ""}${sel ? " on" : ""}" data-id="${esc(p.id)}"${row ? "" : ' role="listitem"'}>
+      <button class="lx-main" data-act="lxPin" data-arg="${esc(p.id)}" aria-label="${esc(`${p.title}, show on the map`)}">
+        <span class="lx-top"><span class="kt pl">${icon("pin", "xs")}Place</span></span>
+        <span class="lx-title">${esc(p.title)}</span>
+        <span class="lx-when">${esc(p.hours)}</span>
+        <span class="lx-meta">${esc(p.price)}</span>
+      </button>
+      ${p.url ? `<a class="lx-link" href="${esc(p.url)}" target="_blank" rel="noopener">Directions<span aria-hidden="true">›</span><span class="sr-only"> to ${esc(p.title)} (opens Google Maps)</span></a>` : ""}
+      <span class="lx-attr">Place info from ${esc(p.attribution || "Google Maps")}</span>
+    </div>`;
+  }
+  SQ.lxEventCard = lxEventCard;
+  SQ.lxPlaceCard = lxPlaceCard;
+  // Before the taste avatar has picked (or while it's loading), the map still shows this week's events, soonest first
+  const soonWeek = () => SQ.d.events.filter((e) => live(e)).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+
+  S.discover = { role: "attendee", label: "Discover · map", render: () => {
     const u = me();
-    const all = weekly();
-    const list = all.filter((e) => passes(e));
-    let body;
-    if (!u.feed && U().feedLoading) body = `<div class="pad stack"><div class="sixer-msg">${SQ.sixer()}<div class="bubble-s">${thinking("Picking this week's sidequests…")}</div></div><div class="skeleton" style="height:340px"></div></div>`;
-    else if (!list.length) body = `<div class="empty-state">
-        <span class="illo">${icon("search")}</span>
-        <p class="t-title-l">${all.length ? "No sidequests match these filters." : "No sidequests picked yet."}</p>
-        <p class="t-body-l c-secondary">Loosen a filter, or ask hosts to put this on. When enough people ask, you hear first.</p>
-        <div class="btn-row">${btn("Clear filters", { "data-act": "dfClear" }, "outline m")}${btn("Request it", { "data-go": "request-new" }, "primary m", "bulb")}</div>
-      </div>`;
-    else {
-      const m = mixes();
-      body = `<section class="disc-sec">
-          <div class="pad-x section-header"><h2>Weekly Sidequests</h2><button data-go="weekly">See all (${all.length})</button></div>
-          <div class="hscroll">${list.slice(0, 12).map(questCard).join("")}</div>
-        </section>
-        ${m.length ? `<section class="disc-sec">
-          <div class="pad-x section-header"><h2>Vibe Mixes</h2></div>
-          <div class="hscroll">${m.map(([l, p, n]) => `<button class="mix" data-act="openMix" data-arg="${esc(l)}" aria-label="${esc(l)}, ${n} sidequest${n === 1 ? "" : "s"} this week"><span class="mix-cover">${ph(p)}<span class="scrim"></span><span class="mix-count">${n}</span><span class="t-title-m">${esc(l)}</span></span></button>`).join("")}</div>
-        </section>` : ""}`;
+    const L = SQ.lx.state();
+    const STOP = { peek: "cards", half: "list and map", full: "list" };
+    const wk = u.feed ? weekly() : [];
+    const picked = wk.length > 0;
+    const evAll = (picked ? wk : soonWeek()).filter((e) => passes(e) && e.venue && e.venue.lat != null);
+    const evs = L.show.events ? evAll : [];
+    const pls = L.show.places ? L.places || [] : [];
+    const sel = L.sel;
+    const pins = [
+      ...evs.slice(0, 60).map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, kind: "event", tier: pick(e) ? SQ.matchTier(matchOf(e)) : "low", selected: sel === `e${e.id}`, act: "lxPin", arg: `e${e.id}`, label: e.title })),
+      ...pls.map((p) => ({ lat: p.lat, lng: p.lng, kind: "place", selected: sel === p.id, act: "lxPin", arg: p.id, label: p.title })),
+    ];
+    // Cards: the best matches, with a place after every two events
+    const cards = [];
+    const ce = evs.slice(0, 12), cp = pls.slice(0, 6);
+    for (let i = 0, j = 0; i < ce.length || j < cp.length;) {
+      if (i < ce.length) cards.push(lxEventCard(ce[i++], { sel: sel === `e${ce[i - 1].id}` }));
+      if (i < ce.length && (i % 2 || j >= cp.length)) continue;
+      if (j < cp.length) cards.push(lxPlaceCard(cp[j++], { sel: sel === cp[j - 1].id }));
     }
-    return screen(`<div class="disc-top">${discoverTop("list")}</div>
-      <div class="disc-body">
-        <div class="disc-title pad-x"><span class="t-display-xl">Your week,</span><span class="t-display-xl c-accent">picked.</span></div>
-        ${U().feedError ? `<div class="pad-x"><div class="notice hot">${icon("x")}<span>${esc(U().feedError)}</span></div></div>` : ""}
-        ${body}
-      </div>`, { tabbar: attendeeTabs("discover") });
-  } };
-
-  // Figma: 09 Discover · map and 10 Map · pin selected
-  S["discover-map"] = { role: "attendee", label: "Discover · map", render: () => {
-    const u = me();
-    const list = weekly().filter((e) => passes(e) && e.venue && e.venue.lat != null);
-    const sel = list.find((e) => e.id === U().mapSel);
-    const pins = list.map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, tier: SQ.matchTier(matchOf(e)), selected: sel === e, act: "mapPin", arg: e.id, label: e.title }));
-    const home = u.homeArea || homeLL(u);
-    const going = sel ? [...partyGoing(sel), ...(sel.friends || []).filter((x) => !partyGoing(sel).includes(x))] : [];
-    return screen(`<div class="disc-map">
-      ${SQ.mapView("discover", { pins, home, labels: ["Kensington", "Queen West", ...(u.areas || [])] })}
+    const nE = evs.length, nP = pls.length;
+    const count = [L.show.events ? `${nE} event${nE === 1 ? "" : "s"}` : "", L.show.places && L.places ? `${nP} place${nP === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "Nothing shown";
+    const sub = !u.feed && U().feedLoading ? "Picking your matches…" : picked ? "Best matches first, this week" : "This week, soonest first";
+    const where = L.loc ? `You · ${L.loc.label}` : L.locState === "asking" ? "Finding you…" : "Downtown Toronto · change";
+    const center = L.loc || SQ.lx.DOWNTOWN;
+    const m = mixes();
+    let list;
+    if (!evAll.length && !(L.places || []).length) list = !u.feed && U().feedLoading ? `<div class="lx-pad">${thinking("Picking this week's sidequests…")}</div>`
+      : `<div class="empty-state"><span class="illo">${icon("search")}</span><p class="t-title-l">${activeFilters().length ? "No sidequests match these filters." : "Nothing on this week yet."}</p>
+        <p class="t-body-l c-secondary">Loosen a filter, or ask hosts to put this on. When enough people ask, you hear first.</p>
+        <div class="btn-row">${btn("Clear filters", { "data-act": "dfClear" }, "outline m")}${btn("Request it", { "data-go": "request-new" }, "primary m", "bulb")}</div></div>`;
+    else list = `        ${evs.length ? `<section class="lx-sec lx-pad"><h2 class="lx-h"><span class="kt ev">${icon("ticket", "xs")}Events</span>Shows with set times</h2>${evs.slice(0, 20).map((e) => lxEventCard(e, { row: true, sel: sel === `e${e.id}` })).join("")}
+          ${evs.length > 20 && picked ? `<button class="lx-more" data-go="weekly">See all ${evs.length} picks</button>` : ""}</section>` : ""}
+        ${pls.length ? `<section class="lx-sec lx-pad"><h2 class="lx-h"><span class="kt pl">${icon("pin", "xs")}Places</span>Drop in any time</h2>${pls.map((p) => lxPlaceCard(p, { row: true, sel: sel === p.id })).join("")}</section>` : ""}
+        ${m.length && L.show.events ? `<section class="lx-sec"><div class="section-header lx-pad"><h2>Vibe Mixes</h2><button data-go="weekly">See all (${wk.length})</button></div>
+          <div class="hscroll">${m.map(([l, p, n]) => `<button class="mix" data-act="openMix" data-arg="${esc(l)}" aria-label="${esc(l)}, ${n} sidequest${n === 1 ? "" : "s"} this week"><span class="mix-cover">${ph(p)}<span class="scrim"></span><span class="mix-count">${n}</span><span class="t-title-m">${esc(l)}</span></span></button>`).join("")}</div></section>` : ""}`;
+    return screen(`<div class="disc-map lx" data-stop="${L.stop}">
+      ${SQ.mapView("discover", { pins, you: L.loc ? [L.loc.lat, L.loc.lng] : null, labels: ["Kensington", "Queen West", ...(u.areas || [])], view: { lat: center.lat, lng: center.lng, zoom: L.loc ? 13.6 : 12.4 } })}
       <div class="map-ctrls">
-        ${discoverTop("map")}
+        <div class="row" style="gap:10px">${searchBar()}${bell()}</div>
+        <div class="lx-chips scroll-x">
+          <button class="lx-loc${L.loc ? " on" : ""}" data-act="lxLocate" aria-label="${L.loc ? `Showing near you, ${esc(L.loc.label)}. Tap to update your location` : "Showing downtown Toronto. Use my location"}">${icon(L.loc ? "loc" : "pin", "sm")}<span>${esc(where)}</span></button>
+          ${activeFilters().map(([l, [act, arg]]) => chip(l, true, { "data-act": act, "data-arg": arg }, "x")).join("")}
+        </div>
       </div>
-      <div class="map-zoom-at">${SQ.mapZoom("discover")}</div>
-      ${sel ? `<div class="sheet">
-          <span class="grabber"></span>
-          <div class="row start" style="gap:14px">${poster(sel, "", { style: "width:96px;height:96px;border-radius:16px" })}
-            <div class="stack grow" style="gap:5px;min-width:0">${pillFor(sel)}<span class="t-title-l">${esc(sel.title)}</span><span class="t-data c-secondary">${esc(qMeta(sel))}</span>
-              ${going.length ? `<span class="row start t-caption c-secondary" style="gap:8px">${avatars(going, 3, "xs")}${esc(going.slice(0, 2).join(" and "))} ${going.length > 1 ? "are" : "is"} going</span>` : ""}</div></div>
-          <div class="row" style="gap:10px">${btn("View sidequest", { "data-act": "openQuest", "data-arg": sel.id }, "primary m", "arrow")}
-            ${iconBtn(u.saved.includes(sel.id) ? "bookmarkFill" : "bookmark", { "data-act": "save", "data-arg": sel.id, "aria-label": "Save" }, "outline")}${iconBtn("share", { "data-act": "share", "data-arg": sel.id, "aria-label": "Share" }, "outline")}</div>
-        </div>` : `<div class="map-legend-at">${SQ.mapLegend()}</div>
-        <div class="hscroll map-cards">${list.slice(0, 12).map((e) => `<button class="map-card" data-act="mapPin" data-arg="${e.id}">${poster(e)}<span class="stack grow" style="gap:4px;min-width:0"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-data c-secondary ellipsis">${esc(`${dayTime(e)} · ${e.neighbourhood}`)}</span>${pillFor(e)}</span></button>`).join("")}</div>`}
+      <div class="lx-float">
+        <div class="lx-legend" role="group" aria-label="Show on the map">
+          <button class="lx-key ev" data-act="lxShow" data-arg="events" aria-pressed="${L.show.events}"><i aria-hidden="true">★</i>Events</button>
+          <button class="lx-key pl" data-act="lxShow" data-arg="places" aria-pressed="${L.show.places}"><i aria-hidden="true">●</i>Places</button>
+        </div>
+        <div class="map-zoom lx-zoom" data-for="discover">
+          <button class="icon-btn" data-zoom="out" aria-label="Zoom out">${icon("minus")}</button>
+          <button class="icon-btn" data-zoom="in" aria-label="Zoom in">${icon("plus")}</button>
+          <button class="icon-btn" data-zoom="locate" data-act="lxLocate" aria-label="Use my location">${icon("loc")}</button>
+        </div>
+      </div>
+      <section class="lx-sheet" id="lx-sheet" aria-label="Sidequests near you">
+        <div class="lx-head">
+          <button class="lx-grab" data-lx-cycle aria-label="Sheet showing ${STOP[L.stop]}. Press to pull it up, or use the arrow keys"><span></span></button>
+          <div class="lx-headrow">
+            <div class="lx-count"><span class="t-title-m">${esc(count)}</span><span class="t-caption c-secondary">${esc(sub)}</span></div>
+            <div class="lx-views" role="group" aria-label="View">
+              <button class="lx-view" data-lx-stop="full" aria-pressed="${L.stop === "full"}">${icon("list", "sm")}List</button>
+              <button class="lx-view" data-lx-stop="peek" aria-pressed="${L.stop === "peek"}">${icon("map", "sm")}Map</button>
+            </div>
+          </div>
+        </div>
+        <div class="lx-cards hscroll" role="list" aria-label="Top picks">${cards.join("") || `<p class="t-body-m c-secondary lx-pad">${!u.feed && U().feedLoading ? "Picking this week's sidequests…" : "Nothing to show with these filters."}</p>`}</div>
+        <div class="lx-list">${U().feedError ? `<div class="lx-pad"><div class="notice hot">${icon("x")}<span>${esc(U().feedError)}</span></div></div>` : ""}${list}</div>
+      </section>
     </div>`, { tabbar: attendeeTabs("discover"), cls: "bleed" });
   } };
 
@@ -1035,7 +1096,7 @@
         ${btn("Found an event? Add it to Sidequest", { "data-act": "addEvent" }, "ghost m", "link")}
         <div class="section-head" style="margin-top:6px"><span class="t-title-l">Trending near you</span><span class="t-caption c-secondary">last 30 days</span></div>
         ${list.map(requestCard).join("")}
-      </div>`, { tabbar: attendeeTabs("requests") });
+      </div>`, { title: "", tabbar: attendeeTabs("requests") });
   } };
 
   SQ.budgetLabel = (b) => (b >= 60 ? "Any" : b ? `Under $${b}` : "Free");
@@ -1169,6 +1230,7 @@
       ${onDay.map((e) => logRow(e)).join("") || '<p class="t-body-m c-secondary">Nothing planned that day.</p>'}`;
   }
 
+  const unreadReq = () => me().notifications.filter((n) => !n.read && n.requestId).length;
   S.questlog = { role: "attendee", label: "Quest Log", render: () => {
     const u = me();
     const tab = U().logTab;
@@ -1214,6 +1276,7 @@
     return screen(`
       <div class="page-head" style="gap:14px">
         <div class="row start" style="gap:8px"><h1 class="t-display-xl grow">Sidequests</h1>
+          ${u.demo ? "" : `<button class="icon-btn primary-soft" data-go="requests" aria-label="Add an event${unreadReq() ? `, ${unreadReq()} new` : ""}">${icon("plus")}${unreadReq() ? `<span class="count-badge">${unreadReq()}</span>` : ""}</button>`}
           ${iconBtn("wallet", { "data-act": "openWallet", "aria-label": "Ticket wallet" })}
           ${iconBtn(cal ? "list" : "cal", { "data-act": "toggleLogCal", "aria-label": cal ? "Show as a list" : "Show a calendar" })}</div>
         <div class="seg surface">${LOG_TABS.map(([k, label]) => `<button class="${tab === k ? "on" : ""}" data-act="setLogTab" data-arg="${k}" aria-pressed="${tab === k}">${label}${k === "Completed" && toRate ? `<span class="dot" aria-label="${toRate} to rate">${toRate}</span>` : ""}</button>`).join("")}</div>

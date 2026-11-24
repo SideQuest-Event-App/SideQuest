@@ -3,16 +3,99 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#13101b" />
+  <!-- Matches the loader's night sky; app.js's loader hand-off switches it to the app's base colour -->
+  <meta name="theme-color" content="#0e0b15" />
   <title>Sidequest — Sketch 2</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@500&display=swap" rel="stylesheet" />
+  <!-- Fonts and the map's styles load without holding up the first frame (the loader below is inline) -->
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@500&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2313101b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23a97af2'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" media="print" onload="this.media='all'" />
   <link rel="stylesheet" href="./styles.css" />
+  <!-- Start downloading the listings straight away, alongside the scripts -->
+  <link rel="preload" href="/api/events" as="fetch" crossorigin="anonymous" />
+  <style>
+    /* The loader (design LD1, option S3 "City lights"): inline so the lights paint on the first frame.
+       It stays only until the first screen is ready (app.js calls SQboot.done()), then fades out, opacity only.
+       The headline waits 0.3 s before fading in, so a fast load never flashes text; past 1 s a line says what's
+       happening, with real counts. Reduced motion: a still version, no fades. */
+    #boot { position: fixed; inset: 0; z-index: 100; overflow: hidden; background: #0e0b15; color: #f6f2ff; font-family: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif; transition: opacity .15s ease-out; }
+    #boot::before { content: ""; position: absolute; inset: 0; background:
+      radial-gradient(min(70vw, 420px) min(56vw, 340px) at 75% 30%, rgba(242, 201, 76, .45), transparent 70%),
+      radial-gradient(min(60vw, 360px) min(48vw, 280px) at 85% 65%, rgba(242, 141, 200, .4), transparent 70%),
+      radial-gradient(min(54vw, 320px) min(44vw, 260px) at 30% 75%, rgba(92, 207, 230, .3), transparent 70%); }
+    #boot.out { opacity: 0; pointer-events: none; }
+    .b-in { position: absolute; left: 24px; right: 24px; bottom: max(64px, 12vh); display: flex; flex-direction: column; gap: 14px; max-width: 560px; }
+    .b-wm { font-weight: 600; font-size: 22px; line-height: 28px; letter-spacing: -.02em; }
+    .b-hl { margin: 0; font-weight: 600; font-size: clamp(52px, 16vw, 88px); line-height: .92; letter-spacing: -.05em; opacity: 0; transform: translateY(10px); animation: b-rise .5s cubic-bezier(.23, 1, .32, 1) .3s forwards; }
+    .b-hl em { font-style: normal; color: #c2a5f6; }
+    .b-st { display: flex; flex-direction: column; gap: 10px; min-height: 92px; opacity: 0; transform: translateY(6px); transition: opacity .3s ease-out, transform .3s ease-out; }
+    #boot.slow .b-st { opacity: 1; transform: none; }
+    .b-line { font-weight: 500; font-size: 17px; line-height: 24px; }
+    .b-counts { display: flex; flex-wrap: wrap; gap: 8px; }
+    .b-counts span { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+    .b-counts span[hidden] { display: none; }
+    .b-counts svg { width: 14px; height: 14px; }
+    .b-counts b { font-weight: 600; }
+    .b-ev { background: #452871; color: #c2a5f6; }
+    .b-pl { background: #1c4e5c; color: #82dcec; }
+    .b-wake { margin: 0; font-size: 13px; line-height: 18px; color: #bcb0d9; }
+    .b-wake[hidden] { display: none; }
+    @keyframes b-rise { to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) {
+      #boot, #boot * { animation: none !important; transition: none !important; }
+      .b-hl { opacity: 1; transform: none; }
+      .b-st { transform: none; }
+    }
+  </style>
 </head>
 <body>
+  <div id="boot" role="status" aria-live="polite" aria-label="Sidequest is loading">
+    <div class="b-in">
+      <span class="b-wm">sidequest</span>
+      <p class="b-hl">Who's <em>in</em><br />tonight?</p>
+      <div class="b-st">
+        <span class="b-line">Finding what's on near you…</span>
+        <span class="b-counts">
+          <span class="b-ev" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 9V6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a3 3 0 0 0 0-6z"/></svg><b></b></span>
+          <span class="b-pl" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg><b></b></span>
+        </span>
+        <p class="b-wake" hidden>Waking Sidequest up. The first visit in a while can take about 30 seconds.</p>
+      </div>
+    </div>
+  </div>
+  <script>
+    // The loader's timing. app.js calls SQboot.counts() as numbers arrive and SQboot.done() once the first screen is in.
+    (function () {
+      var b = document.getElementById("boot"), n = {}, fmt = function (x) { return Number(x).toLocaleString("en-US"); };
+      var slow = setTimeout(function () { b.classList.add("slow"); }, 1000);
+      var wake = setTimeout(function () { b.querySelector(".b-wake").hidden = false; }, 6000);
+      function paint() {
+        [["events", ".b-ev", "event"], ["places", ".b-pl", "place"]].forEach(function (k) {
+          var el = b.querySelector(k[1]);
+          if (n[k[0]] == null || !(n[k[0]] > 0)) return;
+          el.hidden = false;
+          el.querySelector("b").textContent = fmt(n[k[0]]) + " " + k[2] + (n[k[0]] === 1 ? "" : "s");
+        });
+      }
+      window.SQboot = {
+        counts: function (c) { for (var k in c) if (c[k] != null) n[k] = c[k]; if (b.isConnected) paint(); },
+        done: function () {
+          if (b.dataset.done) return;
+          b.dataset.done = "1";
+          clearTimeout(slow);
+          clearTimeout(wake);
+          window.SQboot.doneAt = performance.now();
+          var still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+          b.classList.add("out");
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.content = "#13101b";
+          setTimeout(function () { b.remove(); }, still ? 0 : 180);
+        },
+      };
+    })();
+  </script>
   <div class="shell">
     <!-- Demo controls: a floating panel on a tablet or desktop, opened from its button. Hidden on a phone. -->
     <button type="button" class="side-toggle" id="side-toggle" aria-expanded="false" aria-controls="side" aria-label="Sketch controls"><span>Sketch controls</span></button>
@@ -44,13 +127,15 @@
   </div>
 
   <!-- Plain scripts, no build step -->
-  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <!-- The street map loads in the background; until it's here a light map with the same pins stands in (map.js) -->
+  <script async src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" onload="window.SQ && SQ.mapsReady && SQ.mapsReady()"></script>
   <script src="./js/ui.js"></script>
   <script src="./js/map.js"></script>
   <script src="./js/sites.js"></script>
   <script src="./js/screens-attendee.js"></script>
   <script src="./js/screens-host.js"></script>
   <script src="./js/actions.js"></script>
+  <script src="./js/launch.js"></script>
   <script src="./js/wallet.js"></script>
   <script src="./js/app.js"></script>
 </body>

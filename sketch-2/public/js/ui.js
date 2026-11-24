@@ -191,8 +191,11 @@ window.SQ = window.SQ || {};
   const stars = (n) => `<span class="stars-inline" aria-label="${n} stars">${"★".repeat(n)}${"☆".repeat(5 - n)}</span>`;
   // Figma: Tab bar. Each tab is [screen id, label, icon]; a tab may carry data-act instead via a 4th item ({ act: "addEvent" })
   // In the desktop layout the tab bar is a sidebar, with the logo on top
-  const tabs = (list, active, dots = {}) => `<nav class="tabs" aria-label="Sections"><span class="tabs-logo">${logo()}</span>${list.map(([id, label, ic, opts = {}]) => `
-    <button class="tab${id === active ? " on" : ""}" ${opts.act ? `data-act="${opts.act}"` : `data-go="${id}"`} ${id === active ? 'aria-current="page"' : ""}>${icon(ic)}${esc(label)}${dots[id] ? `<span class="dot">${dots[id]}</span>` : ""}</button>`).join("")}</nav>`;
+  // opts.href makes the tab a link to another page (Plan opens the Sidekick call at /sk); ic "orb" draws the Sidekick orb
+  const tabIcon = (ic) => (ic === "orb" ? '<span class="tab-orb" aria-hidden="true"></span>' : icon(ic));
+  const tabs = (list, active, dots = {}) => `<nav class="tabs" aria-label="Sections"><span class="tabs-logo">${logo()}</span>${list.map(([id, label, ic, opts = {}]) => opts.href ? `
+    <a class="tab" href="${esc(opts.href)}">${tabIcon(ic)}${esc(label)}</a>` : `
+    <button class="tab${id === active ? " on" : ""}" ${opts.act ? `data-act="${opts.act}"` : `data-go="${id}"`} ${id === active ? 'aria-current="page"' : ""}>${tabIcon(ic)}${esc(label)}${dots[id] ? `<span class="dot">${dots[id]}</span>` : ""}</button>`).join("")}</nav>`;
   const screen = (body, { title, back = true, close = false, right = "", tabbar = "", footer = "", large = false, cls = "" } = {}) => `
     <div class="screen ${title !== undefined ? "has-bar" : ""} ${cls}">
       ${title !== undefined ? bar(title, { back, close, right, large }) : ""}
@@ -210,7 +213,8 @@ window.SQ = window.SQ || {};
   const req = (id) => (D().requests || []).find((r) => r.id === Number(id));
   const now = () => new Date(D().now || Date.now());
   const TZ = "America/Toronto";
-  const dayKey = (d) => d.toLocaleDateString("en-CA", { timeZone: TZ });
+  const DAY_KEY = new Intl.DateTimeFormat("en-CA", { timeZone: TZ }); // one formatter: Discover asks this for every listing
+  const dayKey = (d) => DAY_KEY.format(d);
 
   function whenLabel(e, { short = false } = {}) {
     const start = new Date(e.startsAt);

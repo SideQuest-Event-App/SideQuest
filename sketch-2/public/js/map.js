@@ -18,12 +18,18 @@
   SQ.HOODS = HOODS;
   const hood = (name) => HOODS.find((h) => h[0] === name);
 
+  // Event pins are violet with a star (and a ring in their match colour); place pins are teal dots. Both are 44px buttons.
+  const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.5 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.5l6-.8z" fill="currentColor"/></svg>';
+  const kindPin = (p, at) => `<button class="map-pin2 ${p.kind === "place" ? "pl" : `ev ${p.tier || "low"}`}${p.selected ? " on" : ""}" data-kind="${p.kind === "place" ? "place" : "event"}" ${at(p.lat, p.lng)} ${p.act ? `data-act="${esc(p.act)}" data-arg="${esc(p.arg)}"` : ""} aria-label="${esc(`${p.kind === "place" ? "Place" : "Event"}: ${p.label || ""}`)}"${p.selected ? ' aria-pressed="true"' : ""}><i>${p.kind === "place" ? "" : STAR}</i></button>`;
+
   // A pin: { lat, lng, tier: strong|close|low, selected, act, arg, label }. home: a neighbourhood name, or [lat, lng].
   // labels: neighbourhood names to label (true: all of them). Labels sit up and left of their spot, as the design draws them.
   // view: { lat, lng, zoom } at the centre; kept in SQ.u.maps[id] so re-renders and back keep the view.
   // The marks are rendered hidden here; initMaps puts them on the map.
   // circles: [{ lat, lng, km, on }] drawn under the pins, to show how big an area is
-  SQ.mapView = (id, { pins = [], home = null, labels = true, circles = [], view = { lat: 43.6419, lng: -79.3996, zoom: 12.4 }, cls = "", style = "" } = {}) => {
+  // pins may carry kind: "event" (a violet pin with a star) or "place" (a teal dot); without one they're the match-coloured dots.
+  // you: [lat, lng] marks where the person is (already rounded to about 1 km).
+  SQ.mapView = (id, { pins = [], home = null, you = null, labels = true, circles = [], view = { lat: 43.6419, lng: -79.3996, zoom: 12.4 }, cls = "", style = "" } = {}) => {
     const maps = (SQ.u.maps = SQ.u.maps || {});
     if (!maps[id]) maps[id] = { ...view };
     const homeLL = typeof home === "string" ? hood(home) && hood(home).slice(1, 3) : home;
@@ -32,7 +38,8 @@
       <div class="map-marks" hidden>
         ${labels ? HOODS.filter((h) => labels === true || labels.includes(h[0])).map(([n, la, ln]) => `<span class="map-label" ${at(la, ln)}>${esc(n)}</span>`).join("") : ""}
         ${homeLL ? `<span class="map-home" ${at(homeLL[0], homeLL[1])}><i>${icon("home2")}</i>Home</span>` : ""}
-        ${pins.filter((p) => p.lat != null).map((p) => `<button class="map-pin ${p.tier || "strong"}${p.selected ? " on" : ""}" ${at(p.lat, p.lng)} ${p.act ? `data-act="${esc(p.act)}" data-arg="${esc(p.arg)}"` : ""} aria-label="${esc(p.label || "Pin")}"><i></i></button>`).join("")}
+        ${you ? `<span class="map-you" ${at(you[0], you[1])} aria-hidden="true"><i></i></span>` : ""}
+        ${pins.filter((p) => p.lat != null).map((p) => p.kind ? kindPin(p, at) : `<button class="map-pin ${p.tier || "strong"}${p.selected ? " on" : ""}" ${at(p.lat, p.lng)} ${p.act ? `data-act="${esc(p.act)}" data-arg="${esc(p.arg)}"` : ""} aria-label="${esc(p.label || "Pin")}"><i></i></button>`).join("")}
       </div>
     </div>`;
   };
@@ -89,15 +96,88 @@
     m.marks = marks.map((n) => new maplibregl.Marker({ element: n, anchor: "top-left" }).setLngLat([+n.dataset.lng, +n.dataset.lat]).addTo(m.map));
   }
 
+  // ---------- The light map ----------
+  // Pins and labels on a plain land-coloured canvas, placed with the same projection MapLibre uses (Web Mercator,
+  // 512px tiles), so they sit where they will once the street map arrives. Drag to pan; the zoom buttons work.
+  const world = (lat, lng, zoom) => {
+    const size = 512 * 2 ** zoom, s = Math.sin((Math.max(-85, Math.min(85, lat)) * Math.PI) / 180);
+    return [((lng + 180) / 360) * size, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * size];
+  };
+  function liteMap(ph, id, marks) {
+    ph.classList.add("map-lite");
+    const layer = document.createElement("div");
+    layer.className = "map-lite-layer";
+    for (const n of marks) layer.appendChild(n);
+    ph.appendChild(layer);
+    const m = { lite: true, el: ph, marks };
+    m.place = () => {
+      const v = SQ.u.maps[id];
+      const [cx, cy] = world(v.lat, v.lng, v.zoom);
+      const w = ph.clientWidth / 2, h = ph.clientHeight / 2;
+      for (const n of marks) {
+        const [x, y] = world(+n.dataset.lat, +n.dataset.lng, v.zoom);
+        n.style.transform = `translate(${Math.round(w + x - cx)}px, ${Math.round(h + y - cy)}px)`;
+      }
+    };
+    // Drag the map (not a pin) to pan
+    const down = (e) => {
+      if (e.button || e.target.closest("button, a")) return;
+      const v = SQ.u.maps[id];
+      const [x0, y0] = world(v.lat, v.lng, v.zoom), px = e.clientX, py = e.clientY, size = 512 * 2 ** v.zoom;
+      const move = (ev) => {
+        const x = x0 - (ev.clientX - px), y = y0 - (ev.clientY - py);
+        v.lng = (x / size) * 360 - 180;
+        v.lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / size))) * 180) / Math.PI;
+        m.place();
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", () => window.removeEventListener("pointermove", move), { once: true });
+    };
+    ph.addEventListener("pointerdown", down);
+    const ro = window.ResizeObserver ? new ResizeObserver(() => m.place()) : null;
+    if (ro) ro.observe(ph);
+    m.stop = () => ro && ro.disconnect();
+    m.place();
+    return m;
+  }
+
+  // Where a map is looking now, and moving it (the launch map re-centres on "Use my location")
+  SQ.mapCenter = (id) => {
+    const m = live[id];
+    if (m && !m.lite) return { lat: m.map.getCenter().lat, lng: m.map.getCenter().lng, zoom: m.map.getZoom() };
+    return SQ.u.maps && SQ.u.maps[id] ? { ...SQ.u.maps[id] } : null;
+  };
+  SQ.mapJump = (id, view) => {
+    const maps = (SQ.u.maps = SQ.u.maps || {});
+    maps[id] = { ...(maps[id] || {}), ...view };
+    const m = live[id];
+    if (!m) return;
+    if (m.lite) m.place();
+    else m.map.jumpTo({ center: [maps[id].lng, maps[id].lat], zoom: maps[id].zoom });
+  };
+  // MapLibre loads in the background (so it never holds up the first screen); once it's here, maps upgrade
+  SQ.mapsReady = () => {
+    if (SQ.d && SQ.render) SQ.render();
+  };
+
   // After every render: put each map in place. A map that was on the last render keeps its canvas (no flash, no reload).
   SQ.initMaps = (root) => {
-    if (!window.maplibregl) return; // offline: the map stays its land colour
     for (const ph of root.querySelectorAll(".map[data-map]")) {
       const id = ph.dataset.map;
       const box = ph.querySelector(".map-marks");
       const marks = [...box.children];
       box.remove();
       let m = live[id];
+      // Until MapLibre has loaded (it loads in the background), or when it can't load at all, a light map stands in
+      if (!window.maplibregl) {
+        if (m && !m.lite) m.map.remove();
+        live[id] = liteMap(ph, id, marks);
+        continue;
+      }
+      if (m && m.lite) {
+        m.stop();
+        m = null;
+      }
       if (m && !m.el.isConnected) {
         m.el.className = ph.className;
         m.el.style.cssText = ph.style.cssText;
@@ -129,7 +209,8 @@
     }
     // Maps no longer on screen let go of their WebGL context
     for (const id in live) if (!live[id].el.isConnected) {
-      live[id].map.remove();
+      if (live[id].lite) live[id].stop();
+      else live[id].map.remove();
       delete live[id];
     }
     for (const z of root.querySelectorAll(".map-zoom")) {
@@ -140,10 +221,19 @@
         if (!b) return;
         e.stopPropagation();
         const k = b.dataset.zoom;
+        if (k === "locate") return; // the launch map's "Use my location" (an action, not a view change)
+        if (m.lite) {
+          const v = SQ.u.maps[z.dataset.for];
+          if (k === "home") {
+            const h = m.el.querySelector(".map-you, .map-home");
+            if (h) Object.assign(v, { lat: +h.dataset.lat, lng: +h.dataset.lng });
+          } else v.zoom = Math.max(9, Math.min(18, v.zoom + (k === "in" ? 1 : -1)));
+          return m.place();
+        }
         if (k === "in") m.map.zoomIn();
         else if (k === "out") m.map.zoomOut();
         else {
-          const h = m.el.querySelector(".map-home");
+          const h = m.el.querySelector(".map-you, .map-home");
           const at = h ? [+h.dataset.lng, +h.dataset.lat] : m.map.getCenter();
           m.map.flyTo({ center: at, zoom: Math.max(m.map.getZoom(), 12.4) });
         }

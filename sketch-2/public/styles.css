@@ -1166,3 +1166,116 @@ textarea.compose { width: 100%; resize: none; padding: 10px 14px; border-radius:
 .hl-img > .poster { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; filter: grayscale(1); }
 .hl-img > .tag { position: absolute; top: 8px; left: 8px; }
 .hl-stars { color: var(--accent-yellow); font-size: 12px; letter-spacing: 1px; }
+
+/* ---------- Launch: Discover, map first (designs LD2 option L2 and DX; cards are PK2 option A) ----------
+   Violet is events (and Sidekick), teal is places and you. A full map, controls on top, a sheet at the bottom
+   with three stops (launch.js moves it with transform only). Nothing sits under the tab bar: the map ends at it. */
+.tab-orb { width: 24px; height: 24px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, #f5d6ff 0%, #c98adf 35%, #a97af2 60%, #452871 100%); }
+a.tab { text-decoration: none; }
+[data-layout="desktop"] .tabs-logo .logo { font-weight: 400; } /* three weights only: 400, 500, 600 */
+.icon-btn.primary-soft { background: var(--action-primary-tint); color: var(--text-accent); }
+
+.disc-map.lx { min-height: 0; height: 100%; }
+.disc-map.lx > .map { bottom: 0; }
+.lx .map-label { font-size: 12px; line-height: 16px; letter-spacing: 0.6px; }
+.lx .map-ctrls { top: 0; padding: max(12px, env(safe-area-inset-top)) var(--sp-lg) 0; gap: var(--sp-sm); }
+.lx .map-ctrls > .row { align-items: center; }
+.lx .search { height: 52px; flex: 1; width: auto; min-width: 0; padding-right: 4px; }
+.lx .search .icon-btn { width: 44px; height: 44px; }
+.lx-chips { display: flex; gap: var(--sp-sm); overflow-x: auto; scrollbar-width: none; margin: 0 calc(-1 * var(--sp-lg)); padding: 0 var(--sp-lg); }
+.lx-chips::-webkit-scrollbar { display: none; }
+.lx-chips .chip { height: 44px; }
+.lx-loc { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 44px; max-width: 100%; padding: 0 14px; border-radius: var(--r-full); background: var(--social-tint); color: var(--social-text); font-weight: 600; font-size: 14px; line-height: 18px; box-shadow: var(--shadow-float); }
+.lx-loc span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The legend chips (they filter the map) and the zoom buttons ride just above the sheet */
+.lx-float { position: absolute; left: var(--sp-lg); right: var(--sp-lg); bottom: 0; z-index: 2; display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-sm); pointer-events: none; transform: translateY(calc(-1 * var(--lx-vis, 300px) - 10px)); transition: transform 0.3s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.2s; }
+.lx-float > * { pointer-events: auto; }
+.lx[data-stop="full"] .lx-float { opacity: 0; visibility: hidden; }
+.lx-legend { display: flex; gap: var(--sp-sm); }
+.lx-key { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: var(--r-full); background: var(--bg-surface); border: 1px solid var(--border-default); color: var(--text-primary); font-weight: 600; font-size: 14px; line-height: 18px; box-shadow: var(--shadow-float); }
+.lx-key i { font-style: normal; font-size: 14px; line-height: 1; }
+.lx-key.ev i { color: var(--action-primary); }
+.lx-key.pl i { color: var(--social-fill); }
+.lx-key.ev[aria-pressed="true"] { background: var(--action-primary-tint); border-color: var(--action-primary-edge); color: var(--text-accent); }
+.lx-key.pl[aria-pressed="true"] { background: var(--social-tint); border-color: #2c7385; color: var(--social-text); }
+.lx-key[aria-pressed="false"] { color: var(--text-secondary); text-decoration: line-through; }
+.lx-key[aria-pressed="false"] i { color: var(--text-tertiary); }
+.lx-zoom { flex-direction: row; }
+.lx-zoom .icon-btn { background: var(--bg-surface); border: 1px solid var(--border-default); box-shadow: var(--shadow-float); }
+.lx .maplibregl-ctrl-bottom-right { bottom: calc(var(--lx-vis, 300px) + 64px); }
+.lx .maplibregl-ctrl-attrib-button { width: 44px; height: 44px; }
+
+/* Pins: events are violet with a star (ringed in their match colour), places are teal dots. 44px to tap. */
+.map-pin2 { position: relative; width: 44px; height: 44px; margin: -22px 0 0 -22px; display: grid; place-items: center; padding: 0; background: none; }
+.map-pin2 i { display: grid; place-items: center; border-radius: 50%; transition: transform 0.2s cubic-bezier(0.23, 1, 0.32, 1); }
+.map-pin2.ev i { width: 28px; height: 28px; background: var(--action-primary); color: var(--text-on-action); box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--match-low); }
+.map-pin2.ev.strong i { box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--match-strong); }
+.map-pin2.ev.close i { box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--match-close); }
+.map-pin2.ev svg { width: 16px; height: 16px; }
+.map-pin2.pl i { width: 22px; height: 22px; background: var(--social-fill); box-shadow: 0 0 0 3px var(--bg-base); }
+.map-pin2.pl i::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--bg-base); }
+.map-pin2.on { z-index: 3; }
+.map-pin2.on i { transform: scale(1.3); }
+.map-you { width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--white); box-shadow: 0 0 0 3px var(--social-fill), 0 0 0 12px rgba(92, 207, 230, 0.2); pointer-events: none; }
+
+/* The light map, until MapLibre arrives (or if it can't) */
+.map-lite { overflow: hidden; touch-action: none; background-color: var(--map-land);
+  background-image: linear-gradient(var(--map-street) 1px, transparent 1px), linear-gradient(90deg, var(--map-street) 1px, transparent 1px); background-size: 96px 96px; }
+.map-lite-layer { position: absolute; inset: 0; }
+.map-lite-layer > * { position: absolute; left: 0; top: 0; }
+
+/* The sheet */
+.lx-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; flex-direction: column; background: var(--bg-surface); border-top: 1px solid var(--border-subtle); border-radius: var(--r-3xl) var(--r-3xl) 0 0; box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35); transition: transform 0.3s cubic-bezier(0.23, 1, 0.32, 1); will-change: transform; }
+.lx-sheet.still, .lx-sheet.dragging { transition: none; }
+.lx-head { padding: 0 var(--sp-lg); touch-action: none; flex: none; cursor: grab; }
+.lx-grab { display: flex; justify-content: center; width: 120px; height: 44px; margin: 0 auto -8px; padding-top: 10px; }
+.lx-grab span { width: 40px; height: 5px; border-radius: 3px; background: var(--border-default); }
+.lx-headrow { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-md); padding-bottom: var(--sp-sm); }
+.lx-count { display: flex; flex-direction: column; min-width: 0; }
+.lx-count > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lx-views { display: flex; gap: 6px; flex: none; }
+.lx-view { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border-radius: var(--r-full); background: var(--bg-raised); color: var(--text-primary); font-weight: 600; font-size: 13px; line-height: 16px; }
+.lx-view[aria-pressed="true"] { background: var(--bg-inverse); color: var(--text-inverted); }
+.lx-cards { gap: 10px; padding: 0 var(--sp-lg) 14px; scroll-padding: 0 var(--sp-lg); flex: none; }
+.lx-list { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: var(--sp-lg); }
+.lx-list::-webkit-scrollbar { display: none; }
+.lx[data-stop="peek"] .lx-list { display: none; }
+.lx:not([data-stop="peek"]) .lx-cards { display: none; }
+.lx-pad { padding-left: var(--sp-lg); padding-right: var(--sp-lg); }
+.lx-sec { display: flex; flex-direction: column; gap: 10px; margin-top: var(--sp-md); }
+.lx-sec .section-header > button { min-height: 44px; }
+.lx-sec .hscroll { padding: 0 var(--sp-lg); }
+.lx-h { display: flex; align-items: center; gap: 10px; margin: 0; font-weight: 600; font-size: 16px; line-height: 22px; }
+
+/* Cards (option A): a tag with an icon, the facts that matter (a start time and a ticket, or hours and a price), one link */
+.lx-card { flex: none; width: calc((100% - 10px) / 2); display: flex; flex-direction: column; padding: 12px 12px 0 12px; border-radius: 18px; background: var(--bg-base); border: 1px solid var(--border-subtle); border-left: 4px solid var(--action-primary); text-align: left; }
+.lx-card.pl { border-left-color: var(--social-fill); }
+.lx-card.row { width: 100%; }
+.lx-card.on { box-shadow: 0 0 0 2px var(--action-primary); }
+.lx-card.pl.on { box-shadow: 0 0 0 2px var(--social-fill); }
+.lx-main { display: flex; flex-direction: column; gap: 4px; width: 100%; min-height: 44px; text-align: left; border-radius: 8px; }
+.lx-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 4px; }
+.kt { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--r-full); font-weight: 600; font-size: 12px; line-height: 16px; white-space: nowrap; }
+.kt.ev { background: var(--action-primary-tint); color: var(--text-accent); }
+.kt.pl { background: var(--social-tint); color: var(--social-text); }
+.lx-match { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; font-size: 12px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; }
+.lx-match i { width: 8px; height: 8px; border-radius: 50%; background: var(--match-low); }
+.lx-match.strong i { background: var(--match-strong); }
+.lx-match.close i { background: var(--match-close); }
+.lx-title { font-weight: 600; font-size: 15px; line-height: 20px; color: var(--text-primary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lx-when { font-size: 13px; line-height: 18px; color: var(--text-primary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lx-meta { font-size: 12px; line-height: 16px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lx-link { display: flex; align-items: center; gap: 4px; min-height: 44px; margin-top: auto; font-weight: 600; font-size: 14px; line-height: 18px; color: var(--text-accent); text-decoration: none; align-self: flex-start; }
+.lx-card.pl .lx-link { color: var(--social-text); margin-top: auto; }
+.lx-why { margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--text-accent); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lx-attr { font-size: 12px; line-height: 16px; color: var(--text-tertiary); padding-bottom: 10px; margin-top: -6px; }
+.lx-card.ev .lx-link { padding-bottom: 2px; }
+.lx-card.row .lx-when { -webkit-line-clamp: 1; }
+:is([data-layout="tablet"], [data-layout="desktop"]) .lx-card:not(.row) { width: 240px; }
+:is([data-layout="tablet"], [data-layout="desktop"]) .lx .map-ctrls { max-width: 560px; }
+:is([data-layout="tablet"], [data-layout="desktop"]) .lx-list > * { max-width: 760px; }
+@media (prefers-reduced-motion: reduce) {
+  .lx-sheet, .lx-float, .map-pin2 i { transition: none; }
+}
+.lx-more { min-height: 44px; font-weight: 600; font-size: 14px; color: var(--text-accent); align-self: flex-start; }

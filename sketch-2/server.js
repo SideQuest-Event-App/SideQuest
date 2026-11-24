@@ -28,6 +28,7 @@ const siteName = require("./public/js/sites.js"); // shared with the add-event f
 const sidekick = require("./lib/sidekick/rooms"); // Sidekick planning calls (lib/sidekick, public/sidekick.html)
 const skOg = require("./lib/sidekick/og"); // link previews for call invites
 const skStudy = require("./lib/sidekick/study"); // the voice A/B study (public/study.html, reference/sidekick-ab-study-plan.md)
+const launch = require("./lib/launch"); // the launch map: "You · <neighbourhood>" and nearby places
 
 const PORT = process.env.PORT || 3001; // Sketch 1 uses 3000, so both can run at once
 
@@ -284,6 +285,7 @@ function view(userId, hostId) {
     host,
     organizers: organizerList(),
     eventsVersion: eventsVersion(), // the events themselves come from /api/events, only when this changes
+    eventsCount: d.events.reduce((n, e) => n + (isOver(e) ? 0 : 1), 0), // for the loader ("Finding what's on… 1,240 events")
     requests: [...d.requests].sort((a, b) => b.votes - a.votes),
     hostMessages: d.hostMessages,
     eventChat: d.eventChat,
@@ -1830,6 +1832,9 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       return res.end(req.method === "HEAD" ? undefined : html);
     }
+    // The launch map: name a (rounded) point, and the one places search a map session gets
+    if (req.method === "GET" && url.pathname === "/api/where") return sendJSON(res, 200, launch.where(url.searchParams.get("lat"), url.searchParams.get("lng")));
+    if (req.method === "POST" && url.pathname === "/api/places") return sendJSON(res, 200, await launch.nearby(await readBody(req)));
     const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster, "/api/extract": apiExtract, "/api/from-link": apiFromLink, "/api/cover": apiCover, "/api/read-ticket": apiReadTicket };
     if (req.method === "POST" && ROUTES[url.pathname]) {
       const body = await readBody(req);

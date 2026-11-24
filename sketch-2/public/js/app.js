@@ -125,7 +125,9 @@
     return state;
   }
   SQ.refresh = async () => {
-    SQ.d = await withEvents(await request(`/api/state?user=${encodeURIComponent(ids.user || "")}&host=${encodeURIComponent(ids.host || "")}`));
+    const state = await request(`/api/state?user=${encodeURIComponent(ids.user || "")}&host=${encodeURIComponent(ids.host || "")}`);
+    if (window.SQboot) window.SQboot.counts({ events: state.eventsCount }); // the loader's "1,240 events", while the listings download
+    SQ.d = await withEvents(state);
     if (ids.user && !SQ.d.user) SQ.setIds({ user: null }); // the database was reset
     if (ids.host && !SQ.d.host) SQ.setIds({ host: null });
   };
@@ -202,18 +204,19 @@
   }
 
   // ---------- Navigation ----------
-  const ROOTS = ["discover", "parties", "requests", "questlog", "profile", "host-demand", "host-quests", "host-insights", "host-messages"];
+  const ROOTS = ["discover", "parties", "questlog", "profile", "host-demand", "host-quests", "host-insights", "host-messages"];
   const OPEN = ["landing", "role", "login", "login-code", "signup", "host-type", "host-login"]; // screens that work signed out
   // Where you actually land: signed-out users can't open app screens
   function guard(id) {
+    if (id === "discover-map") id = "discover"; // the old map view is Discover now
     const scr = SQ.screens[id];
     if (!scr) return "landing";
     if (id === "friend" && !SQ.u.friendProfile) return "friends"; // a reload forgets whose profile it was
     if (OPEN.includes(id)) return id;
     if (scr.role === "host") return SQ.d.host ? id : "host-type";
     if (!SQ.d.user) return "landing";
-    if (!SQ.d.user.registered && ROOTS.includes(id)) return "ob-vibes";
-    if (SQ.d.user.demo && ROOTS.includes(id) && !["discover", "parties", "questlog"].includes(id)) return "discover"; // the demo account only gets Discover, Community and Sidequests
+    if (!SQ.d.user.registered && (ROOTS.includes(id) || id === "requests")) return "ob-vibes";
+    if (SQ.d.user.demo && (ROOTS.includes(id) || id === "requests") && !["discover", "parties", "questlog"].includes(id)) return "discover"; // the demo account only gets Discover, Community and Sidequests
     return id;
   }
   // Analytics: which screens people reach, and from where (fire and forget)
@@ -289,6 +292,7 @@
       for (const p of SQ.u.invalid) screenEl.querySelectorAll(`[data-bind="${CSS.escape(p)}"], [data-req="${CSS.escape(p)}"]`).forEach((el) => el.classList.add("invalid"));
     }
     SQ.initMaps(screenEl);
+    if (SQ.afterRender) SQ.afterRender(screenEl); // the launch map's sheet, location and places (launch.js)
     watchReveal(screenEl.querySelector("[data-reveal]"));
     renderSide();
     ensure();
@@ -588,6 +592,7 @@
       await SQ.refresh();
     } catch (err) {
       screenEl.innerHTML = `<div class="screen"><main class="scroll"><div class="pad stack" style="padding-top:80px">${SQ.empty("x", err.message)}</div></main></div>`;
+      if (window.SQboot) window.SQboot.done();
       return;
     }
     let last = null;
@@ -613,5 +618,6 @@
     }
     trackScreen(SQ.u.screen, null);
     render(true);
+    if (window.SQboot) window.SQboot.done(); // the first screen is in: the loader fades away
   })();
 })();

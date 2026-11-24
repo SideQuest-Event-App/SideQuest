@@ -199,9 +199,10 @@
     U().mix = l;
     return "mix";
   };
+  // A pin on Discover's map (launch.js has the rest of the map's actions)
   A.mapPin = (id) => {
-    U().mapSel = U().mapSel === Number(id) ? null : Number(id);
-    if (U().screen !== "discover-map") return "discover-map";
+    if (SQ.lx) SQ.lx.state().sel = `e${Number(id)}`;
+    if (U().screen !== "discover") return "discover";
   };
   const shareText = async (text) => {
     try {
