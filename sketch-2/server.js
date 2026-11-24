@@ -569,8 +569,8 @@ A.save = (ctx, { eventId }) => {
   const e = findEvent(eventId);
   if (!e) throw new Error("Unknown quest.");
   const u = needUser(ctx);
-  const saved = toggle(u.saved, e.id);
-  if (saved.includes(e.id)) taste.record(u, "save", e);
+  const saved = toggle(u.saved, e.id); // true when it was just saved
+  if (saved) taste.record(u, "save", e);
   else taste.undo(u, "save", e);
   return { saved };
 };
