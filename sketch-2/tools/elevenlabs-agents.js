@@ -40,7 +40,18 @@ const CALL = `How this call works
   - accept_relax: when the crew says yes to loosening something you offered.
   - get_plan_state: the board, if you need to check what's settled.
 - Ask, listen, record, move on. Don't ask a question the board already answers. One question per turn, then stop talking.
-- Keep every line short: one breath, two short sentences at most. Speak first, then call tools if you can; don't narrate tool calls.
+- Keep every line short: one breath, two short sentences at most, and never more than one question. Speak first, then call tools if you can; don't narrate tool calls.
+
+How to sound like a conversation, not a form
+- Say back what you heard, then ask. Every question opens by briefly confirming what was just said, with names, then links to the next ask: "Saturday after six, love it. Jay said games, Maya's leaning live music, so what about you, Asia?" Never say back a budget, an amount or a place someone wants to avoid.
+- Open with the room: the crew name, who's here and the nights ("{{crew_name}}'s here! Friday or Saturday, right?").
+- After the check-in, ask one open question ("What kind of night are you all after?"), take everything you can from the answers (night, time, vibe, starting point) with record_facts, and only ask about what's still missing. When something doesn't need asking, say so in a few words ("Budget's sorted, everyone's added theirs privately").
+- If only one thing is unclear, ask about just that, by name: "Maya, was that Friday or Saturday?" On a split, name it: "Friday or Saturday, there's a split. Want me to find something that works both nights?"
+- If someone has been quiet for a while, invite them in gently by name, once. Don't single anyone out twice.
+- If people drift off topic, react in a few words, then steer back: "Leafs talk after we pick, promise."
+- React to good news briefly ("Oh, everyone's free Saturday, nice"), and let small listening sounds be short.
+- Present picks like a DJ, not a list: a hook, why it fits named people, one vivid detail (venue, start time, or that it's free), then invite the vote. Use clean names: never read out "w/", "Free event." or "@ venue", and if a title is just a number, add the venue ("54.40 at the Danforth Music Hall"). Say which is a show and which is a spot you can drop into.
+- When the plan is locked, close warmly in one line ("That's a plan, see you Saturday!").
 - Only mention events and places the tools give you. Never invent venues, prices or times.
 - If people are just chatting with each other, stay quiet (skip_turn). If someone asks you to step back or sit back, say so in a few words and stay quiet until someone says "Sidekick".
 - Never ask about budget or places to avoid out loud, and never say anyone's private answer or who has or hasn't answered it. Those are answered privately on screens.
@@ -92,6 +103,13 @@ const TOOLS = [
   pre_tool_speech: "auto",
   interruption_mode: "allow",
 }));
+// Said by people while Sidekick talks: a listening sound, so Sidekick keeps going
+const BACKCHANNELS = ["yeah", "yep", "mhm", "mm-hm", "uh-huh", "right", "okay", "ok", "nice", "cool", "totally", "for sure", "true"];
+// The short reaction the agent says while its reply is being written (never a question or a private answer)
+const LISTEN = {
+  friend: "Output only a SHORT, warm reaction (1 to 4 words) to what was just said, like a friend on a call: 'Ooh, Saturday.' 'Ha, nice.' 'Mm, love that.' Celebrate good news. Never a question, never a budget, an amount or a place someone wants to avoid.",
+  concierge: "Output only a SHORT, calm acknowledgement (1 to 4 words) of what was just said: 'Mm, lovely.' 'I see.' 'Saturday, noted.' Never a question, never a budget, an amount or a place someone wants to avoid.",
+};
 const SKIP_TURN = { type: "system", name: "skip_turn", description: "Stay silent when people are talking among themselves and nobody needs Sidekick.", params: { system_tool_type: "skip_turn" } };
 
 function config(a) {
@@ -123,7 +141,14 @@ function config(a) {
       tts: { voice_id: a.voice || VOICE_DEFAULT, model_id: process.env.ELEVENLABS_TTS_MODEL || "eleven_flash_v2", stability: 0.45, similarity_boost: 0.8, speed: a.speed },
       // Turn-taking: "normal" eagerness answers about as fast as ElevenLabs' own page; speculative turns
       // start the reply during the pause. Interruptions stay on (the "interruption" client event).
-      turn: { turn_timeout: 8, turn_eagerness: "normal", speculative_turn: true, turn_model: "turn_v3", silence_end_call_timeout: -1 },
+      // Listening sounds: "yeah", "mhm" and friends while Sidekick talks are backchannels, not
+      // interruptions (real interruptions still stop it). And while the reply is being written, a
+      // 1 to 4 word reaction in the persona's voice ("Ooh, Saturday.") instead of dead air.
+      turn: {
+        turn_timeout: 8, turn_eagerness: "normal", speculative_turn: true, turn_model: "turn_v3", silence_end_call_timeout: -1,
+        interruption_ignore_terms: BACKCHANNELS, interruption_ignore_term_languages: ["en"], merge_with_default_ignore_terms: true,
+        soft_timeout_config: { timeout_seconds: 1.2, message: a.persona === "friend" ? "Mm, okay." : "Mm, I see.", use_llm_generated_message: true, llm_generated_message_prompt_override: LISTEN[a.persona], max_soft_timeouts_per_generation: 1, pause_after_filler: true, disable_until_first_user_message: true },
+      },
       conversation: {
         max_duration_seconds: MAX_MIN * 60,
         // client_tool_call must be listed, or the browser never hears the agent's tool calls
@@ -174,6 +199,9 @@ function check(want, got) {
     turn_timeout: [(g.turn || {}).turn_timeout, w.turn.turn_timeout],
     speculative_turn: [(g.turn || {}).speculative_turn, w.turn.speculative_turn],
     interruptions: [((g.conversation || {}).client_events || []).includes("interruption"), true],
+    backchannels_ignored: [((g.turn || {}).interruption_ignore_terms || []).includes("mhm") && (g.turn || {}).merge_with_default_ignore_terms === true, true],
+    listening_sounds: [((g.turn || {}).soft_timeout_config || {}).use_llm_generated_message === true && ((g.turn || {}).soft_timeout_config || {}).timeout_seconds > 0, true],
+    reflect_then_ask_prompt: [/Say back what you heard, then ask/.test(p.prompt || ""), true],
     client_tool_call_event: [((g.conversation || {}).client_events || []).includes("client_tool_call"), true],
     auth: [((got.platform_settings || {}).auth || {}).enable_auth, true],
     record_voice: [((got.platform_settings || {}).privacy || {}).record_voice, false],
@@ -222,6 +250,12 @@ async function main() {
       if (!checkOnly) await el("PATCH", `${API}/agents/${agentId}`, want);
       const after = checkOnly ? before : await el("GET", `${API}/agents/${agentId}`);
       const rows = check(want, after);
+      // The dashboard's voice choices (voice and voice model) must come through an update untouched
+      if (keepTts) {
+        const was = before.conversation_config.tts, now = (after.conversation_config || {}).tts || {};
+        const same = was.voice_id === now.voice_id && was.model_id === now.model_id;
+        rows.push({ setting: "dashboard_voice_kept", have: `${now.voice_id} / ${now.model_id}`, need: `${was.voice_id} / ${was.model_id}`, ok: same });
+      }
       bad += rows.filter((r) => !r.ok).length;
       console.log(`\n${checkOnly ? "Checked" : "Updated"} ${a.name} (${agentId}). Read back:`);
       for (const r of rows) console.log(`  ${r.ok ? "ok  " : "DIFF"} ${r.setting}: ${JSON.stringify(r.have)}${r.ok ? "" : ` (wanted ${JSON.stringify(r.need)})`}${r.note ? ` (note: ${r.note})` : ""}`);
