@@ -1,5 +1,15 @@
 # Suggesting places, not just ticketed events
 
+**Status: built (Nov 2026).** The code is in `lib/sidekick/places.js` and `lib/sidekick/usage.js`. It switches on when `GOOGLE_MAPS_API_KEY` is set. The spending stop:
+- Every Text Search is counted before it's made, and counts are saved to disk and to Supabase.
+- Searching stops at `GOOGLE_PLACES_FREE_PER_MONTH × GOOGLE_PLACES_STOP_AT` (default 1,000 × 0.8 = 800 a month) and at `GOOGLE_PLACES_DAILY_MAX` (default 40 a day).
+- Each call uses at most `SIDEKICK_PLACES_PER_CALL` searches (default 2).
+- After the cap, Sidekick carries on with events only.
+
+**Also set Google's own caps, which work even if the app has a bug or the key leaks:**
+- In Google Cloud Console › APIs & Services › Places API (New) › Quotas, set "Text Search requests per day" to about 40.
+- In Billing › Budgets & alerts, set a budget of $1 with email alerts.
+
 **Product decision (Nov 2026):** Sidekick should also suggest places that don't need a ticket, for crews who don't want an event. That covers bars, karaoke, arcades and board-game cafés, restaurants and dessert spots, bowling, live-music bars, parks and galleries. Toronto comes first; other cities later.
 
 ## Does it need a maps API? Yes

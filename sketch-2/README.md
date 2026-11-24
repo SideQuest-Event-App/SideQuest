@@ -34,11 +34,18 @@ Open `/sk` to start a planning call. Pick your nights, share the link, and frien
 - Design and rules: `reference/sidekick-conversation-design.md`.
 - The two personas and the A/B test: `reference/sidekick-personas.md`.
 
+**Places (Google):** with `GOOGLE_MAPS_API_KEY` set, Sidekick also suggests places that don't need tickets (bars, karaoke, arcades, galleries) and can ask "a ticketed event, or just somewhere good to go?". Every search is counted, and the app stops at 80% of Google's free monthly allowance and at a daily cap, then carries on with events only (`lib/sidekick/usage.js`). Also set quota caps in Google Cloud as a second stop. Details: `reference/sidekick-places-plan.md`.
+
+**Voice agent (ElevenLabs):** with `ELEVENLABS_API_KEY` and the two agent IDs set, the planner sees "Turn on Sidekick's voice". The planner's phone then runs the ElevenLabs agent as Sidekick's voice, while our server still decides every move and sends it to the agent as a cue. Minutes are capped the same way. If ElevenLabs can't be reached, the call carries on with the built-in voice. Create the agents with `node tools/elevenlabs-agents.js --create`. Details: `reference/elevenlabs-agent-spec.md`.
+
+All the settings are listed in `.env.example`.
+
 **Test it:**
 
 ```
 node test/sidekick-eval.js              # scripted calls, both personas, checked against everyone's limits
 node test/sidekick-eval.js --keywords   # the same without AI calls for understanding speech
+node test/sidekick-integrations.js      # spending caps, places and the voice agent, with Google and ElevenLabs faked
 ```
 
 ## Put it online (Render)

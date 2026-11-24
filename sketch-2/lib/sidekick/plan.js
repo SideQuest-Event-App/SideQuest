@@ -10,9 +10,14 @@ const SLOTS = {
   vibe: { label: "Vibe", multi: true, private: false, options: [["music", "Live music"], ["comedy", "Comedy"], ["games", "Games & social"], ["dance", "Dancing"], ["arts", "Art & film"]] },
   budget: { label: "Budget", multi: false, private: true, options: [["20", "Under $20"], ["30", "Under $30"], ["50", "Under $50"], ["any", "Doesn't matter"]] },
   nos: { label: "Avoid", multi: true, private: true, options: [["West End", "West End"], ["Downtown", "Downtown"], ["East End", "East End"], ["North York", "North York"], ["Scarborough", "Scarborough"], ["Etobicoke", "Etobicoke"]] },
+  // Only asked when the call has places as well as events (Google Places on, and under its usage cap)
+  kind: { label: "Plan", multi: false, private: false, options: [["events", "A ticketed event"], ["places", "Just somewhere good"], ["either", "Either works"]] },
 };
+const placesOpen = require("./places").openAt;
+// A representative hour for each time of night, to check a place is open then
+const BUCKET_HOUR = { early: 15, evening: 19, late: 21 };
 // Asked in this order of importance when nothing else decides it; nos is only asked on the join card
-const ASKABLE = ["night", "time", "budget", "origin", "vibe"];
+const ASKABLE = ["night", "time", "budget", "origin", "vibe", "kind"];
 const VIBES = { music: ["Live music", "Jazz", "Indie gigs"], comedy: ["Comedy"], games: ["Games & social"], dance: ["Dance", "Electronic"], arts: ["Art & making", "Film nights", "Photography"] };
 const MAX_TRIP = 60; // minutes; an event further than this from anyone's start is out
 
@@ -61,6 +66,15 @@ function groupFact(room, slot) {
     out.known = true;
     return out;
   }
+  if (slot === "kind") {
+    const sets = got.map((x) => (x.a.value === "either" ? ["events", "places"] : [x.a.value]));
+    const both = ["events", "places"].filter((k) => sets.every((st) => st.includes(k)));
+    got.forEach((x) => (out.supporters[x.a.value] = [...(out.supporters[x.a.value] || []), x.person.name]));
+    if (!both.length) { if (got.length >= 2) out.conflict = ["events", "places"]; return out; }
+    out.value = both;
+    out.known = got.length >= need(room);
+    return out;
+  }
   if (slot === "origin") {
     out.value = [...new Set(got.map((x) => x.a.value))];
     got.forEach((x) => (out.supporters[x.a.value] = [...(out.supporters[x.a.value] || []), x.person.name]));
@@ -106,7 +120,21 @@ function filterEvents(events, room, f) {
   if (max != null && relax.has("budget")) max = TIERS.find((t) => t > max) || null;
   const avoid = relax.has("area") ? [] : f.nos.value || [];
   const origins = Array.isArray(f.origin.value) ? f.origin.value : [];
+  const kinds = f.kind && f.kind.known ? f.kind.value : ["events", "places"];
   return events.filter((e) => {
+    if (e.type === "place") {
+      if (!kinds.includes("places") || e.area === "Beyond Toronto") return false;
+      const open = nights.some((d) => (times || ["evening"]).some((b) => placesOpen(e.hours, new Date(d + "T12:00:00").getDay(), BUCKET_HOUR[b]) !== false));
+      if (!open) return false;
+      if (max != null && e.price != null && e.price > max) return false;
+      if (avoid.includes(e.area)) return false;
+      for (const o of origins) {
+        const t = e.travel && e.travel.from && e.travel.from[o];
+        if (t && t.minutes > MAX_TRIP) return false;
+      }
+      return true;
+    }
+    if (!kinds.includes("events")) return false;
     if (!e.startsAt || e.area === "Beyond Toronto") return false;
     if (!nights.includes(localDay(e.startsAt))) return false;
     const b = bucket(localHour(e.startsAt));
@@ -130,7 +158,7 @@ function score(e, room, f) {
   const origins = Array.isArray(f.origin.value) && f.origin.value.length ? f.origin.value : ["union"];
   const trips = origins.map((o) => (e.travel && e.travel.from && e.travel.from[o] ? e.travel.from[o].minutes : 30));
   s -= Math.max(...trips) / 6;
-  s += (e.rating || 0) * 1.5 + Math.min(e.going || 0, 20) / 10;
+  s += e.type === "place" ? Math.max(0, (e.rating || 0) - 3.8) * 5 + (e.hours ? 0 : -3) : (e.rating || 0) * 1.5 + Math.min(e.going || 0, 20) / 10;
   if (e.price == null && f.budget.value != null && f.budget.value !== "any") s -= 4;
   return s;
 }
@@ -168,6 +196,7 @@ function simulate(room, f, slot, value) {
 }
 
 function openSlots(room, f) {
+  if (!room.places || !room.places.length) return ASKABLE.filter((s) => s !== "kind" && !f[s].known && !(s === "night" && room.nights.length === 1));
   return ASKABLE.filter((s) => !f[s].known && !(s === "night" && room.nights.length === 1));
 }
 

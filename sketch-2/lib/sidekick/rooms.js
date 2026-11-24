@@ -12,6 +12,8 @@ const factsOf = (room) => Object.assign(P.facts(room), { relax: room.relax });
 const personas = require("./personas");
 const claude = require("./claude");
 const ai = require("../ai");
+const places = require("./places");
+const usage = require("./usage");
 const { track } = require("../analytics");
 
 const rooms = new Map();
@@ -20,7 +22,7 @@ const QUIET_MS = 900; // wait this long after the last line before thinking, so 
 const MIN_GAP_MS = 5000; // at least this long between Sidekick's lines, unless someone asks it something
 const NUDGE_AFTER_MS = 20000;
 const IDLE_MS = 3 * 3600 * 1000;
-const PROMPTS = { night: "Which night works?", time: "What time works?", origin: "Where are you starting from?", vibe: "What kind of night?", budget: "Your max for the night?", nos: "Anything that's a no?" };
+const PROMPTS = { night: "Which night works?", time: "What time works?", origin: "Where are you starting from?", vibe: "What kind of night?", budget: "Your max for the night?", nos: "Anything that's a no?", kind: "A ticketed event, or just somewhere good to go?" };
 
 const id = (n = 6) => crypto.randomBytes(n).toString("base64url");
 const initial = (name) => (name || "?").trim().charAt(0).toUpperCase();
@@ -56,6 +58,9 @@ function createRoom({ crew, planner, nights, persona }) {
     surveys: {},
     relax: new Set(), // constraints the crew agreed to loosen when nothing fit
     offer: null,
+    places: [], // non-ticketed places from Google, for this call only (never stored)
+    cues: [], // moves sent to the ElevenLabs voice agent on the planner's phone
+    agentMode: false,
   };
   if (!room.nights.length) room.nights = suggestNights().slice(0, 2).map((n) => n.date);
   rooms.set(room.id, room);
@@ -103,7 +108,7 @@ function setAnswer(room, person, slot, value, source) {
 function addLine(room, person, text, kind) {
   text = String(text || "").trim().slice(0, 300);
   if (!text) return;
-  const line = { pid: person.id, name: person.name, text, kind: kind === "typed" ? "typed" : "spoken", at: now() };
+  const line = { id: id(4), pid: person.id, name: person.name, text, kind: kind === "typed" ? "typed" : "spoken", at: now() };
   room.lines.push(line);
   if (room.lines.length > 40) room.lines.shift();
   room.pending.push(line);
@@ -242,6 +247,16 @@ async function speak(room, move, c = {}) {
   const f = factsOf(room);
   const people = P.crew(room);
   const ctx = lineContext(room, f, c);
+  if (room.agentMode) {
+    // The voice agent speaks; we send it the move with a suggested line from the line book
+    const key = move === "welcome" ? "hello" : move === "ask" ? `ask_${c.slot}` : move === "conflict" ? "clash" : move === "none" ? "loosen" : move;
+    const suggestion = personas.fallbackLine(room.persona, key, ctx, room.said.filter((x) => !x.system).slice(-3).map((x) => x.text));
+    room.cues.push({ id: id(4), text: cueFor(room, move, c, suggestion), move, at: now() });
+    if (room.cues.length > 20) room.cues.shift();
+    room.lastSaidAt = now();
+    track("sk_said", { sessionId: room.id, persona: room.persona, move, ai: false, agent: true });
+    return { id: id(4), text: suggestion, move, at: now() };
+  }
   let text = null;
   let usedAI = false;
   if (claude.available()) {
@@ -324,7 +339,39 @@ function ideasFor(room, f, slot, events) {
   }
   if (slot === "time") return "an early dinner-and-a-show kind of night, or a later one after eight";
   if (slot === "origin") return "Union, Finch, Kennedy or Kipling, whichever's closest";
+  if (slot === "kind") return "a ticketed show, or just a good bar, arcade or karaoke spot you can drop into";
   return null;
+}
+
+// ---------- ElevenLabs voice agent (optional) ----------
+// The planner's phone can run an ElevenLabs agent as Sidekick's voice. Our engine stays the brain:
+// each move becomes a cue the phone passes to the agent, which says it in the persona's voice.
+const AGENTS = () => ({ friend: process.env.ELEVENLABS_AGENT_FRIEND, concierge: process.env.ELEVENLABS_AGENT_CONCIERGE });
+const agentIdFor = (room) => (process.env.ELEVENLABS_API_KEY && process.env.SIDEKICK_ELEVENLABS_OFF !== "1" ? AGENTS()[room.persona] || null : null);
+const AGENT_MAX_MIN = () => Number(process.env.ELEVENLABS_MAX_CALL_MINUTES || 10);
+const MOVE_HINT = {
+  welcome: "Welcome the crew, then ask the first question",
+  ask: "Ask the group this one question",
+  conflict: "Name this clash kindly, without taking sides, and offer a way forward",
+  nudge: "Gently invite this person in",
+  guide: "People seem unsure. Offer these ideas and ask which sounds good",
+  picks: "Present these two picks, with a reason for each, and ask everyone to vote",
+  none: "Nothing fits everything. Offer to loosen one thing, without saying whose limit it is",
+  answer: "Reply briefly to what was just asked",
+  locked: "Confirm the locked plan warmly",
+  wrap: "Point everyone to the two quick survey questions on their screen",
+};
+function cueFor(room, move, c, suggestion) {
+  const opts = c.slot && c.slot !== "budget" ? P.optionsFor(c.slot, room).map(([, l]) => l).join(", ") : "";
+  const detail = move === "ask" || move === "welcome" ? `${PROMPTS[c.slot] || ""}${opts ? ` Options on screen: ${opts}.` : ""}${c.slot === "budget" ? " Everyone answers privately on their own screen." : ""}`
+    : move === "picks" ? (c.picks || []).map((x, i) => `${i + 1}) ${x}`).join(" ")
+    : move === "guide" ? `Ideas: ${c.options}.`
+    : move === "conflict" ? `${c.a} vs ${c.b}.`
+    : move === "nudge" ? `Person: ${c.person}. Question: ${PROMPTS[c.slot] || ""}`
+    : move === "none" && c.relax ? `${c.relax} would open up ${c.n} options.`
+    : move === "answer" ? `${c.person} asked: "${redact(c.question || "")}"`
+    : move === "locked" ? `Plan: ${c.pick}.` : "";
+  return `[app] ${MOVE_HINT[move] || "Say this"}. ${detail} Say it your way, in one breath, for example: "${suggestion}"`.replace(/\s+/g, " ").trim();
 }
 
 // ---------- The loop: listen, update, decide ----------
@@ -366,9 +413,23 @@ async function think(room) {
   }
 }
 
+// Loads Google places for this call once: after the night is known and the vibe has been asked or
+// answered. At most SIDEKICK_PLACES_PER_CALL searches, and none once the usage cap is near.
+async function ensurePlaces(room, f) {
+  if (room.placesTried) return;
+  if (!(room.nights.length === 1 || f.night.known)) return;
+  if (!(f.vibe.answered > 0 || room.asked.includes("vibe") || room.asked.length >= 3)) return;
+  room.placesTried = true;
+  if (!(await places.available())) return;
+  const out = await places.forCall(f.vibe.value || []);
+  room.places = out.places;
+  track("sk_places_loaded", { sessionId: room.id, persona: room.persona, n: out.places.length, capped: out.capped || null });
+}
+
 async function decide(room, { forcePicks = false } = {}) {
   if (room.status !== "live" || room.picks) return;
-  const events = upcoming();
+  await ensurePlaces(room, factsOf(room));
+  const events = [...upcoming(), ...(room.places || [])];
   const f = factsOf(room);
   const r = P.readiness(events, room, f);
   const canSpeak = () => !room.lastSaidAt || now() - room.lastSaidAt > MIN_GAP_MS;
@@ -478,13 +539,20 @@ async function makePicks(room, list) {
   for (const e of pool) if (matches.length < 2 && !matches.some((m) => m.id === e.id)) matches.push({ id: e.id, reason: "", fits: {} });
   room.picks = matches.slice(0, 2).map((m) => {
     const e = pool.find((x) => x.id === m.id);
-    return { id: e.id, title: e.title, when: e.date, stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `$${e.price}` : "Price not listed", where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), reason: m.reason || "", fits: m.fits || {}, url: e.sourceUrl || null };
+    if (e.type === "place") {
+      const night = f.night.known && f.night.value.length ? f.night.value[0] : room.nights[0];
+      const b = f.time.known && f.time.value.length ? f.time.value[0] : "evening";
+      const hours = places.closesLabel(e.hours, new Date(night + "T12:00:00").getDay(), { early: 15, evening: 19, late: 21 }[b]);
+      return { id: e.id, kind: "place", title: e.title, when: `${spokenDay(P.nightLabel(night))} · ${hours}`, stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `${e.priceNote ? `${e.priceNote} · ` : ""}about $${e.price} each` : e.priceNote || "Price not listed", where: [e.neighbourhood, e.rating ? `rated ${e.rating}` : null].filter(Boolean).join(" · "), reason: m.reason || "", fits: m.fits || {}, url: e.mapsUrl, attribution: "Google Maps" };
+    }
+    return { id: e.id, kind: "event", title: e.title, when: e.date, stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `$${e.price}` : "Price not listed", where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), reason: m.reason || "", fits: m.fits || {}, url: e.sourceUrl || null };
   });
   room.card = null;
   track("call_facts_complete", { sessionId: room.id, persona: room.persona, secs: Math.round((now() - room.createdAt) / 1000), questions: room.asked.length });
   track("picks_shown", { sessionId: room.id, persona: room.persona, pool: list.length });
   const whyOf = (p) => {
     const e = pool.find((x) => x.id === p.id);
+    if (e.type === "place") return [e.rating ? `rated ${e.rating}` : null, e.neighbourhood && `in ${e.neighbourhood}`, e.price != null ? `about ${e.price} dollars each` : null].filter(Boolean).join(", ");
     const vibe = (e.vibes || [])[0];
     return [[vibe && vibe.toLowerCase(), e.neighbourhood && `in ${e.neighbourhood}`].filter(Boolean).join(" "), e.price === 0 ? "and it's free" : e.price != null ? `about ${e.price} dollars` : null].filter(Boolean).join(", ");
   };
@@ -527,7 +595,7 @@ function endRoom(room, why) {
 // ---------- What each person sees ----------
 
 function rows(room, f = factsOf(room)) {
-  return ["night", "time", "budget", "origin", "vibe"].filter((s) => !(s === "night" && room.nights.length === 1 && false)).map((slot) => {
+  return ["night", "time", "budget", "origin", "vibe", ...(room.places && room.places.length ? ["kind"] : [])].map((slot) => {
     const g = f[slot];
     let value = null;
     let who = "";
@@ -574,7 +642,10 @@ function viewFor(room, pid) {
     rows: r,
     known: r.filter((x) => x.state === "done").length,
     card: me ? cardFor(room, me) : null,
-    captions: room.lines.slice(-5).map((l) => ({ name: l.name, text: l.text, kind: l.kind })),
+    captions: room.lines.slice(-5).map((l) => ({ id: l.id, pid: l.pid, name: l.name, text: l.text, kind: l.kind })),
+    cues: me && me.role === "planner" && room.agentMode ? room.cues.slice(-6) : [],
+    voiceAgent: Boolean(me && me.role === "planner" && agentIdFor(room)),
+    agentOn: room.agentMode,
     sidekick: room.said.slice(-3),
     picks: room.picks,
     votes,
@@ -595,7 +666,8 @@ function broadcast(room) {
 async function handle(req, res, url, { readBody, sendJSON }) {
   const parts = url.pathname.split("/").filter(Boolean); // api, sk, rooms, :id, action
   try {
-    if (req.method === "GET" && parts[2] === "nights") return sendJSON(res, 200, { nights: suggestNights(), ai: claude.available() });
+    if (req.method === "GET" && parts[2] === "nights") return sendJSON(res, 200, { nights: suggestNights(), ai: claude.available(), places: places.configured() && (await places.available()) });
+    if (parts[2] === "agent") return agentTool(req, res, parts[3], { readBody, sendJSON });
     if (req.method === "POST" && parts[2] === "rooms" && !parts[3]) {
       const body = await readBody(req);
       return sendJSON(res, 200, createRoom({ crew: body.crew, planner: body.name, nights: body.nights, persona: body.persona }));
@@ -656,6 +728,57 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       broadcast(room);
       return sendJSON(res, 200, { ok: true });
     }
+    if (action === "voice-agent" && !parts[5]) {
+      if (person.role !== "planner") return sendJSON(res, 403, { error: "Only the planner's phone runs Sidekick's voice." });
+      const agentId = agentIdFor(room);
+      if (!agentId) return sendJSON(res, 400, { error: "Sidekick's voice agent isn't set up yet." });
+      const minutes = AGENT_MAX_MIN();
+      const ok = await usage.reserve("elevenlabs_minutes", minutes);
+      if (!ok.ok) return sendJSON(res, 429, { error: "Sidekick's voice has hit its usage limit for now. The built-in voice will carry on." });
+      try {
+        const r = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`, { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY } });
+        if (!r.ok) throw new Error(`ElevenLabs refused the session (${r.status})`);
+        const { signed_url: signedUrl } = await r.json();
+        room.agentMode = true;
+        room.agent = { startedAt: now(), reserved: minutes };
+        room.cues = [{ id: id(4), text: room.said.length ? "[app] You've just joined this call as Sidekick. Say a short hi. The app will tell you what to ask next." : "[app] You've just joined. Stay quiet for now; the app will cue your welcome.", move: "join", at: now() }];
+        track("sk_voice_agent", { sessionId: room.id, persona: room.persona, on: true });
+        const nights = room.nights.map((d) => spokenDay(P.nightLabel(d)));
+        broadcast(room);
+        schedule(room, 500);
+        return sendJSON(res, 200, {
+          signedUrl,
+          maxMinutes: minutes,
+          dynamicVariables: { room_id: room.id, crew_name: room.crew, planner_name: person.name, people: P.crew(room).map((p) => `${p.name} (${p.mode})`).join(", "), nights_spoken: nights.length > 1 ? `${nights.slice(0, -1).join(", ")} or ${nights[nights.length - 1]}` : nights[0] },
+        });
+      } catch (err) {
+        await usage.release("elevenlabs_minutes", minutes);
+        const why = /fetch failed|abort|ENOTFOUND|ECONN/i.test(err.message) ? "Couldn't reach ElevenLabs" : err.message;
+        return sendJSON(res, 502, { error: `${why}. The built-in voice will carry on.` });
+      }
+    }
+    if (action === "voice-agent" && parts[5] === "end") {
+      if (room.agent) {
+        const usedMin = Math.min(room.agent.reserved, Math.ceil(Math.max(0, Number(body.seconds) || 0) / 60));
+        await usage.release("elevenlabs_minutes", room.agent.reserved - usedMin);
+        track("sk_voice_agent", { sessionId: room.id, persona: room.persona, on: false, minutes: usedMin });
+      }
+      room.agentMode = false;
+      room.agent = null;
+      broadcast(room);
+      return sendJSON(res, 200, { ok: true });
+    }
+    if (action === "agent-said") {
+      if (person.role !== "planner" || !room.agentMode) return sendJSON(res, 403, { error: "Not allowed." });
+      const text = String(body.text || "").trim().slice(0, 400);
+      if (text) {
+        room.said.push({ id: id(4), text, move: "agent", at: now() });
+        if (room.said.length > 20) room.said.shift();
+        room.lastSaidAt = now();
+        broadcast(room);
+      }
+      return sendJSON(res, 200, { ok: true });
+    }
     if (action === "vote") {
       if (!room.picks || room.locked || !room.picks.some((p) => p.id === Number(body.eventId))) return sendJSON(res, 400, { error: "Nothing to vote on yet." });
       room.votes[person.id] = Number(body.eventId);
@@ -697,6 +820,58 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     console.error(err);
     return sendJSON(res, 500, { error: err.message });
   }
+}
+
+// POST /api/sk/agent/<tool>, header X-Sidekick-Secret. Returns public data only: never anyone's
+// private answers, and no tool can vote, lock, book or pay.
+async function agentTool(req, res, tool, { readBody, sendJSON }) {
+  const secret = process.env.SIDEKICK_TOOL_SECRET;
+  if (!secret || req.headers["x-sidekick-secret"] !== secret) return sendJSON(res, 401, { error: "Missing or wrong X-Sidekick-Secret." });
+  if (req.method !== "POST") return sendJSON(res, 405, { error: "Use POST." });
+  const body = await readBody(req);
+  const room = rooms.get(String(body.room_id || ""));
+  if (!room) return sendJSON(res, 404, { error: "No live call with that room_id." });
+  room.touched = now();
+  const state = () => {
+    const f = factsOf(room);
+    return {
+      people: P.crew(room).map((p) => ({ name: p.name, joined: p.mode })),
+      board: rows(room, f).map((r) => ({ fact: r.label, value: r.value, said_by: P.SLOTS[r.slot].private ? undefined : r.who, state: r.state })),
+      open_question: room.card ? { slot: room.card.slot, question: PROMPTS[room.card.slot], private: P.SLOTS[room.card.slot].private, options: P.SLOTS[room.card.slot].private ? undefined : P.optionsFor(room.card.slot, room).map(([, l]) => l) } : null,
+      picks: room.picks ? room.picks.map((x) => ({ title: x.title, when: x.when, price: x.price, where: x.where, reason: x.reason })) : null,
+      locked: room.locked ? room.locked.title : null,
+    };
+  };
+  if (tool === "get_plan_state") return sendJSON(res, 200, state());
+  if (tool === "get_next_move") {
+    const cue = room.cues[room.cues.length - 1];
+    return sendJSON(res, 200, { ...state(), next_move: cue ? cue.move : "wait", say: cue ? cue.text : "Nothing needed right now. Stay quiet (skip_turn)." });
+  }
+  if (tool === "record_facts") {
+    const lines = [{ pid: null, at: now(), kind: "spoken" }];
+    applyUpdates(room, { updates: Array.isArray(body.updates) ? body.updates : [] }, lines);
+    broadcast(room);
+    schedule(room, 300);
+    return sendJSON(res, 200, state());
+  }
+  if (tool === "get_picks") {
+    if (!room.picks) await decide(room, { forcePicks: true });
+    broadcast(room);
+    return sendJSON(res, 200, room.picks ? state() : { ...state(), note: "Not enough to suggest picks yet." });
+  }
+  if (tool === "send_private_card") {
+    if (body.slot !== "budget") return sendJSON(res, 400, { error: "Only the budget card can be sent." });
+    room.card = { slot: "budget", at: now() };
+    broadcast(room);
+    return sendJSON(res, 200, { sent: true });
+  }
+  if (tool === "accept_relax") {
+    const ok = acceptOffer(room);
+    if (ok) await decide(room);
+    broadcast(room);
+    return sendJSON(res, 200, { loosened: ok, ...state() });
+  }
+  return sendJSON(res, 404, { error: `Unknown tool: ${tool}` });
 }
 
 function init({ events }) {

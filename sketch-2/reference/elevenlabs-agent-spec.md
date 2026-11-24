@@ -1,5 +1,20 @@
 # Sidekick on ElevenLabs: what to set up, and what stays in our code
 
+## As built (Nov 2026): set-up checklist
+
+The connection is built. It works by **cues**: our engine decides every move, as it already does, and sends it to the agent as an `[app] …` message that includes a suggested line from the line book. The agent says it in the persona's voice. The tools in section 4.5 also exist (`/api/sk/agent/<tool>`), but they're optional: the cues work without them, so ElevenLabs doesn't need to reach our server at all.
+
+1. **Get an ElevenLabs API key.** Put it in `.env` and on Render as `ELEVENLABS_API_KEY`.
+2. **Optional: choose voices.** Set `ELEVENLABS_VOICE_FRIEND` and `ELEVENLABS_VOICE_CONCIERGE`, for example to your own cloned voice.
+3. **Create the agents.** Run `node tools/elevenlabs-agents.js --create`. It builds both agents from `lib/sidekick/personas.js` and prints two IDs. Without `--create`, it only writes `reference/elevenlabs-agents.json`, which you can paste into the dashboard instead.
+4. **Save the IDs.** Put them in `.env` and on Render as `ELEVENLABS_AGENT_FRIEND` and `ELEVENLABS_AGENT_CONCIERGE`.
+5. **Check the dashboard.** The script prints the settings to confirm: turn `skip_turn` on, interruptions on, authentication on with an allowlist, privacy settings, and a monthly usage limit.
+6. **Know the spending stop.** Each voice session reserves `ELEVENLABS_MAX_CALL_MINUTES` (default 10) up front and gives back what it didn't use. No new sessions start past `ELEVENLABS_MINUTES_PER_MONTH × ELEVENLABS_STOP_AT` (default 15 × 0.8 = 12 minutes) or `ELEVENLABS_DAILY_MINUTES`. Raise these to match your plan.
+7. **Use it.** In a call, the planner taps **Turn on Sidekick's voice**. If ElevenLabs fails or the cap is reached, the call carries on with the built-in voice.
+
+The sections below are the original plan, kept for the reasoning.
+
+
 This is a plan for moving Sidekick's voice and conversation onto the ElevenLabs Agents platform while keeping the in-call design: the plan board, question cards, private answers, picks and voting.
 
 Facts about ElevenLabs come from its published SDK types (`@elevenlabs/client` 1.38, `@elevenlabs/elevenlabs-js` 2.79) and search results quoting its docs, checked in November 2026. Its docs site couldn't be opened from here. Items marked *(check)* need confirming in the dashboard or on elevenlabs.io before you rely on them.

@@ -185,6 +185,7 @@
       warned = false;
       render();
       readAloud();
+      relayToAgent();
     };
     es.onerror = async () => {
       if (warned) return;
@@ -261,11 +262,13 @@
       const voters = view.votes[p.id] || [];
       const fits = Object.entries(p.fits || {}).filter(([, v]) => v).map(([n, v]) => `<span><b>${esc(n)}</b> ${esc(v)}</span>`).join("");
       return `<button class="pick" data-vote="${p.id}" aria-pressed="${view.myVote === p.id}">
+        ${p.kind === "place" ? '<span class="tag soc" style="align-self:flex-start">Place · no tickets</span>' : '<span class="tag pri" style="align-self:flex-start">Event</span>'}
         <span class="row sb"><h2>${esc(p.title)}</h2>${voters.length ? `<span class="stk">${voters.map((v) => `<span class="av xs c${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(v) % 6}">${esc(v)}</span>`).join("")}</span>` : ""}</span>
         <span class="small" style="color:var(--t2)">${esc([p.when, p.price, p.where].filter(Boolean).join(" · "))}</span>
         ${p.reason ? `<span class="small" style="color:var(--acc)">${esc(p.reason)}</span>` : ""}
         ${fits ? `<span class="fits">${fits}</span>` : ""}
         ${p.stretch && p.stretch.length ? `<span class="small">Stretches: ${esc(p.stretch.join(", "))}</span>` : ""}
+        ${p.attribution ? `<span class="small">Place info from ${esc(p.attribution)}</span>` : ""}
         <span class="meter"><i style="width:${Math.round((voters.length / crewSize) * 100)}%"></i></span>
       </button>`;
     }).join("");
@@ -274,14 +277,15 @@
       : `<p class="small center">${esc(view.people.find((p) => p.planner)?.name || "The planner")} locks it in once you've voted.</p>`;
     document.getElementById("body").innerHTML = `<div class="board">${boardHead('<span class="tag ok">All set</span>')}<p class="small" style="padding:0 14px 12px;color:var(--t2)">${esc(summary)}</p></div>
       <div class="q" style="border-radius:22px;border:1px solid var(--pri-e)"><span class="small">Two picks fit everyone · tap one to vote</span>${picks}</div>
-      <p class="small">Picked for your crew's budget, distance and vibe. Venues can't pay to appear here.</p>${lock}`;
+      <p class="small">Picked for your crew's budget, distance and vibe. Venues can't pay to appear here.</p>
+      ${view.picks.filter((p) => p.url && p.kind === "place").map((p) => `<a class="small" style="color:var(--soc-x)" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)} on Google Maps</a>`).join("")}${lock}`;
     document.getElementById("ticks").innerHTML = "";
   }
 
   function renderDone() {
     const L = view.locked;
     const plan = L
-      ? `<div class="board">${boardHead('<span class="tag ok">Locked</span>')}<div style="padding:0 14px 14px" class="stack"><h1>${esc(L.title)}</h1><p class="muted">${esc([L.when, L.price, L.where].filter(Boolean).join(" · "))}</p>${L.url ? `<a class="small" style="color:var(--soc-x)" href="${esc(L.url)}" target="_blank" rel="noopener">See the listing</a>` : ""}</div></div>`
+      ? `<div class="board">${boardHead('<span class="tag ok">Locked</span>')}<div style="padding:0 14px 14px" class="stack"><h1>${esc(L.title)}</h1><p class="muted">${esc([L.when, L.price, L.where].filter(Boolean).join(" · "))}</p>${L.url ? `<a class="small" style="color:var(--soc-x)" href="${esc(L.url)}" target="_blank" rel="noopener">${L.kind === "place" ? "Open in Google Maps" : "See the listing"}</a>` : ""}${L.attribution ? `<span class="small">Place info from ${esc(L.attribution)}</span>` : ""}</div></div>`
       : `<h1>Call ended</h1><p class="muted">The transcript has been deleted.</p>`;
     const survey = view.surveyed
       ? `<div class="priv" style="border-style:solid;border-color:var(--bs)"><p>Thanks, that helps us improve Sidekick.</p></div>`
@@ -312,12 +316,15 @@
       return;
     }
     const voice = view.me.mode === "voice";
-    dock.innerHTML = `
+    const agentBtn = view.voiceAgent
+      ? `<button class="btn ${agent ? "out" : "pri"}" id="agent" style="height:44px">${agent ? "Sidekick's voice is on · Turn off" : agentStarting ? "Connecting Sidekick's voice…" : "Turn on Sidekick's voice"}</button>`
+      : "";
+    dock.innerHTML = `${agentBtn}
       <form class="compose" id="compose" ${voice && !typing ? "hidden" : ""}><label class="sr" for="line">Message the call</label><input class="in" id="line" autocomplete="off" placeholder="${voice ? "Type instead…" : "Type to the call…"}" maxlength="300"><button class="send" aria-label="Send">${ICON.send}</button></form>
       <div class="ctrls">
-        ${voice ? `<button class="ctrl" id="mic" aria-pressed="${micOn}" aria-label="${micOn ? "Mute" : "Unmute"}">${ICON.mic}</button>` : ""}
+        ${voice && !agent ? `<button class="ctrl" id="mic" aria-pressed="${micOn}" aria-label="${micOn ? "Mute" : "Unmute"}">${ICON.mic}</button>` : ""}
         <button class="ctrl" id="ask" aria-label="Ask Sidekick for picks"><span class="orb"></span></button>
-        ${view.me.planner ? `<button class="ctrl" id="aloud" aria-pressed="${aloud}" aria-label="Read Sidekick aloud">${ICON.speaker}</button>` : ""}
+        ${view.me.planner && !agent ? `<button class="ctrl" id="aloud" aria-pressed="${aloud}" aria-label="Read Sidekick aloud">${ICON.speaker}</button>` : ""}
         ${voice ? `<button class="ctrl" id="kb" aria-label="Type instead"><span style="font:600 13px var(--m)">Aa</span></button>` : ""}
         <button class="ctrl end" id="leave" aria-label="${view.me.planner ? "End the call" : "Leave the call"}">${ICON.x}</button>
       </div>`;
@@ -348,10 +355,12 @@
     }
     if (t.closest("#share")) return void navigator.share({ title: `${view.crew}: help plan our next night`, text: "Sidekick's helping us plan. Hop on or answer in 30 seconds:", url: `${location.origin}/sk/${roomId}` }).catch(() => {});
     if (t.closest("#ask")) return void send("ask", {});
+    if (t.closest("#agent")) return void (agent ? stopAgent() : startAgent());
     if (t.closest("#mic")) return void (micOn ? stopMic() : startMic());
     if (t.closest("#kb")) { typing = !typing; renderDock(); if (typing) document.getElementById("line").focus(); return; }
     if (t.closest("#aloud")) { aloud = !aloud; store.set("sk:aloud", aloud); renderDock(); if (!aloud) speechSynthesis.cancel(); return; }
     if (t.closest("#leave") || t.closest("#endCall")) {
+      if (agent) stopAgent();
       if (view.me.planner) {
         if (confirm("End the call for everyone? The transcript will be deleted.")) send("end", {});
       } else {
@@ -383,6 +392,83 @@
     input.value = "";
     send("line", { text, kind: "typed" });
   });
+
+  // ---------- ElevenLabs voice agent (planner's phone only) ----------
+  // Our server stays the brain. This phone passes the agent: other people's lines as context (no reply),
+  // and the server's cues ("[app] ask this...") as messages it should act on. What the agent says, and
+  // what it hears from this phone's mic, go back to the server so the board and captions stay complete.
+  let agent = null;
+  let agentStarting = false;
+  let agentStart = 0;
+  const relayed = new Set();
+  async function startAgent() {
+    if (agent || agentStarting) return;
+    agentStarting = true;
+    renderDock();
+    try {
+      const s = await api(`/api/sk/rooms/${roomId}/voice-agent`, { p: me.person });
+      stopMic();
+      if ("speechSynthesis" in window) speechSynthesis.cancel();
+      // Mark everything already on screen as passed on, so the agent only gets what happens next
+      view.captions.forEach((c) => relayed.add(`l:${c.id}`));
+      view.sidekick.forEach((x) => relayed.add(`s:${x.id}`));
+      const { Conversation } = await import("https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.38.0/+esm");
+      agent = await Conversation.startSession({
+        signedUrl: s.signedUrl,
+        connectionType: "websocket",
+        dynamicVariables: s.dynamicVariables,
+        onMessage: (m) => {
+          const role = m.source || m.role;
+          const text = String(m.message || m.text || "").trim();
+          if (!text) return;
+          if (role === "ai" || role === "agent") send("agent-said", { text });
+          else if (role === "user") send("line", { text, kind: "spoken" });
+        },
+        onError: () => { toast("Sidekick's voice dropped. Switching back to the built-in voice."); stopAgent(); },
+        onDisconnect: () => { if (agent) stopAgent(); },
+      });
+      agentStart = Date.now();
+      toast("Sidekick's voice is on. Talk normally; it'll speak when it has something useful.");
+      relayToAgent();
+    } catch (err) {
+      agent = null;
+      toast(err.message || "Couldn't start Sidekick's voice. The built-in voice will carry on.");
+      api(`/api/sk/rooms/${roomId}/voice-agent/end`, { p: me.person, seconds: 0 }).catch(() => {});
+    } finally {
+      agentStarting = false;
+      renderDock();
+    }
+  }
+  async function stopAgent() {
+    const a = agent;
+    agent = null;
+    try { if (a) await a.endSession(); } catch {}
+    send("voice-agent/end", { seconds: agentStart ? Math.round((Date.now() - agentStart) / 1000) : 0 });
+    agentStart = 0;
+    if (phase === "call" || phase === "picks") renderDock();
+  }
+  function relayToAgent() {
+    if (!agent || !view) return;
+    try {
+      for (const c of view.captions) {
+        if (relayed.has(`l:${c.id}`)) continue;
+        relayed.add(`l:${c.id}`);
+        if (c.pid !== view.me.id) agent.sendContextualUpdate(`${c.name}${c.kind === "typed" ? " (typed)" : ""}: ${c.text}`);
+      }
+      for (const x of view.sidekick) {
+        if (relayed.has(`s:${x.id}`)) continue;
+        relayed.add(`s:${x.id}`);
+        if (x.system) agent.sendContextualUpdate(x.text); // e.g. "Sam answered by form: Saturday"
+      }
+      for (const q of view.cues || []) {
+        if (relayed.has(`q:${q.id}`)) continue;
+        relayed.add(`q:${q.id}`);
+        agent.sendUserMessage(q.text);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   // ---------- Voice: captions from this phone's mic ----------
   let rec = null;
@@ -499,7 +585,7 @@
     if (!("speechSynthesis" in window)) return;
     // Barge-in: if anyone else starts talking while Sidekick is speaking, stop at once
     if (speechSynthesis.speaking && view.people.some((p) => p.talking && p.id !== view.me.id)) speechSynthesis.cancel();
-    if (!view.me.planner || !aloud) return;
+    if (!view.me.planner || !aloud || agent || agentStarting) return; // the voice agent speaks instead
     const last = view.sidekick.slice(-1)[0];
     if (!last || last.system || last.id === lastRead) return;
     if (lastRead === null && Date.now() - last.at > 15000) { lastRead = last.id; return; } // don't replay old lines after a reload
