@@ -200,7 +200,7 @@ const SAT = days.find((d) => d > FRI && new Date(d + "T12:00:00").getDay() === 6
     T.endRoom(room, "test");
   });
 
-  await test("Voice agent: only the planner can start it, it reserves minutes, and moves become cues", async () => {
+  await test("Voice agent: only the planner can start it, it reserves minutes, and the engine goes quiet while it leads", async () => {
     usage._reset();
     const { room: rid, person: planner } = (await call("POST", "/api/sk/rooms", { crew: "Test", name: "Asia", nights: [FRI, SAT], persona: "friend" })).data;
     const { person: maya } = (await call("POST", `/api/sk/rooms/${rid}/join`, { name: "Maya", mode: "voice" })).data;
@@ -209,13 +209,16 @@ const SAT = days.find((d) => d > FRI && new Date(d + "T12:00:00").getDay() === 6
     assert.strictEqual(start.status, 200, JSON.stringify(start.data));
     assert.match(start.data.signedUrl, /^wss:/);
     assert.strictEqual(start.data.dynamicVariables.room_id, rid);
+    assert(start.data.dynamicVariables.opening, "the agent gets its first line");
     assert(!JSON.stringify(start.data.dynamicVariables).match(/budget|\$/i), "no private answers in the agent's variables");
     assert.strictEqual((await usage.status()).elevenlabs_minutes.used.month, 10);
     const room = T.rooms.get(rid);
+    assert.strictEqual((await call("POST", `/api/sk/rooms/${rid}/voice-agent/live`, { p: planner })).status, 200);
+    assert.strictEqual(room.agentMode, true);
     room.lastSaidAt = 0;
     await T.think(room);
-    const cue = room.cues[room.cues.length - 1];
-    assert(cue && cue.text.startsWith("[app]"), "a cue was queued for the agent");
+    assert.strictEqual(room.mode, "lead", "the agent leads without a spoken check-in");
+    assert(room.card && P.SLOTS[room.card.slot], "the open question's card is up");
     assert(!room.said.some((x) => x.move !== "form" && !x.system && x.move !== "agent"), "Sidekick didn't speak with the built-in voice");
     // The agent's actual words come back as Sidekick's line
     await call("POST", `/api/sk/rooms/${rid}/agent-said`, { p: planner, text: "Hey y'all! Friday or Saturday?" });

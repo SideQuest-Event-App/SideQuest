@@ -19,6 +19,7 @@ const { track } = require("../analytics");
 const rooms = new Map();
 const SUMMARY_FILE = path.join(__dirname, "..", "..", "data", "sidekick-summaries.jsonl");
 const QUIET_MS = 900; // wait this long after the last line before thinking, so Sidekick never cuts in
+const QUIET_ASKED_MS = 400; // shorter when someone just spoke to Sidekick ("Sidekick, ..."): they're waiting on it
 const MIN_GAP_MS = 5000; // at least this long between Sidekick's lines, unless someone asks it something
 const NUDGE_AFTER_MS = 20000;
 const IDLE_MS = 3 * 3600 * 1000;
@@ -62,8 +63,10 @@ function createRoom({ crew, planner, nights, persona }) {
     relax: new Set(), // constraints the crew agreed to loosen when nothing fit
     offer: null,
     places: [], // non-ticketed places from Google, for this call only (never stored)
-    cues: [], // moves sent to the ElevenLabs voice agent on the planner's phone
-    agentMode: false,
+    agentNotes: [], // things the ElevenLabs agent can't hear (joins, taps, picks on screen), passed as context
+    nextMove: null, // the engine's latest move while the agent leads; the agent reads it with get_next_move
+    agentMode: false, // the ElevenLabs agent is Sidekick's voice: the engine stops speaking for itself
+    agent: null,
     mode: null, // null (not asked yet) | "voting" | "lead" | "sidelines"
     modeVotes: {},
     modeHow: null,
@@ -431,14 +434,16 @@ async function speak(room, move, c = {}) {
   const people = P.crew(room);
   const ctx = lineContext(room, f, c);
   if (room.agentMode) {
-    // The voice agent speaks; we send it the move with a suggested line from the line book
+    // The ElevenLabs agent leads and speaks. The engine never speaks for itself: it keeps the move for
+    // the agent's get_next_move tool, and passes on only what the agent can't know (picks on screen, a lock).
     const key = move === "welcome" ? "hello" : move === "ask" ? `ask_${c.slot}` : move === "conflict" ? "clash" : move === "none" ? "loosen" : move;
     const suggestion = personas.fallbackLine(room.persona, key, ctx, room.said.filter((x) => !x.system).slice(-3).map((x) => x.text));
-    room.cues.push({ id: id(4), text: cueFor(room, move, c, suggestion), move, at: now() });
-    if (room.cues.length > 20) room.cues.shift();
-    room.lastSaidAt = now();
+    room.nextMove = { move, slot: c.slot || null, todo: moveText(room, move, c), example: suggestion, at: now() };
+    if (move === "picks") agentNote(room, `[app] Two picks are on everyone's screens now. ${moveText(room, move, c)} Present them at the next natural pause.`);
+    if (move === "locked") agentNote(room, `[app] The planner locked the plan: ${c.pick}. Confirm it warmly in one short sentence.`);
+    if (move === "wrap") agentNote(room, "[app] Two quick survey questions are on everyone's screen now. Mention them once, briefly.");
     track("sk_said", { sessionId: room.id, persona: room.persona, move, ai: false, agent: true });
-    return { id: id(4), text: suggestion, move, at: now() };
+    return { id: id(4), text: suggestion, move, at: now(), agent: true };
   }
   let text = null;
   let usedAI = false;
@@ -535,11 +540,44 @@ function ideasFor(room, f, slot, events) {
 }
 
 // ---------- ElevenLabs voice agent (optional) ----------
-// The planner's phone can run an ElevenLabs agent as Sidekick's voice. Our engine stays the brain:
-// each move becomes a cue the phone passes to the agent, which says it in the persona's voice.
+// The planner's phone can run an ElevenLabs agent as Sidekick's voice. The agent leads the talk turn by
+// turn, and uses client tools (run in the planner's browser, see agentTool below) to read the engine's
+// next move and record what it heard. The engine stays the source of truth for facts, privacy and picks.
 const AGENTS = () => ({ friend: process.env.ELEVENLABS_AGENT_FRIEND, concierge: process.env.ELEVENLABS_AGENT_CONCIERGE });
 const agentIdFor = (room) => (process.env.ELEVENLABS_API_KEY && process.env.SIDEKICK_ELEVENLABS_OFF !== "1" ? AGENTS()[room.persona] || null : null);
 const AGENT_MAX_MIN = () => Number(process.env.ELEVENLABS_MAX_CALL_MINUTES || 10);
+const AGENT_CONNECTION = () => (process.env.ELEVENLABS_CONNECTION === "websocket" ? "websocket" : "webrtc");
+// Is the ElevenLabs voice set up and under its minute cap? (Checks only; a call reserves when it starts.)
+async function agentReady() {
+  if (!process.env.ELEVENLABS_API_KEY || process.env.SIDEKICK_ELEVENLABS_OFF === "1") return false;
+  if (!process.env.ELEVENLABS_AGENT_FRIEND && !process.env.ELEVENLABS_AGENT_CONCIERGE) return false;
+  return usage.available("elevenlabs_minutes", AGENT_MAX_MIN());
+}
+async function endAgent(room, seconds) {
+  if (room.agent) {
+    const usedMin = Math.min(room.agent.reserved, Math.ceil(Math.max(0, Number(seconds) || 0) / 60));
+    await usage.release("elevenlabs_minutes", room.agent.reserved - usedMin);
+    track("sk_voice_agent", { sessionId: room.id, persona: room.persona, on: false, minutes: usedMin });
+  }
+  room.agentMode = false;
+  room.agent = null;
+  room.nextMove = null;
+  room.agentNotes = [];
+}
+// The agent's first words (its first message, so it speaks the moment it connects, with no AI wait)
+function openingSlot(room) {
+  if (room.status !== "live" || room.picks || room.mode === "sidelines") return null;
+  if (room.card && P.SLOTS[room.card.slot]) return room.card.slot;
+  const events = [...upcoming(), ...(room.places || [])];
+  const f = factsOf(room);
+  return P.nextQuestion(events, room, f) || (f.budget.answered < P.need(room) ? "budget" : null);
+}
+function openingLine(room, person, slot) {
+  const ctx = { ...lineContext(room, factsOf(room), { slot }), name: person.name };
+  const back = room.said.some((x) => !x.system);
+  const key = room.status !== "live" || room.picks ? "agent_back_done" : back ? "agent_back" : P.crew(room).length < 2 ? "agent_solo" : "agent_hello";
+  return personas.fallbackLine(room.persona, key, ctx);
+}
 const MOVE_HINT = {
   welcome: "Welcome the crew, then ask the first question",
   checkin: "Welcome everyone to SideQuest and ask: should you lead the planning, or sit back while they fill in the plan on their screens?",
@@ -559,7 +597,7 @@ const MOVE_HINT = {
   locked: "Confirm the locked plan warmly",
   wrap: "Point everyone to the two quick survey questions on their screen",
 };
-function cueFor(room, move, c, suggestion) {
+function moveText(room, move, c) {
   const opts = c.slot && c.slot !== "budget" ? P.optionsFor(c.slot, room).map(([, l]) => l).join(", ") : "";
   const detail = ["mode_lead", "mode_default", "switch_lead"].includes(move) && c.slot ? `Question: ${QUESTION_SPOKEN[c.slot]}`
     : move === "ask" || move === "welcome" ? `${PROMPTS[c.slot] || ""}${opts ? ` Options on screen: ${opts}.` : ""}${c.slot === "budget" ? " Everyone answers privately on their own screen." : ""}`
@@ -570,7 +608,14 @@ function cueFor(room, move, c, suggestion) {
     : move === "none" && c.relax ? `${c.relax} would open up ${c.n} options.`
     : move === "answer" ? `${c.person} asked: "${redact(c.question || "")}"`
     : move === "locked" ? `Plan: ${c.pick}.` : "";
-  return `[app] ${MOVE_HINT[move] || "Say this"}. ${detail} Say it your way, in one breath, for example: "${suggestion}"`.replace(/\s+/g, " ").trim();
+  return `${MOVE_HINT[move] || "Say this"}. ${detail}`.replace(/\s+/g, " ").trim();
+}
+// A note for the agent about something it can't hear: someone joined, a tap on a card, picks on screen.
+// The planner's phone passes these on as contextual updates (they never make the agent reply by themselves).
+function agentNote(room, text) {
+  if (!room.agentMode) return;
+  room.agentNotes.push({ id: id(4), text, at: now() });
+  if (room.agentNotes.length > 30) room.agentNotes.shift();
 }
 
 // ---------- The loop: listen, update, decide ----------
@@ -634,6 +679,15 @@ async function ensurePlaces(room, f) {
 
 async function decide(room, { forcePicks = false } = {}) {
   if (room.status !== "live" || room.picks) return;
+  // The agent leads: no spoken check-in vote (people can still say "step back" or tap "sits back")
+  if (room.agentMode && (!room.mode || room.mode === "voting")) {
+    clearTimeout(room.modeTimer);
+    room.mode = "lead";
+    room.modeHow = "agent";
+    room.modeSetAt = now();
+    if (room.card && room.card.slot === "mode") room.card = null;
+    track("sk_mode", { sessionId: room.id, persona: room.persona, mode: "lead", how: "agent", votes: Object.keys(room.modeVotes).length });
+  }
   if (!room.mode) {
     if (room.people.length >= 2) return startCheckIn(room); // wait for a second person before saying hello
     return;
@@ -648,7 +702,8 @@ async function decide(room, { forcePicks = false } = {}) {
   const events = [...upcoming(), ...(room.places || [])];
   const f = factsOf(room);
   const r = P.readiness(events, room, f);
-  const canSpeak = () => !room.lastSaidAt || now() - room.lastSaidAt > MIN_GAP_MS;
+  // The agent paces itself; the built-in voice keeps a gap between lines (a direct question skips it, above)
+  const canSpeak = () => room.agentMode || !room.lastSaidAt || now() - room.lastSaidAt > MIN_GAP_MS;
 
   if (forcePicks && room.offer) { acceptOffer(room); return decide(room, { forcePicks }); }
   if (room.addressed) {
@@ -657,6 +712,7 @@ async function decide(room, { forcePicks = false } = {}) {
     if (forcePicks || /pick|suggest|recommend|what do you think|ideas?/i.test(q.text)) {
       if (r.pool >= 2 && (room.nights.length === 1 || f.night.known)) return makePicks(room, r.list);
     }
+    if (room.agentMode) return; // the agent heard the question and answers it itself
     await speak(room, "answer", { person: q.name, question: q.text, events: r.list });
     return;
   }
@@ -725,7 +781,18 @@ async function decide(room, { forcePicks = false } = {}) {
 function nudgeTick() {
   for (const room of rooms.values()) {
     if (now() - room.touched > IDLE_MS) { endRoom(room, "idle"); continue; }
-    if (room.status !== "live" || room.picks || !room.card || room.thinking) continue;
+    // The planner's phone went away without saying the agent stopped (a crash, a killed tab): after 45 s
+    // with no live stream from it, give the call back to the built-in voice and return the unused minutes
+    if (room.agent) {
+      const planner = room.people.find((p) => p.role === "planner");
+      if (planner && room.streams.has(planner.id)) room.agent.lostAt = 0;
+      else if (!room.agent.lostAt) room.agent.lostAt = now();
+      else if (now() - room.agent.lostAt > 45000) {
+        endAgent(room, (now() - room.agent.startedAt) / 1000).then(() => { if (room.card && P.SLOTS[room.card.slot]) room.card = null; broadcast(room); schedule(room, 300); });
+        continue;
+      }
+    }
+    if (room.status !== "live" || room.picks || !room.card || room.thinking || room.agentMode) continue; // the agent does its own nudging
     if (room.mode === "sidelines") {
       const last = Math.max(room.modeSetAt || 0, ...room.lines.map((l) => l.at), ...Object.values(room.answers).flatMap((a) => Object.values(a).map((x) => x.at || 0)));
       if (!room.stalledAsked && now() - last > 60000) { room.stalledAsked = true; speak(room, "mode_stalled", {}).then(() => broadcast(room)); }
@@ -926,14 +993,14 @@ function viewFor(room, pid) {
     status: room.status,
     nights: room.nights.map((d) => P.nightLabel(d)),
     me: me && { id: me.id, name: me.name, mode: me.mode, planner: me.role === "planner", answers: ownAnswers(room.answers[me.id]), sharedLocation: Boolean((room.answers[me.id] || {}).location) },
-    people: P.crew(room).map((p) => ({ id: p.id, name: p.name, initial: initial(p.name), mode: p.mode, talking: now() - p.lastSpokeAt < 3000, planner: p.role === "planner", online: room.streams.has(p.id), audio: Boolean(p.audio), muted: Boolean(p.muted) })),
+    people: P.crew(room).map((p) => ({ id: p.id, name: p.name, initial: initial(p.name), mode: p.mode, talking: now() - p.lastSpokeAt < 3000, spokeAt: p.lastSpokeAt || 0, planner: p.role === "planner", online: room.streams.has(p.id), audio: Boolean(p.audio), muted: Boolean(p.muted) })),
     audioRoom: room.people.some((p) => p.audio),
     boot: BOOT,
     rows: r,
     known: r.filter((x) => x.state === "done").length,
     card: me ? cardFor(room, me) : null,
     captions: room.lines.slice(-5).map((l) => ({ id: l.id, pid: l.pid, name: l.name, text: l.text, kind: l.kind })),
-    cues: me && me.role === "planner" && room.agentMode ? room.cues.slice(-6) : [],
+    agentNotes: me && me.role === "planner" && room.agentMode ? room.agentNotes.slice(-8) : [],
     voiceAgent: Boolean(me && me.role === "planner" && agentIdFor(room)),
     agentOn: room.agentMode,
     mode: room.mode,
@@ -989,7 +1056,7 @@ function preview(roomId) {
 async function handle(req, res, url, { readBody, sendJSON }) {
   const parts = url.pathname.split("/").filter(Boolean); // api, sk, rooms, :id, action
   try {
-    if (req.method === "GET" && parts[2] === "nights") return sendJSON(res, 200, { nights: suggestNights(), ai: claude.available(), places: places.configured() && (await places.available()) });
+    if (req.method === "GET" && parts[2] === "nights") return sendJSON(res, 200, { nights: suggestNights(), ai: claude.available(), places: places.configured() && (await places.available()), voiceAgent: await agentReady() });
     if (parts[2] === "agent") return agentTool(req, res, parts[3], { readBody, sendJSON });
     if (req.method === "POST" && parts[2] === "rooms" && !parts[3]) {
       const body = await readBody(req);
@@ -1033,7 +1100,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
         // Only the public parts are mentioned in the call
         const pub = ["night", "time", "vibe"].filter((s) => room.answers[person.id][s]).map((s) => [].concat(room.answers[person.id][s].value).map((v) => P.labelOf(s, v, room)).join(" or "));
         room.said.push({ id: id(4), text: `${person.name} answered by form${pub.length ? `: ${pub.join(" · ")}` : ""}.`, move: "form", at: now(), system: true });
-      }
+      } else agentNote(room, `[app] ${person.name} just joined the call (${person.mode === "text" ? "typing" : "voice"}). Say a quick hi when there's a gap.`);
       broadcast(room);
       schedule(room, 300);
       return sendJSON(res, 200, { person: person.id });
@@ -1047,12 +1114,22 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     }
     if (action === "mode") {
       if (room.mode === "voting") voteMode(room, person, body.value, "tap");
-      else if (["lead", "sidelines"].includes(body.value) && body.value !== room.mode && room.mode) { room.wantMode = body.value; schedule(room, 50); }
+      else if (["lead", "sidelines"].includes(body.value) && body.value !== room.mode && room.mode) {
+        room.wantMode = body.value;
+        agentNote(room, body.value === "sidelines" ? `[app] ${person.name} tapped "Sidekick sits back". Say you'll stay quiet in a few words, then skip_turn until someone says "Sidekick".` : `[app] ${person.name} tapped "Sidekick leads". Pick the planning back up (get_next_move).`);
+        schedule(room, 50);
+      }
       broadcast(room);
       return sendJSON(res, 200, { ok: true });
     }
     if (action === "answer") {
       const ok = setAnswer(room, person, body.slot, body.value, body.source || "call_card");
+      if (ok && room.agentMode && P.SLOTS[body.slot]) {
+        // Taps the agent can't hear. A private answer is reported without its value.
+        const a = room.answers[person.id][body.slot];
+        const shown = P.SLOTS[body.slot].private ? "answered the private question on their screen" : `tapped ${P.SLOTS[body.slot].label.toLowerCase()}: ${body.slot === "origin" && a.here ? "their own location" : [].concat(a.value).map((v) => P.labelOf(body.slot, v, room)).join(" or ") || "none"}`;
+        agentNote(room, `[app] ${person.name} ${body.slot === "budget" ? "added their budget privately" : shown}.`);
+      }
       broadcast(room);
       schedule(room, 400);
       return sendJSON(res, ok ? 200 : 400, ok ? { ok } : { error: "That answer isn't one of the options." });
@@ -1061,7 +1138,9 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       const out = addLine(room, person, body.text, body.kind);
       if (out && out.dropped) return sendJSON(res, 200, { ok: true, dropped: out.dropped });
       broadcast(room);
-      schedule(room);
+      // Someone spoke to Sidekick: answer after a short pause instead of the usual one. Anyone who keeps
+      // talking pushes it back again (each line restarts the wait), so Sidekick still never cuts in.
+      schedule(room, room.addressed === out ? QUIET_ASKED_MS : QUIET_MS);
       return sendJSON(res, 200, { ok: true });
     }
     if (action === "audio") {
@@ -1095,45 +1174,69 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     if (action === "voice-agent" && !parts[5]) {
       if (person.role !== "planner") return sendJSON(res, 403, { error: "Only the planner's phone runs Sidekick's voice." });
       const agentId = agentIdFor(room);
-      if (!agentId) return sendJSON(res, 400, { error: "Sidekick's voice agent isn't set up yet." });
+      if (!agentId) return sendJSON(res, 400, { error: "Sidekick's voice agent isn't set up yet.", fallback: true });
       const minutes = AGENT_MAX_MIN();
       const ok = await usage.reserve("elevenlabs_minutes", minutes);
-      if (!ok.ok) return sendJSON(res, 429, { error: "Sidekick's voice has hit its usage limit for now. The built-in voice will carry on." });
+      if (!ok.ok) return sendJSON(res, 429, { error: "Sidekick's voice has hit its usage limit for now. The built-in voice will carry on.", fallback: true, capped: true });
       try {
-        const r = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`, { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY } });
-        if (!r.ok) throw new Error(`ElevenLabs refused the session (${r.status})`);
-        const { signed_url: signedUrl } = await r.json();
-        room.agentMode = true;
-        room.agent = { startedAt: now(), reserved: minutes };
-        room.cues = [{ id: id(4), text: room.said.length ? "[app] You've just joined this call as Sidekick. Say a short hi. The app will tell you what to ask next." : "[app] You've just joined. Stay quiet for now; the app will cue your welcome.", move: "join", at: now() }];
+        // Both ways in, fetched at once: a WebRTC token (what ElevenLabs' own page uses) and a websocket URL
+        const q = `agent_id=${encodeURIComponent(agentId)}`;
+        const get = (p) => fetch(`https://api.elevenlabs.io/v1/convai/conversation/${p}?${q}`, { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY } }).then(async (r) => (r.ok ? r.json() : Promise.reject(new Error(`ElevenLabs refused the session (${r.status})`))));
+        const [tok, url] = await Promise.allSettled([AGENT_CONNECTION() === "websocket" ? Promise.reject(new Error("off")) : get("token"), get("get-signed-url")]);
+        if (tok.status !== "fulfilled" && url.status !== "fulfilled") throw url.reason;
+        room.agent = { startedAt: now(), reserved: minutes, live: false };
+        const slot = openingSlot(room);
         track("sk_voice_agent", { sessionId: room.id, persona: room.persona, on: true });
         const nights = room.nights.map((d) => spokenDay(P.nightLabel(d)));
-        broadcast(room);
-        schedule(room, 500);
         return sendJSON(res, 200, {
-          signedUrl,
+          conversationToken: tok.status === "fulfilled" ? tok.value.token : null,
+          signedUrl: url.status === "fulfilled" ? url.value.signed_url : null,
           maxMinutes: minutes,
-          dynamicVariables: { room_id: room.id, crew_name: room.crew, planner_name: person.name, people: P.crew(room).map((p) => `${p.name} (${p.mode})`).join(", "), nights_spoken: nights.length > 1 ? `${nights.slice(0, -1).join(", ")} or ${nights[nights.length - 1]}` : nights[0] },
+          dynamicVariables: { room_id: room.id, crew_name: room.crew, planner_name: person.name, people: P.crew(room).map((p) => `${p.name} (${p.mode})`).join(", "), nights_spoken: nights.length > 1 ? `${nights.slice(0, -1).join(", ")} or ${nights[nights.length - 1]}` : nights[0], opening: openingLine(room, person, slot) },
         });
       } catch (err) {
         await usage.release("elevenlabs_minutes", minutes);
+        room.agent = null;
         const why = /fetch failed|abort|ENOTFOUND|ECONN/i.test(err.message) ? "Couldn't reach ElevenLabs" : err.message;
-        return sendJSON(res, 502, { error: `${why}. The built-in voice will carry on.` });
+        return sendJSON(res, 502, { error: `${why}. The built-in voice will carry on.`, fallback: true });
       }
     }
-    if (action === "voice-agent" && parts[5] === "end") {
-      if (room.agent) {
-        const usedMin = Math.min(room.agent.reserved, Math.ceil(Math.max(0, Number(body.seconds) || 0) / 60));
-        await usage.release("elevenlabs_minutes", room.agent.reserved - usedMin);
-        track("sk_voice_agent", { sessionId: room.id, persona: room.persona, on: false, minutes: usedMin });
+    // The session connected on the phone: from now on the agent leads and the engine stays quiet
+    if (action === "voice-agent" && parts[5] === "live") {
+      if (person.role !== "planner" || !room.agent) return sendJSON(res, 409, { error: "Sidekick's voice isn't starting." });
+      room.agent.live = true;
+      room.agentMode = true;
+      room.agentNotes = [];
+      room.nextMove = null;
+      // The opening line already asks this question: put its card up so taps and the board follow along
+      const slot = openingSlot(room);
+      if (slot && room.status === "live" && !room.picks && room.mode !== "sidelines" && (!room.card || room.card.slot === "mode")) {
+        room.card = { slot, at: now() };
+        room.asked.push(slot);
       }
-      room.agentMode = false;
-      room.agent = null;
+      await decide(room);
       broadcast(room);
       return sendJSON(res, 200, { ok: true });
     }
+    if (action === "voice-agent" && parts[5] === "end") {
+      const wasLive = room.agentMode;
+      // A page that lost track of its session (a reload) sends 0: count the time since it went live instead
+      await endAgent(room, Number(body.seconds) > 0 || !wasLive ? body.seconds : (now() - room.agent.startedAt) / 1000);
+      // Back to the built-in voice: let it say the open question out loud, since only the agent heard it
+      if (wasLive && room.status === "live" && !room.picks && room.card && P.SLOTS[room.card.slot]) room.card = null;
+      broadcast(room);
+      schedule(room, 300);
+      return sendJSON(res, 200, { ok: true });
+    }
+    // Client tools: the agent on the planner's phone calls these through the planner's browser
+    if (action === "agent-tool") {
+      if (person.role !== "planner") return sendJSON(res, 403, { error: "Only the planner's phone runs Sidekick's voice." });
+      if (!room.agent) return sendJSON(res, 409, { error: "Sidekick's voice is off." });
+      const out = await runTool(room, parts[5], body);
+      return sendJSON(res, out.status, out.body);
+    }
     if (action === "agent-said") {
-      if (person.role !== "planner" || !room.agentMode) return sendJSON(res, 403, { error: "Not allowed." });
+      if (person.role !== "planner" || !room.agent) return sendJSON(res, 403, { error: "Not allowed." });
       const text = String(body.text || "").trim().slice(0, 400);
       if (text) {
         room.said.push({ id: id(4), text, move: "agent", at: now() });
@@ -1191,8 +1294,12 @@ async function handle(req, res, url, { readBody, sendJSON }) {
   }
 }
 
-// POST /api/sk/agent/<tool>, header X-Sidekick-Secret. Returns public data only: never anyone's
-// private answers, and no tool can vote, lock, book or pay.
+// The agent's tools. Two ways in, same tools:
+//  - client tools (the default): the agent calls them in the planner's browser, which POSTs to
+//    /api/sk/rooms/:id/agent-tool/<tool> as the planner. No public URL or shared secret needed.
+//  - server tools (optional): POST /api/sk/agent/<tool> with header X-Sidekick-Secret and room_id.
+// Every tool returns public data only: never anyone's private answers (budget, places they'd rather
+// avoid, a shared location) and no tool can vote, lock, book or pay.
 async function agentTool(req, res, tool, { readBody, sendJSON }) {
   const secret = process.env.SIDEKICK_TOOL_SECRET;
   if (!secret || req.headers["x-sidekick-secret"] !== secret) return sendJSON(res, 401, { error: "Missing or wrong X-Sidekick-Secret." });
@@ -1201,50 +1308,116 @@ async function agentTool(req, res, tool, { readBody, sendJSON }) {
   const room = rooms.get(String(body.room_id || ""));
   if (!room) return sendJSON(res, 404, { error: "No live call with that room_id." });
   room.touched = now();
-  const state = () => {
-    const f = factsOf(room);
-    return {
-      people: P.crew(room).map((p) => ({ name: p.name, joined: p.mode })),
-      board: rows(room, f).map((r) => ({ fact: r.label, value: r.value, said_by: P.SLOTS[r.slot].private ? undefined : r.who, state: r.state })),
-      open_question: room.card && P.SLOTS[room.card.slot] ? { slot: room.card.slot, question: PROMPTS[room.card.slot], private: P.SLOTS[room.card.slot].private, options: P.SLOTS[room.card.slot].private ? undefined : P.optionsFor(room.card.slot, room).map(([, l]) => l) } : null,
-      picks: room.picks ? room.picks.map((x) => ({ title: x.title, when: x.when, price: x.price, where: x.where, reason: x.reason })) : null,
-      locked: room.locked ? room.locked.title : null,
-    };
+  const out = await runTool(room, tool === "send_private_card" ? "show_private_card" : tool, body);
+  return sendJSON(res, out.status, out.body);
+}
+
+const PUBLIC_SLOTS = ["night", "time", "origin", "vibe", "kind"];
+// What the board says, for the agent. Budget is only the group label the crew can see anyway.
+function planState(room) {
+  const f = factsOf(room);
+  const open = room.card && P.SLOTS[room.card.slot] ? room.card.slot : null;
+  const got = open ? P.answersFor(room, open).map((x) => x.person.id) : [];
+  return {
+    people: P.crew(room).map((p) => ({ name: p.name, joined: p.mode, planner: p.role === "planner" || undefined })),
+    board: rows(room, f).map((r) => ({ fact: r.label, value: r.value, said_by: P.SLOTS[r.slot].private ? undefined : r.who || undefined, state: r.state })),
+    open_question: open ? {
+      slot: open,
+      question: PROMPTS[open],
+      private: P.SLOTS[open].private,
+      options: P.SLOTS[open].private ? undefined : P.optionsFor(open, room).map(([, l]) => l),
+      // Who hasn't answered, for a public question only (who's done with their budget stays private)
+      waiting_on: P.SLOTS[open].private ? undefined : P.crew(room).filter((p) => p.mode !== "form" && !got.includes(p.id)).map((p) => p.name),
+    } : null,
+    answer_options: Object.fromEntries(PUBLIC_SLOTS.filter((s) => s !== "kind" || (room.places && room.places.length)).map((s) => [s, P.optionsFor(s, room).map(([, l]) => l)])),
+    mode: room.mode === "sidelines" ? "sitting back (stay quiet unless someone says Sidekick)" : "leading",
+    picks: room.picks ? room.picks.map((x) => ({ title: x.title, kind: x.kind, when: x.when, price: x.price, where: x.where, reason: x.reason || undefined })) : null,
+    locked: room.locked ? room.locked.title : null,
   };
-  if (tool === "get_plan_state") return sendJSON(res, 200, state());
-  if (tool === "get_next_move") {
-    const cue = room.cues[room.cues.length - 1];
-    return sendJSON(res, 200, { ...state(), next_move: cue ? cue.move : "wait", say: cue ? cue.text : "Nothing needed right now. Stay quiet (skip_turn)." });
+}
+
+// The move the agent should make now, from the engine (run after any lines it hasn't read yet)
+async function nextMove(room) {
+  clearTimeout(room.timer);
+  for (let i = 0; room.thinking && i < 60; i++) await new Promise((r) => setTimeout(r, 50));
+  if (room.pending.length) await think(room);
+  else { await decide(room); broadcast(room); }
+  const st = planState(room);
+  const fresh = room.nextMove && !room.nextMove.read ? room.nextMove : null;
+  if (fresh) fresh.read = true;
+  let move;
+  if (room.locked) move = { next_move: "locked", what_to_do: `The plan is locked: ${cleanTitle(room.locked.title)}. If you haven't yet, confirm it in one sentence and point to the two quick survey questions on screen. Otherwise stay quiet (skip_turn).` };
+  else if (room.picks) move = { next_move: "present_picks", what_to_do: fresh && fresh.move === "picks" ? fresh.todo : "The two picks are on everyone's screens. If you haven't presented them, do it now with one reason each and ask everyone to vote in the app. Otherwise answer questions about them, using only the pick details.", example_line: fresh && fresh.move === "picks" ? fresh.example : undefined };
+  else if (room.mode === "sidelines") move = { next_move: "stay_quiet", what_to_do: "The crew asked you to sit back. Stay quiet (skip_turn) unless someone says Sidekick." };
+  else if (fresh && fresh.move !== "ask" && fresh.move !== "welcome") move = { next_move: fresh.move, what_to_do: fresh.todo, example_line: fresh.example };
+  else if (st.open_question) {
+    const q = st.open_question;
+    move = q.private
+      ? { next_move: "private_card", what_to_do: "The budget card is on everyone's screen. Ask them to tap their max there; it stays private. Never ask for amounts out loud, and never say who has or hasn't answered it." }
+      : { next_move: "ask", what_to_do: `Ask: ${QUESTION_SPOKEN[q.slot] || q.question}${q.options ? ` Options: ${q.options.join(", ")}.` : ""}${q.waiting_on.length ? ` Still waiting on: ${q.waiting_on.join(", ")}.` : " Everyone has answered; recap it in a few words."}`, example_line: fresh ? fresh.example : undefined };
+  } else move = { next_move: "wait", what_to_do: "Nothing needed from the app right now. Chat briefly if someone's talking to you, or stay quiet (skip_turn)." };
+  return { ...move, ...st };
+}
+
+// "Saturday", "sat", "Sat, Nov 28", "after 8", "union": the agent may give labels, weekdays or values
+function toValue(room, slot, v) {
+  const t = String(v || "").trim().toLowerCase();
+  if (!t) return null;
+  if (slot === "origin" && /^(here|my location|home)$/.test(t)) return "here";
+  for (const [value, label] of P.optionsFor(slot, room)) {
+    if (t === String(value).toLowerCase() || t === String(label).toLowerCase()) return value;
+    if (slot === "night") {
+      const wd = new Date(value + "T12:00:00").toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+      if (t === wd || t === wd.slice(0, 3) || t.startsWith(wd)) return value;
+    }
   }
+  return null;
+}
+
+async function runTool(room, tool, body) {
+  const ok = (b) => ({ status: 200, body: b });
+  if (tool === "get_plan_state") return ok(planState(room));
+  if (tool === "get_next_move") return ok(await nextMove(room));
   if (tool === "record_facts") {
-    const lines = [{ pid: null, at: now(), kind: "spoken" }];
-    applyUpdates(room, { updates: Array.isArray(body.updates) ? body.updates : [] }, lines);
-    broadcast(room);
-    schedule(room, 300);
-    return sendJSON(res, 200, state());
+    // Public facts only: budget and dealbreakers are answered privately on screens, never by the agent
+    const updates = [];
+    const skipped = [];
+    for (const u of Array.isArray(body.updates) ? body.updates.slice(0, 20) : []) {
+      if (!PUBLIC_SLOTS.includes(u && u.slot)) { skipped.push(`${(u && u.slot) || "?"}: not something you record (private or unknown)`); continue; }
+      const person = P.crew(room).find((p) => p.name.toLowerCase() === String(u.person || "").trim().toLowerCase());
+      if (!person) { skipped.push(`${u.person || "?"}: not on this call`); continue; }
+      const values = [].concat(u.values == null ? u.value : u.values).map((v) => toValue(room, u.slot, v)).filter((v) => v != null);
+      if (!values.length) { skipped.push(`${u.person} ${u.slot}: none of those are options`); continue; }
+      updates.push({ person: person.name, slot: u.slot, values, confidence: 1 });
+    }
+    applyUpdates(room, { updates }, [{ pid: null, at: now(), kind: "spoken" }]);
+    const move = await nextMove(room); // the next move comes back with it, so the agent needs one call, not two
+    return ok({ recorded: updates.length, skipped: skipped.length ? skipped : undefined, ...move });
   }
   if (tool === "get_picks") {
-    if (!room.picks) await decide(room, { forcePicks: true });
+    if (!room.picks && room.status === "live") await decide(room, { forcePicks: true });
     broadcast(room);
-    return sendJSON(res, 200, room.picks ? state() : { ...state(), note: "Not enough to suggest picks yet." });
+    return ok(room.picks ? planState(room) : { ...planState(room), note: "Not enough to suggest picks yet. Ask the open question first." });
   }
-  if (tool === "send_private_card") {
-    if (body.slot !== "budget") return sendJSON(res, 400, { error: "Only the budget card can be sent." });
+  if (tool === "show_private_card") {
+    if ((body.slot || "budget") !== "budget") return { status: 400, body: { error: "Only the budget card can be shown." } };
+    if (room.picks || room.status !== "live") return ok({ shown: false, note: "Too late for that: the picks are out." });
     room.card = { slot: "budget", at: now() };
+    if (!room.asked.includes("budget")) room.asked.push("budget");
     broadcast(room);
-    return sendJSON(res, 200, { sent: true });
+    return ok({ shown: true, note: "The budget card is on everyone's screen. Tell them it stays private." });
   }
   if (tool === "accept_relax") {
-    const ok = acceptOffer(room);
-    if (ok) await decide(room);
+    const done = acceptOffer(room);
+    if (done) await decide(room);
     broadcast(room);
-    return sendJSON(res, 200, { loosened: ok, ...state() });
+    return ok({ loosened: done, ...planState(room) });
   }
-  return sendJSON(res, 404, { error: `Unknown tool: ${tool}` });
+  return { status: 404, body: { error: `Unknown tool: ${tool}` } };
 }
 
 function init({ events }) {
   eventsSource = events;
 }
 
-module.exports = { init, handle, preview, BOOT, _test: { rooms, createRoom, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode } };
+module.exports = { init, handle, preview, BOOT, _test: { rooms, createRoom, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, QUIET_MS, QUIET_ASKED_MS } };

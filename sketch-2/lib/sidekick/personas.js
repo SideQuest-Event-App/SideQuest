@@ -96,6 +96,11 @@ const LINES = {
     answer: ["Almost there. Tell me {missing} and I'll pull two picks.", "Give me one more answer and I've got you."],
     locked: ["Locked in. {pick}, {night}. That's a good one.", "Done. {night} is sorted, nobody has to chase anyone."],
     wrap: ["Last thing: two quick taps on your screen about how I did. Keeps me honest.", "Before you go, rate me on your screen. Be brutal."],
+    // The ElevenLabs agent's first words, said the moment it connects
+    agent_hello: ["Hey y'all, Sidekick here. Let's sort this out. First up, {question}", "Hey hey, Sidekick's on. So, {question}"],
+    agent_solo: ["Hey {name}, Sidekick here. Send the link to the crew. While they hop on, {question}", "Hey {name}! I'm on. Share the invite, and in the meantime, {question}"],
+    agent_back: ["Okay, I'm back. Picking up where we left off: {question}", "Alright, I'm here. So, {question}"],
+    agent_back_done: ["Hey, I'm back. Your picks are on screen. Want me to run through them?"],
   },
   concierge: {
     checkin: ["Hi everyone, welcome to SideQuest. This call is for planning your next night out. Would you like me to lead the planning, or stay in the background while you fill in the plan?", "Welcome to SideQuest, everyone. Shall I guide the planning, or would you prefer to fill in the plan yourselves while I stay in the background?"],
@@ -120,6 +125,10 @@ const LINES = {
     answer: ["I don't have quite enough yet. Once I know {missing}, I'll suggest two options.", "Nearly there. One more answer and I'll share what fits."],
     locked: ["Wonderful. {pick} on {night} is locked in.", "That's settled. {pick}, {night}."],
     wrap: ["Before you go, there are two short questions on your screen. They help me improve.", "Thank you, everyone. If you have a moment, two quick questions are on your screen."],
+    agent_hello: ["Hi everyone, I'm Sidekick. I'll keep track, so you can just talk. To start, {question}", "Good evening, {crew}. I'm Sidekick. Let's begin: {question}"],
+    agent_solo: ["Hello {name}, I'm Sidekick. Share the link with your crew, and while they join, {question}", "Hi {name}. I'm here whenever your crew joins. To get us started, {question}"],
+    agent_back: ["I'm back with you. Let's continue. {question}", "Here again. Where were we: {question}"],
+    agent_back_done: ["I'm back. Your two options are on screen. Would you like me to go through them?"],
   },
 };
 // Old persona ids still resolve (rooms made before the rename, saved links with ?persona=)

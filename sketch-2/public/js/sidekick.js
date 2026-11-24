@@ -169,7 +169,10 @@
   // ---------- 1. Start a call ----------
   async function startScreen() {
     let nights = [];
-    try { ({ nights } = await api("/api/sk/nights")); } catch (err) { toast(err.message); }
+    let voiceAgent = false; // ElevenLabs is set up and under its minute cap
+    try { ({ nights, voiceAgent } = await api("/api/sk/nights")); } catch (err) { toast(err.message); }
+    const autoAgent = Boolean(voiceAgent) && !STUDY && agentPref;
+    if (autoAgent) loadEL().catch(() => {}); // fetch the SDK now, so the Start tap doesn't wait for it
     const weekend = nights.filter((n) => n.events > 0 && /^(Fri|Sat)/.test(n.label));
     const defaults = (weekend.length ? weekend : nights.filter((n) => n.events > 0)).slice(0, 2).map((n) => n.date);
     app.innerHTML = `
@@ -191,6 +194,7 @@
       if (!name) return toast("Add your name so your crew knows who's planning.");
       if (!chosen.length) return toast("Pick at least one night.");
       unlockAudio();
+      if (autoAgent) primeAgentAudio(); // the microphone prompt comes from this tap
       const origin = await originAnswer(e.target);
       if (!origin) return; // no location: Union is now selected, with a note; the next tap starts
       e.target.disabled = true;
@@ -206,6 +210,8 @@
         // Stay on this page (no reload), so the tap that unlocked audio on iPhones still counts
         history.pushState(null, "", `/sk/${roomId}${STUDY ? `?study=${encodeURIComponent(STUDY)}&v=${out.n || 1}` : ""}`);
         connect();
+        // Sidekick's natural voice starts on this same tap: no second button to find
+        if (autoAgent) startAgent({ auto: true });
       } catch (err) {
         e.target.disabled = false;
         toast(err.message);
@@ -673,8 +679,9 @@
     }
     dock.hidden = false;
     const voice = view.me.mode === "voice";
-    const agentBtn = view.voiceAgent && !STUDY // study calls keep the built-in voice, the same in both arms
-      ? `<button class="btn ${agent ? "out" : "pri"}" id="agent" style="height:44px">${agent ? "Sidekick's voice is on · Turn off" : agentStarting ? "Connecting Sidekick's voice…" : "Turn on Sidekick's voice"}</button>`
+    // The voice switch: natural voice (ElevenLabs agent) or the built-in voice. Study calls keep the built-in one in both arms.
+    const agentBtn = view.voiceAgent && !STUDY && !agentCapped
+      ? `<button class="btn out sm wide-btn" id="agent" aria-pressed="${Boolean(agent)}">${agent ? "Natural voice on · Use the built-in voice" : agentStarting ? "Connecting Sidekick's natural voice…" : "Built-in voice · Use Sidekick's natural voice"}</button>`
       : "";
     const vote = view.mode === "voting";
     const seg = view.mode && phase === "call"
@@ -731,7 +738,13 @@
     if (t.closest("#share")) return void navigator.share({ title: `${view.crew}: help plan our next night`, text: "Help plan our next night! Sidekick's on the call:", url: inviteLink() }).catch(() => {});
     if (t.closest("#ask")) return void send("ask", {});
     if (t.closest("#practice")) { t.closest("#practice").disabled = true; return void studyApi("practice", { room: roomId, p: me.person }).catch((err) => { toast(err.message); renderCall(); }); }
-    if (t.closest("#agent")) return void (agent ? stopAgent() : startAgent());
+    if (t.closest("#agent")) {
+      if (agentStarting) return;
+      agentPref = !agent;
+      store.set("sk:agentVoice", agentPref);
+      if (agent) { stopAgent(); if (view.me.mode === "voice" && !micOn) startMic(); } else startAgent();
+      return;
+    }
     if (t.closest("#audioBtn")) return void (Audio.on ? Audio.stop() : Audio.start().then(() => { if (Audio.on && !micOn) startMic(); }));
     const sm = t.closest("[data-setmode]");
     if (sm) {
@@ -785,29 +798,59 @@
   });
 
   // ---------- ElevenLabs voice agent (planner's phone only) ----------
-  // Our server stays the brain. This phone passes the agent: other people's lines as context (no reply),
-  // and the server's cues ("[app] ask this...") as messages it should act on. What the agent says, and
-  // what it hears from this phone's mic, go back to the server so the board and captions stay complete.
+  // When ElevenLabs is set up, the planner's phone starts Sidekick's natural voice on the same tap as
+  // "Start the call", and the agent leads the talk turn by turn, like ElevenLabs' own agent page. It
+  // uses client tools (below), which run here in the planner's browser and call our API as the planner:
+  // the engine stays the source of truth for facts, privacy and picks, and the board updates live.
+  // This phone passes the agent only what it can't hear: typed lines and lines from friends in in-app
+  // audio (as messages), and joins, taps, form answers and picks on screen (as context, no reply).
+  // If the session can't start, drops, or the minute cap is reached, the built-in voice takes over quietly.
+  const EL_CLIENT = "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.38.0/+esm";
   let agent = null;
   let agentStarting = false;
   let agentStart = 0;
+  let agentCapped = false; // the minute cap was hit: no natural voice for the rest of this call
+  let agentDropped = false; // shown once: "switched to the built-in voice"
+  let agentPref = store.get("sk:agentVoice") !== false; // the "Use the built-in voice" switch, remembered
+  let elModule = null;
+  let primedMic = null;
   const relayed = new Set();
-  async function startAgent() {
-    if (agent || agentStarting) return;
-    agentStarting = true;
-    renderDock();
+  // Load the SDK early (it also unlocks iPhone audio on the first tap), so Start doesn't wait for it
+  const loadEL = () => (elModule = elModule || import(EL_CLIENT).catch((err) => { elModule = null; throw err; }));
+  // Called synchronously inside the Start tap: the mic prompt comes from that gesture
+  function primeAgentAudio() {
     try {
+      if (!primedMic && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) primedMic = navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
+    } catch { primedMic = null; }
+  }
+  function releasePrimedMic() {
+    const p = primedMic;
+    primedMic = null;
+    if (p) p.then((stream) => stream && stream.getTracks().forEach((t) => t.stop())).catch(() => {});
+  }
+  const toolCall = (name) => async (params) => api(`/api/sk/rooms/${roomId}/agent-tool/${name}`, { p: me.person, ...(params && typeof params === "object" ? params : {}) });
+  const AGENT_TOOLS = ["get_plan_state", "get_next_move", "record_facts", "get_picks", "show_private_card", "accept_relax"];
+  async function startAgent({ auto = false } = {}) {
+    if (agent || agentStarting || agentCapped || !me || STUDY) return;
+    agentStarting = true;
+    agentDropped = false;
+    if (phase) renderDock();
+    let reserved = false;
+    const hadMic = micOn;
+    try {
+      const sdk = loadEL();
       const s = await api(`/api/sk/rooms/${roomId}/voice-agent`, { p: me.person });
-      stopMic();
+      reserved = true;
+      const { Conversation } = await sdk;
+      if (micOn) stopMic();
       if ("speechSynthesis" in window) speechSynthesis.cancel();
       // Mark everything already on screen as passed on, so the agent only gets what happens next
-      view.captions.forEach((c) => relayed.add(`l:${c.id}`));
-      view.sidekick.forEach((x) => relayed.add(`s:${x.id}`));
-      const { Conversation } = await import("https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.38.0/+esm");
-      agent = await Conversation.startSession({
-        signedUrl: s.signedUrl,
-        connectionType: "websocket",
+      if (view) { view.captions.forEach((c) => relayed.add(`l:${c.id}`)); view.sidekick.forEach((x) => relayed.add(`s:${x.id}`)); (view.agentNotes || []).forEach((n) => relayed.add(`n:${n.id}`)); }
+      const clientTools = Object.fromEntries(AGENT_TOOLS.map((t) => [t, toolCall(t)]));
+      let session = null;
+      const opts = {
         dynamicVariables: s.dynamicVariables,
+        clientTools,
         onMessage: (m) => {
           const role = m.source || m.role;
           const text = String(m.message || m.text || "").trim();
@@ -815,51 +858,88 @@
           if (role === "ai" || role === "agent") send("agent-said", { text });
           else if (role === "user") send("line", { text, kind: "spoken" });
         },
-        onError: () => { toast("Sidekick's voice dropped. Switching back to the built-in voice."); stopAgent(); },
-        onDisconnect: () => { if (agent) stopAgent(); },
-      });
+        // A failing tool is reported to the agent by the SDK; only a real session error switches voices
+        onError: (message, context) => { if (!(context && context.clientToolName)) agentFallback(message); },
+        onDisconnect: () => { if (agent && agent === session) agentFallback("disconnected"); },
+      };
+      // WebRTC first (what ElevenLabs' own page uses: echo cancellation and smoother audio), then websocket
+      const tries = [];
+      if (s.conversationToken) tries.push({ conversationToken: s.conversationToken, connectionType: "webrtc" });
+      if (s.signedUrl) tries.push({ signedUrl: s.signedUrl, connectionType: "websocket" });
+      let lastErr = new Error("No way to connect");
+      for (const t of tries) {
+        try { session = await Conversation.startSession({ ...opts, ...t }); break; } catch (err) { lastErr = err; }
+      }
+      if (!session) throw lastErr;
+      agent = session;
       agentStart = Date.now();
-      toast("Sidekick's voice is on. Talk normally; it'll speak when it has something useful.");
+      releasePrimedMic();
+      await api(`/api/sk/rooms/${roomId}/voice-agent/live`, { p: me.person });
       relayToAgent();
     } catch (err) {
+      const a = agent;
       agent = null;
-      toast(err.message || "Couldn't start Sidekick's voice. The built-in voice will carry on.");
-      api(`/api/sk/rooms/${roomId}/voice-agent/end`, { p: me.person, seconds: 0 }).catch(() => {});
+      releasePrimedMic();
+      if (a) { try { await a.endSession(); } catch {} }
+      if (err && err.data && err.data.capped) agentCapped = true;
+      if (reserved) api(`/api/sk/rooms/${roomId}/voice-agent/end`, { p: me.person, seconds: 0 }).catch(() => {});
+      // Quietly carry on with the built-in voice. A tap on the switch gets a short note; the automatic start doesn't.
+      if (!auto) toast(agentCapped ? "Sidekick's natural voice is resting for now. The built-in voice carries on." : "Couldn't start Sidekick's natural voice. The built-in voice carries on.");
+      if (hadMic && !micOn && (phase === "call" || phase === "picks")) startMic();
     } finally {
       agentStarting = false;
-      renderDock();
+      if (phase) renderDock();
     }
+  }
+  // The session dropped or errored: switch to the built-in voice once, with at most one short note
+  function agentFallback() {
+    if (!agent) return;
+    stopAgent();
+    if (!agentDropped) { agentDropped = true; toast("Switched to Sidekick's built-in voice."); }
+    if (me && me.mode === "voice" && !micOn && (phase === "call" || phase === "picks")) startMic();
   }
   async function stopAgent() {
     const a = agent;
     agent = null;
-    try { if (a) await a.endSession(); } catch {}
-    send("voice-agent/end", { seconds: agentStart ? Math.round((Date.now() - agentStart) / 1000) : 0 });
+    const seconds = agentStart ? Math.round((Date.now() - agentStart) / 1000) : 0;
     agentStart = 0;
+    send("voice-agent/end", { seconds });
+    try { if (a) await a.endSession(); } catch {}
     if (phase === "call" || phase === "picks") renderDock();
   }
   function relayToAgent() {
+    // The server still thinks this phone runs the agent (the page reloaded mid-call): hand back to the built-in voice
+    if (view && view.agentOn && view.me.planner && !agent && !agentStarting && !relayToAgent.ended) { relayToAgent.ended = true; send("voice-agent/end", { seconds: 0 }); }
+    if (view && !view.agentOn) relayToAgent.ended = false;
     if (!agent || !view) return;
     try {
+      const remote = (pid) => { const p = view.people.find((x) => x.id === pid); return Boolean(p && p.audio && Audio.on); };
       for (const c of view.captions) {
         if (relayed.has(`l:${c.id}`)) continue;
         relayed.add(`l:${c.id}`);
-        if (c.pid !== view.me.id) agent.sendContextualUpdate(`${c.name}${c.kind === "typed" ? " (typed)" : ""}: ${c.text}`);
+        if (c.pid === view.me.id) continue; // the agent heard it itself
+        // Typed lines, and friends talking through in-app audio, never reach the agent's mic: they get a reply.
+        // Friends in the same room were heard by the mic already: context only, so it doesn't answer twice.
+        if (c.kind === "typed" || remote(c.pid)) agent.sendUserMessage(`${c.name}${c.kind === "typed" ? " (typed)" : ""}: ${c.text}`);
+        else agent.sendContextualUpdate(`${c.name} said: ${c.text}`);
       }
       for (const x of view.sidekick) {
         if (relayed.has(`s:${x.id}`)) continue;
         relayed.add(`s:${x.id}`);
-        if (x.system) agent.sendContextualUpdate(x.text); // e.g. "Sam answered by form: Saturday"
+        if (x.system) agent.sendContextualUpdate(`[app] ${x.text}`); // e.g. "Sam answered by form: Saturday"
       }
-      for (const q of view.cues || []) {
-        if (relayed.has(`q:${q.id}`)) continue;
-        relayed.add(`q:${q.id}`);
-        agent.sendUserMessage(q.text);
+      for (const n of view.agentNotes || []) {
+        if (relayed.has(`n:${n.id}`)) continue;
+        relayed.add(`n:${n.id}`);
+        agent.sendContextualUpdate(n.text);
       }
     } catch (err) {
       console.error(err);
     }
   }
+  window.addEventListener("pagehide", () => {
+    if (agent && me && navigator.sendBeacon) navigator.sendBeacon(`/api/sk/rooms/${roomId}/voice-agent/end`, JSON.stringify({ p: me.person, seconds: agentStart ? Math.round((Date.now() - agentStart) / 1000) : 0 }));
+  });
 
   // ---------- Voice: captions from this phone's mic ----------
   // iPhone Safari stops recognition every few seconds (and after each pause), so while the mic is on
@@ -1140,16 +1220,32 @@
         .replace(/\s{2,}/g, " ")
         .trim();
     },
-    // Say a line now. Returns the utterance (used by the demo's voice picker too).
+    // A reply split into sentences, so the first one starts speaking straight away (long utterances
+    // start later on some phones, and some cut off after about 15 seconds). Short bits stay joined.
+    sentences(text) {
+      const parts = String(text).match(/[^.!?]+(?:[.!?]+["')\]]*|$)\s*/g) || [String(text)];
+      const out = [];
+      for (const p of parts.map((x) => x.trim()).filter(Boolean)) {
+        if (out.length && (p.split(/\s+/).length < 3 || out[out.length - 1].split(/\s+/).length < 3)) out[out.length - 1] += ` ${p}`;
+        else out.push(p);
+      }
+      return out.length ? out : [String(text)];
+    },
+    // Say a line now, sentence by sentence. Returns the first utterance, with all of them in .chunks
+    // (used by the demo's voice picker too).
     say(text, { slot = "concierge", rate = 1, pitch = 1, voice } = {}) {
-      const u = new SpeechSynthesisUtterance(Voice.speakable(text));
       const v = voice || Voice.pick(slot);
-      if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-CA";
-      u.rate = rate;
-      u.pitch = /natural|premium|enhanced/i.test((v && v.name) || "") ? 1 : pitch; // good voices sound worse when pitch-shifted
+      const chunks = Voice.sentences(Voice.speakable(text)).map((part) => {
+        const u = new SpeechSynthesisUtterance(part);
+        if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-CA";
+        u.rate = rate;
+        u.pitch = /natural|premium|enhanced/i.test((v && v.name) || "") ? 1 : pitch; // good voices sound worse when pitch-shifted
+        return u;
+      });
       speechSynthesis.cancel();
-      speechSynthesis.speak(u);
-      return u;
+      for (const u of chunks) speechSynthesis.speak(u); // queued: the next starts as the last ends
+      chunks[0].chunks = chunks;
+      return chunks[0];
     },
   };
   window.SidekickVoice = Voice;
@@ -1169,13 +1265,18 @@
     const last = view.sidekick.slice(-1)[0];
     if (!last || last.system || last.id === lastRead) return;
     if (lastRead === null && Date.now() - last.at > 15000) { lastRead = last.id; return; } // don't replay old lines after a reload
-    if (view.people.some((p) => p.talking) && tries < 6) return void setTimeout(() => readAloud(tries + 1), 1200);
+    // Never talk over anyone: wait while someone has spoken since this line was made, or this phone
+    // is mid-sentence. The person who just asked Sidekick something isn't "talking over" its answer.
+    const over = view.people.some((p) => p.talking && p.spokeAt > last.at) || Boolean(interim.trim());
+    if (over && tries < 8) return void setTimeout(() => readAloud(tries + 1), 400);
     lastRead = last.id;
     const u = Voice.say(last.text, view.voice);
+    const tail = u.chunks[u.chunks.length - 1];
     let ended = false;
     const resume = () => { if (ended) return; ended = true; Audio.duck(false); if (paused) { paused = false; restartRec(150); } };
     u.onstart = () => { Audio.duck(true); if (micOn) { paused = true; stopRec(); } }; // don't caption (or send) Sidekick's own voice
-    u.onend = u.onerror = resume;
+    tail.onend = resume;
+    for (const c of u.chunks) c.onerror = resume;
     setTimeout(resume, 2000 + Voice.speakable(last.text).split(/\s+/).length * 600); // some phones never fire onend
   }
 
