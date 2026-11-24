@@ -12,9 +12,15 @@ const usage = require("./usage");
 const { travel, place } = require("../../../sketch-1/import/normalize");
 
 const ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
+const NEARBY = "https://places.googleapis.com/v1/places:searchNearby";
 // Only the fields we use. Rating, price and hours put the request in Google's "Enterprise" tier,
-// which is why the meter counts against that tier's free allowance.
+// which is why the meter counts against that tier's free allowance. Planning calls need hours, so they use these.
 const FIELDS = ["id", "displayName", "formattedAddress", "location", "types", "primaryType", "priceLevel", "priceRange", "rating", "userRatingCount", "regularOpeningHours", "googleMapsUri"].map((f) => `places.${f}`).join(",");
+// The map only needs a name, a pin and a link: no rating, price or hours keeps the request in the "Pro" tier, which
+// has its own, larger free allowance (about 5,000 a month against Enterprise's 1,000; see usage.js). Check the tier of
+// each field on Google's pricing sheet before changing this list.
+const PRO_FIELDS = ["id", "displayName", "formattedAddress", "location", "types", "primaryType", "googleMapsUri"].map((f) => `places.${f}`).join(",");
+const TIERS = { enterprise: { fields: FIELDS, meter: "places_text_search" }, pro: { fields: PRO_FIELDS, meter: "places_search_pro" } };
 const CITY = () => process.env.SIDEKICK_CITY || "Toronto, ON";
 const CENTER = { latitude: 43.6532, longitude: -79.3832 }; // downtown Toronto; 15 km covers the city
 // Where each starting point is, so places are searched near the crew rather than always downtown
@@ -48,6 +54,38 @@ const PER_CALL = () => Number(process.env.SIDEKICK_PLACES_PER_CALL || 2); // mos
 // One search per vibe, worded the way people search
 const QUERY = { music: "live music bar", comedy: "comedy club", games: "arcade bar or board game cafe", dance: "dance club", arts: "art gallery open late", food: "late night restaurant", default: "cocktail bar" };
 const VIBE_TAGS = { music: ["Live music"], comedy: ["Comedy"], games: ["Games & social"], dance: ["Dance"], arts: ["Art & making"], food: [], default: [] };
+// Every app vibe -> how to find places for it: Google place types for Nearby Search where a type says it exactly,
+// otherwise a Text Search query worded the way people search. Types are from Google's Table A (Places API New);
+// the ones used for includedTypes are limited to types this code already reads back from Google (TYPE_TAGS) or
+// that are long-standing (bar, cafe, park...). If Google rejects a type, the search falls back to the query.
+const VIBE_PLACES = {
+  "Live music": { query: "live music bar", tags: ["Live music"] },
+  Jazz: { query: "jazz bar", tags: ["Jazz", "Live music"] },
+  "Indie gigs": { query: "indie music venue", tags: ["Indie gigs", "Live music"] },
+  Comedy: { query: "comedy club", tags: ["Comedy"] },
+  Dance: { types: ["night_club"], query: "dance club", tags: ["Dance"] },
+  Electronic: { types: ["night_club"], query: "techno club", tags: ["Electronic", "Dance"] },
+  "Records & vinyl": { query: "record store", tags: ["Records & vinyl"] },
+  "Film nights": { types: ["movie_theater"], query: "independent cinema", tags: ["Film nights"] },
+  "Zines & print": { query: "independent bookstore zines", tags: ["Zines & print"] },
+  "Art & making": { types: ["art_gallery"], query: "art gallery open late", tags: ["Art & making"] },
+  Photography: { query: "photography gallery", tags: ["Photography", "Art & making"] },
+  "Writing & poetry": { query: "independent bookstore", tags: ["Writing & poetry"] },
+  "Tech & coding": { query: "board game cafe", tags: ["Tech & coding", "Games & social"] },
+  "Anime & cosplay": { types: ["video_arcade"], query: "anime cafe or arcade", tags: ["Anime & cosplay", "Games & social"] },
+  Outdoors: { types: ["park"], query: "park", tags: ["Outdoors"] },
+  "Run & ride": { types: ["park"], query: "running trail", tags: ["Run & ride", "Outdoors"] },
+  Climbing: { query: "bouldering gym", tags: ["Climbing"] },
+  "Games & social": { types: ["bowling_alley", "karaoke", "video_arcade", "amusement_center"], query: "arcade bar or board game cafe", tags: ["Games & social"] },
+  "Food & drink": { types: ["restaurant", "bar"], query: "late night restaurant", tags: ["Food & drink"] },
+  Markets: { query: "market", tags: ["Markets"] },
+  Wellness: { query: "yoga studio or spa", tags: ["Wellness"] },
+};
+// Sidekick's broad vibes (music, comedy...) keep their Text Search queries; an app vibe name uses VIBE_PLACES
+function planFor(vibe) {
+  if (VIBE_PLACES[vibe]) return VIBE_PLACES[vibe];
+  return { query: QUERY[vibe] || QUERY.default, tags: VIBE_TAGS[vibe] || [] };
+}
 // Google place types that tell us the vibe on their own
 const TYPE_TAGS = { night_club: ["Dance"], karaoke: ["Games & social"], bowling_alley: ["Games & social"], amusement_center: ["Games & social"], video_arcade: ["Games & social"], comedy_club: ["Comedy"], art_gallery: ["Art & making"], museum: ["Art & making"], movie_theater: ["Film nights"], live_music_venue: ["Live music"], concert_hall: ["Live music"] };
 // Rough per-person spend for Google's price levels (used only when there's no price range)
@@ -71,7 +109,7 @@ function toCandidate(p, vibe) {
   const where = place(lat, lng, "Toronto");
   const start = p.priceRange && p.priceRange.startPrice && Number(p.priceRange.startPrice.units);
   const price = Number.isFinite(start) ? start : p.priceLevel in LEVEL_PRICE ? LEVEL_PRICE[p.priceLevel] : null;
-  const tags = new Set([...(VIBE_TAGS[vibe] || []), ...(p.types || []).flatMap((t) => TYPE_TAGS[t] || [])]);
+  const tags = new Set([...(planFor(vibe).tags || []), ...(p.types || []).flatMap((t) => TYPE_TAGS[t] || [])]);
   const title = (p.displayName && p.displayName.text) || "A place nearby";
   return {
     id: numId(p.id),
@@ -97,23 +135,60 @@ function toCandidate(p, vibe) {
   };
 }
 
+// Place IDs seen per search (vibe + area), the one thing Google lets us keep indefinitely. Used to tell repeat places
+// from new ones (exploration, "seen before"), never to show anything: names, ratings and hours always come fresh.
+const idCache = new Map(); // "vibe|lat,lng" -> { ids: [...], at }
+const areaKey = (vibe, circle) => `${vibe}|${circle.center.latitude.toFixed(2)},${circle.center.longitude.toFixed(2)}`;
+function rememberIds(key, places) {
+  idCache.set(key, { ids: places.map((p) => p.placeId), at: Date.now() });
+  if (idCache.size > 500) idCache.delete(idCache.keys().next().value);
+}
+const seenIds = (vibe, origins) => (idCache.get(areaKey(vibe, nearCrew(origins))) || { ids: [] }).ids;
+
+// One request (Text Search, or Nearby Search with place types) after reserving from the tier's meter
+async function request(kind, plan, circle, tier, fetchImpl, signal) {
+  const ok = await usage.reserve(tier.meter, 1);
+  if (!ok.ok) return { capped: ok.reason };
+  const body = kind === "nearby"
+    ? { includedTypes: plan.types, maxResultCount: 10, locationRestriction: { circle } }
+    : { textQuery: `${plan.query} in ${CITY()}`, pageSize: 10, locationBias: { circle } };
+  const res = await fetchImpl(kind === "nearby" ? NEARBY : ENDPOINT, {
+    method: "POST",
+    signal,
+    headers: { "content-type": "application/json", "x-goog-api-key": process.env.GOOGLE_MAPS_API_KEY, "x-goog-fieldmask": tier.fields },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = new Error(`Google Places search failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    err.status = res.status;
+    throw err;
+  }
+  return { data: await res.json() };
+}
+
 // Search once. Returns { places, capped } and never throws (a failed search just means no places).
-async function search(vibe, { fetchImpl = fetch, origins } = {}) {
+// opts.tier: "enterprise" (default; planning calls, with hours and prices) or "pro" (the map: name, pin and link).
+// An app vibe with exact place types uses Nearby Search; if Google rejects the types (400) it retries once as text.
+async function search(vibe, { fetchImpl = fetch, origins, tier = "enterprise" } = {}) {
   if (!configured()) return { places: [], capped: "not configured" };
-  const ok = await usage.reserve("places_text_search", 1);
-  if (!ok.ok) return { places: [], capped: ok.reason };
+  const t = TIERS[tier] || TIERS.enterprise;
+  const plan = planFor(vibe);
+  const circle = nearCrew(origins);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 6000);
   try {
-    const res = await fetchImpl(ENDPOINT, {
-      method: "POST",
-      signal: ctrl.signal,
-      headers: { "content-type": "application/json", "x-goog-api-key": process.env.GOOGLE_MAPS_API_KEY, "x-goog-fieldmask": FIELDS },
-      body: JSON.stringify({ textQuery: `${QUERY[vibe] || QUERY.default} in ${CITY()}`, pageSize: 10, locationBias: { circle: nearCrew(origins) } }),
-    });
-    if (!res.ok) throw new Error(`Google Places search failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
-    const data = await res.json();
-    return { places: (data.places || []).map((p) => toCandidate(p, vibe)).filter(Boolean), capped: null };
+    let out;
+    try {
+      out = await request(plan.types ? "nearby" : "text", plan, circle, t, fetchImpl, ctrl.signal);
+    } catch (err) {
+      if (!plan.types || err.status !== 400) throw err;
+      console.error(`${err.message} (retrying "${vibe}" as a text search)`);
+      out = await request("text", plan, circle, t, fetchImpl, ctrl.signal);
+    }
+    if (out.capped) return { places: [], capped: out.capped };
+    const list = (out.data.places || []).map((p) => toCandidate(p, vibe)).filter(Boolean);
+    rememberIds(areaKey(vibe, circle), list);
+    return { places: list, capped: null };
   } catch (err) {
     console.error(err.message);
     return { places: [], capped: null, error: err.message };
@@ -179,4 +254,4 @@ function closesLabel(periods, day, hour) {
   return "Open that evening";
 }
 
-module.exports = { configured, available, search, forCall, openAt, closesLabel, toCandidate, nearCrew, nearestStation, nearLabel, placeType, FIELDS, _numId: numId };
+module.exports = { configured, available, search, forCall, openAt, closesLabel, toCandidate, nearCrew, nearestStation, nearLabel, placeType, planFor, seenIds, FIELDS, PRO_FIELDS, VIBE_PLACES, _numId: numId, _idCache: idCache };

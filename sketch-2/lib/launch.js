@@ -3,9 +3,11 @@
 // Location: the app sends a point already rounded to 2 decimals (about 1 km); we round again, name the
 // neighbourhood with Sketch 1's place() helper, and keep nothing.
 //
-// Places come from Google Places (lib/sidekick/places.js), behind the same usage meter as Sidekick
-// (lib/sidekick/usage.js): at most one search per map session, and none at all when the meter is near its
-// cap (we leave LAUNCH_PLACES_HEADROOM searches for planning calls, which need them more). Google's terms
+// Places come from Google Places (lib/sidekick/places.js): at most one search per map session. The map asks only for
+// Pro fields (name, pin, link: no rating, price or hours), so it's counted on its own meter (places_search_pro, the
+// larger Pro allowance); it still steps aside when the planning calls' Enterprise meter is near its cap (we leave
+// LAUNCH_PLACES_HEADROOM searches for planning calls, which need them more). The search uses the person's strongest
+// vibe, mapped to Google place types or a query for every one of the app's 21 vibes (places.js VIBE_PLACES). Google's terms
 // don't let us keep ratings, hours or prices, so results live in this process's memory for the session
 // only (SESSION_MS) and are never written anywhere. When places are off or capped, the map shows events only.
 
@@ -25,7 +27,7 @@ function where(latIn, lngIn) {
   return { label: p.area === "Beyond Toronto" ? "Outside Toronto" : p.neighbourhood, area: p.area };
 }
 
-// The one search a map session gets: worded for the person's strongest vibe
+// Sidekick's broad vibe for a person's vibes (kept for callers that use it)
 const VIBE_QUERY = [
   ["music", ["Live music", "Jazz", "Indie gigs", "Records & vinyl"]], ["comedy", ["Comedy"]], ["games", ["Games & social", "Anime & cosplay"]],
   ["dance", ["Dance", "Electronic"]], ["arts", ["Art & making", "Zines & print", "Photography", "Film nights", "Writing & poetry"]], ["food", ["Food & drink", "Markets"]],
@@ -76,6 +78,7 @@ function card(c, loc, now) {
 async function search({ lat, lng, vibes }) {
   if (!places.configured()) return { places: [], reason: "off" };
   if (!(await usage.available("places_text_search", 1 + HEADROOM()))) return { places: [], reason: "capped" };
+  if (!(await usage.available("places_search_pro", 1))) return { places: [], reason: "capped" };
   // Keep each result's location (places.js leaves it out of what it returns), matched up by place id
   const raw = new Map();
   const fetchImpl = async (url, opts) => {
@@ -86,7 +89,9 @@ async function search({ lat, lng, vibes }) {
     return { ok: true, json: async () => data };
   };
   const at = okPoint(lat, lng) ? { lat, lng } : DOWNTOWN;
-  const out = await places.search(queryFor(vibes), { fetchImpl, origins: [at] });
+  // The person's first vibe that has a place search of its own (every app vibe does), else Sidekick's broad query
+  const vibe = (vibes || []).find((v) => places.VIBE_PLACES[v]) || queryFor(vibes);
+  const out = await places.search(vibe, { fetchImpl, origins: [at], tier: "pro" });
   const now = torontoNow();
   const list = out.places.filter((c) => raw.has(c.placeId)).map((c) => card(c, raw.get(c.placeId), now))
     .sort((a, b) => (b.open === true) - (a.open === true)); // open now first

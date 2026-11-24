@@ -6,6 +6,9 @@
 // Meters (all numbers can be changed in .env / Render):
 //   places_text_search  Google Places Text Search (Enterprise fields). Google's free cap is about
 //                       1,000 a month; we stop at 80% (800), and at 40 a day.
+//   places_search_pro   Google Places searches with only Pro fields (no rating, price or hours), used by the map.
+//                       A separate SKU with its own free cap of about 5,000 a month; we stop at 80% (4,000), and at
+//                       150 a day. Confirm both allowances on Google's pricing sheet before raising anything.
 //   elevenlabs_minutes  ElevenLabs agent minutes. Each call reserves its maximum length up front and
 //                       gives back what it didn't use when it ends.
 //
@@ -27,6 +30,13 @@ function meters() {
       monthlyFree: num(process.env.GOOGLE_PLACES_FREE_PER_MONTH, 1000),
       stopAt: num(process.env.GOOGLE_PLACES_STOP_AT, 0.8),
       dailyMax: num(process.env.GOOGLE_PLACES_DAILY_MAX, 40),
+    },
+    places_search_pro: {
+      label: "Google Places searches (map, Pro fields)",
+      off: process.env.SIDEKICK_PLACES_OFF === "1",
+      monthlyFree: num(process.env.GOOGLE_PLACES_PRO_FREE_PER_MONTH, 5000),
+      stopAt: num(process.env.GOOGLE_PLACES_PRO_STOP_AT, 0.8),
+      dailyMax: num(process.env.GOOGLE_PLACES_PRO_DAILY_MAX, 150),
     },
     elevenlabs_minutes: {
       label: "ElevenLabs agent minutes",
