@@ -2,10 +2,16 @@
 // Business Discovery). The AI reads each post's poster (OCR, the first slides of a carousel) together with its
 // caption and pulls out the events they announce.
 //
-// Two halves, because reading posts takes the AI:
-//   - buildInstagram (run by hand: `node import/instagram.js`, using Claude Code) downloads new posts, reads them,
-//     and saves the events to instagram-events.json and to Supabase Storage.
-//   - fetchInstagram (the scheduled import) just picks up those saved events. It never calls the AI.
+// Two ways in:
+//   - buildInstagram (run by hand: `node import/instagram.js`, using Claude Code) downloads new posts, has the AI read
+//     them with their posters, and saves the events to instagram-events.json and to Supabase Storage.
+//   - fetchInstagram (the scheduled import, every day). With INSTAGRAM_USER_ID and INSTAGRAM_ACCESS_TOKEN (GitHub
+//     secrets; setup: import/README-instagram.md) it downloads the accounts' recent posts through the Graph API's
+//     Business Discovery, uses the AI readings already saved (instagram-extracted.json, and its copy in Storage) for
+//     posts read before, and reads new posts' captions with plain rules (import/instagram-rules.js). The AI reads them
+//     instead only when IG_AI=1 and an AI is available, at most IG_MAX_CALLS calls (never in the scheduled workflow,
+//     which sets AI=off). Without the secrets, or when the Graph API fails, it picks up the events the last run saved.
+// Only the official Graph API is used: no logged-out page scraping, which Instagram's terms forbid.
 //
 // The accounts are the list in sketch-2/reference/instagram-accounts.md (add a row to add one). Each venue's
 // address and coordinates are remembered in instagram-accounts.json, found by name the first time.
@@ -30,14 +36,24 @@ const { mode } = require("../../lib/ai");
 const { readPosters, savePoster, torontoISO, asLink } = require("../../lib/posters");
 const { geocode } = require("../../lib/geocode");
 const store = require("../../lib/store");
+const { parseCaption } = require("../instagram-rules");
+
+// Never let the access token reach a log line or an error message (it travels in the Graph API's query string)
+function redact(text) {
+  let out = String(text == null ? "" : text);
+  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
+  if (token) out = out.split(token).join("***");
+  return out.replace(/(access_token=)[^&\s"']+/gi, "$1***");
+}
 
 const DIR = path.join(__dirname, "..");
-const LIST = path.join(DIR, "..", "..", "sketch-2", "reference", "instagram-accounts.md");
-const ACCOUNTS = path.join(DIR, "instagram-accounts.json");
-const EVENTS = path.join(DIR, "instagram-events.json");
-const RAW = path.join(DIR, "instagram-raw.json");
-const EXTRACTED = path.join(DIR, "instagram-extracted.json");
-const IMAGES = path.join(DIR, "instagram-images");
+// Each file can be moved with an env var (the tests use temp copies)
+const LIST = process.env.IG_LIST_FILE || path.join(DIR, "..", "..", "sketch-2", "reference", "instagram-accounts.md");
+const ACCOUNTS = process.env.IG_ACCOUNTS_FILE || path.join(DIR, "instagram-accounts.json");
+const EVENTS = process.env.IG_EVENTS_FILE || path.join(DIR, "instagram-events.json");
+const RAW = process.env.IG_RAW_FILE || path.join(DIR, "instagram-raw.json");
+const EXTRACTED = process.env.IG_EXTRACTED_FILE || path.join(DIR, "instagram-extracted.json");
+const IMAGES = process.env.IG_IMAGES_DIR || path.join(DIR, "instagram-images");
 const POST_DAYS = 60; // older posts are about events that have already happened
 const IMAGES_PER_POST = 2; // a carousel's first slides carry the poster and the lineup
 const MAX_CALLS = Number(process.env.IG_MAX_CALLS || 40); // AI calls per run, at most
@@ -62,12 +78,16 @@ const FIELDS = "username,name,biography,followers_count,media.limit(40){caption,
 const FIELDS_PLAIN = "username,name,biography,followers_count,media.limit(40){caption,timestamp,permalink,media_type,media_url}";
 
 async function download(accounts, log) {
+  return (await downloadPosts(accounts, log)).raw;
+}
+// { raw: handle -> account with its recent media, fresh: accounts downloaded this time }
+async function downloadPosts(accounts, log) {
   const user = process.env.INSTAGRAM_USER_ID;
   const token = process.env.INSTAGRAM_ACCESS_TOKEN;
   const raw = readJSON(RAW, {});
   if (!user || !token) {
     log("  instagram: no INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN in .env, using the saved snapshot");
-    return raw;
+    return { raw, fresh: 0 };
   }
   let fields = FIELDS;
   let fresh = 0;
@@ -87,7 +107,7 @@ async function download(accounts, log) {
       raw[handle] = { ...raw[handle], ...bd, media: (bd.media && bd.media.data) || [] };
       fresh++;
     } catch (err) {
-      log(`  instagram @${handle}: ${err.message.replace(token, "***").slice(0, 120)}`);
+      log(`  instagram @${handle}: ${redact(err.message).slice(0, 160)}`);
       if (/\b(400|401|403)\b/.test(err.message) && !fresh) {
         log("  instagram: token rejected (expired or rate-limited), using the saved snapshot");
         break;
@@ -96,7 +116,7 @@ async function download(accounts, log) {
   }
   fs.writeFileSync(RAW, JSON.stringify(raw, null, 0));
   log(`  instagram: ${fresh} accounts downloaded, ${Object.keys(raw).length} in the snapshot`);
-  return raw;
+  return { raw, fresh };
 }
 
 // A post's images on disk (downloaded earlier), in slide order
@@ -308,17 +328,31 @@ async function buildInstagram({ start, end, log }) {
   for (const id of Object.keys(done)) if (!recent.has(id)) delete done[id];
   fs.writeFileSync(EXTRACTED, JSON.stringify(done, null, 0));
 
+  const out = await toEvents({ posts, readings: done, accounts, raw, known, start, end, log });
+  const file = { builtAt: new Date().toISOString(), events: out };
+  fs.writeFileSync(EVENTS, JSON.stringify(file));
+  const uploaded = await store.put("instagram-events.json", file);
+  writeList(accounts, accountStats(raw, done), file.builtAt);
+  log(`  instagram: ${out.length} events saved to import/instagram-events.json${uploaded ? " and Supabase Storage" : ""}`);
+  return file;
+}
+
+// Events from the posts' readings (the AI's, or the caption rules'), placed at a venue on the map
+async function toEvents({ posts, readings, accounts, raw, known, start, end, log, geocodeNew = true }) {
   const out = [];
   let unplaced = 0;
   for (const p of posts) {
     const acct = accounts[p.handle];
-    for (const [i, ev] of ((done[p.id] && done[p.id].events) || []).entries()) {
+    const reading = readings[p.id];
+    for (const [i, ev] of ((reading && reading.events) || []).entries()) {
       const startsAt = torontoISO(ev.start);
       if (!ev.title || !startsAt || Date.parse(startsAt) < start.getTime() || Date.parse(startsAt) > end.getTime()) continue;
       // The account's own venue, another venue we already know, or one the poster gives an address for
       const home = acct.venue && (!ev.venue || sameVenue(ev.venue, acct.venue)) ? { name: acct.venue, address: acct.address, lat: acct.lat, lng: acct.lng } : null;
       let venue = home || known.get(norm(ev.venue));
-      if (!venue && ev.venue && ev.address) {
+      // A post read by rules names no venue: look for a venue we know in its caption
+      if (!venue && !ev.venue && reading.rules) venue = venueIn(p.caption, known);
+      if (!venue && ev.venue && ev.address && geocodeNew) {
         const g = await geocode(`${ev.venue}, ${ev.address}`) || (await geocode(ev.address));
         if (g) venue = { name: ev.venue, address: ev.address || g.address, lat: g.lat, lng: g.lng };
       }
@@ -337,34 +371,121 @@ async function buildInstagram({ start, end, log }) {
         price: ev.price == null || ev.price === "" ? null : Number(ev.price),
         description: ev.description || "",
         categories: [],
-        organizer: ev.organizer || raw[p.handle].name,
+        organizer: ev.organizer || (raw[p.handle] && raw[p.handle].name) || `@${p.handle}`,
         ticketUrl: asLink(ev.ticketUrl) || undefined,
-        image: done[p.id].image || null, // our copy of the poster (Instagram's own links expire)
+        image: reading.image || null, // our copy of the poster (Instagram's own links expire), or the post's own image link
       });
     }
   }
   if (unplaced) log(`  instagram: ${unplaced} events left out (no venue or address we can place on the map)`);
-  const file = { builtAt: new Date().toISOString(), events: out };
+  return out;
+}
+// A known venue (an account's own, or one from the last import) named in a caption, longest name first
+function venueIn(caption, known) {
+  const text = norm(caption);
+  let best = null;
+  for (const [key, v] of known) if (key.length >= 6 && text.includes(key) && (!best || key.length > best[0].length)) best = [key, v];
+  return best ? best[1] : null;
+}
+
+// ---------- Scheduled import, automated: Graph API posts, saved AI readings, caption rules ----------
+// The post's own image link for an event read by rules (Instagram's links expire after a few days, but the daily
+// import gets fresh ones every day)
+function mediaImage(m) {
+  if (!m) return null;
+  if (m.media_type === "CAROUSEL_ALBUM" && m.children && m.children.data) {
+    const first = m.children.data.find((c) => c.media_type === "IMAGE" && c.media_url);
+    if (first) return first.media_url;
+  }
+  return m.media_type === "IMAGE" ? m.media_url || null : m.thumbnail_url || null;
+}
+
+async function autoInstagram({ start, end, log, previous = [] }) {
+  const accounts = await loadAccounts(log);
+  if (!Object.keys(accounts).length) throw new Error(`No accounts in ${LIST}`);
+  const { raw, fresh } = await downloadPosts(accounts, log);
+  if (!fresh) throw new Error("the Graph API gave no accounts' posts this time");
+
+  // AI readings saved so far: the repo's copy, plus the copy in Storage (written by runs with IG_AI=1)
+  let done = readJSON(EXTRACTED, {});
+  try {
+    const stored = await store.get("instagram-extracted.json");
+    if (stored) done = { ...stored, ...done };
+  } catch (err) {
+    log(`  instagram: couldn't read the saved readings from Supabase Storage (${redact(err.message).slice(0, 100)})`);
+  }
+  const stats = accountStats(raw, done);
+  const skip = new Set(Object.keys(accounts).filter((h) => paused(stats[h])));
+
+  const known = new Map();
+  for (const e of previous) if (e.venue && e.venue.name && e.venue.name !== "N/A" && Number.isFinite(e.venue.lat)) known.set(norm(e.venue.name), e.venue);
+  for (const a of Object.values(accounts)) if (a.venue) known.set(norm(a.venue), { name: a.venue, address: a.address, lat: a.lat, lng: a.lng });
+
+  const since = Date.now() - POST_DAYS * 86400000;
+  const posts = [];
+  for (const [handle, acct] of Object.entries(accounts)) {
+    const a = raw[handle];
+    if (!a || skip.has(handle)) continue;
+    for (const m of a.media || []) {
+      if (Date.parse(m.timestamp) < since || (!m.caption && m.media_type === "VIDEO")) continue;
+      posts.push({ id: m.id, handle, account: `${a.name} (@${handle})`, homeVenue: acct.venue, postedAt: m.timestamp, caption: (m.caption || "").slice(0, 1500), url: m.permalink, media: m });
+    }
+  }
+
+  // The AI only when asked for (IG_AI=1) and available, within IG_MAX_CALLS calls; never in the scheduled workflow
+  if (process.env.IG_AI === "1") {
+    if (mode() === "keywords") log("  instagram: IG_AI=1 but no AI is available (AI=off, no key, no Claude Code), so new posts are read by the caption rules");
+    else {
+      fs.writeFileSync(EXTRACTED, JSON.stringify(done, null, 0));
+      await downloadImages(posts.filter((p) => !done[p.id]), log);
+      done = await extract(posts.filter((p) => p.caption || imagesOf(p.id).length), log);
+      await keepPosters(posts, done, log);
+      if (process.env.UPLOAD) await store.put("instagram-extracted.json", done).catch((err) => log(`  instagram: readings not saved to Storage (${redact(err.message).slice(0, 100)})`));
+    }
+  }
+
+  const readings = {};
+  let byAI = 0;
+  let byRules = 0;
+  for (const p of posts) {
+    if (done[p.id]) {
+      readings[p.id] = done[p.id];
+      byAI++;
+    } else {
+      readings[p.id] = { rules: true, events: parseCaption(p.caption, p.postedAt), image: mediaImage(p.media) };
+      byRules++;
+    }
+  }
+  const events = await toEvents({ posts, readings, accounts, raw, known, start, end, log, geocodeNew: false });
+  log(`  instagram: ${posts.length} recent posts from ${fresh} accounts (${byAI} read before by the AI, ${byRules} read by the caption rules), ${events.length} events`);
+  const file = { builtAt: new Date().toISOString(), auto: true, events };
   fs.writeFileSync(EVENTS, JSON.stringify(file));
-  const uploaded = await store.put("instagram-events.json", file);
-  writeList(accounts, accountStats(raw, done), file.builtAt);
-  log(`  instagram: ${out.length} events saved to import/instagram-events.json${uploaded ? " and Supabase Storage" : ""}`);
+  if (process.env.UPLOAD) await store.put("instagram-events.json", file).catch((err) => log(`  instagram: events not saved to Storage (${redact(err.message).slice(0, 100)})`));
   return file;
 }
 
-// ---------- Scheduled import: the events the last by-hand run saved (no AI) ----------
-async function fetchInstagram({ start, end, max, log }) {
+// The scheduled import: automated with the Graph API secrets, else the events the last run saved (no AI either way)
+async function fetchInstagram({ start, end, max, log, previous }) {
+  const inWindow = (e) => Date.parse(e.startsAt) >= start.getTime() && Date.parse(e.startsAt) <= end.getTime();
+  if (process.env.INSTAGRAM_USER_ID && process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_AUTO !== "off") {
+    try {
+      const file = await autoInstagram({ start, end, log, previous });
+      return file.events.filter(inWindow).slice(0, max);
+    } catch (err) {
+      log(`  instagram: automated read failed (${redact(err.message).slice(0, 160)}); using the last saved events`);
+    }
+  } else log("  instagram: no INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN (GitHub secrets), so using the last saved events; setup: sketch-1/import/README-instagram.md");
   let file = null;
   try {
     file = await store.get("instagram-events.json");
   } catch (err) {
-    log(`  instagram: couldn't read Supabase Storage (${err.message}), using the local file`);
+    log(`  instagram: couldn't read Supabase Storage (${redact(err.message)}), using the local file`);
   }
   file = file || readJSON(EVENTS, null);
-  if (!file) return { skipped: "No Instagram events saved yet: run `node import/instagram.js`" };
+  if (!file) return { skipped: "No Instagram events saved yet: add the INSTAGRAM_USER_ID and INSTAGRAM_ACCESS_TOKEN secrets (sketch-1/import/README-instagram.md), or run `node import/instagram.js`" };
   const days = (Date.now() - Date.parse(file.builtAt)) / 86400000;
   if (days > STALE_DAYS) log(`  instagram: the saved events are ${Math.floor(days)} days old; run \`node import/instagram.js\` to read new posts`);
-  return file.events.filter((e) => Date.parse(e.startsAt) >= start.getTime() && Date.parse(e.startsAt) <= end.getTime()).slice(0, max);
+  return file.events.filter(inWindow).slice(0, max);
 }
 
-module.exports = { fetchInstagram, buildInstagram };
+module.exports = { fetchInstagram, buildInstagram, autoInstagram, redact, mediaImage };
