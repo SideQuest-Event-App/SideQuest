@@ -89,6 +89,7 @@ window.SQ = window.SQ || {};
     inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v6H3v-6z"/>',
     grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
     thumbDown: '<path d="M10 15v4a2 2 0 0 0 2 2l3-7V4H7.5a2 2 0 0 0-2 1.6l-1.3 7A2 2 0 0 0 6.2 15z"/><path d="M15 4h3a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-3"/>',
+    thumbUp: '<path d="M14 9V5a2 2 0 0 0-2-2l-3 7v10h8.5a2 2 0 0 0 2-1.6l1.3-7A2 2 0 0 0 18.8 9z"/><path d="M9 20H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h3"/>',
     mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
     film: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>',
     palette: '<path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-1-1.5-1-2.5 1-1.5 2-1.5h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7" r="1"/>',

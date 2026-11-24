@@ -582,6 +582,19 @@
     const mode = SQ.d.mode;
     pill.classList.toggle("off", mode === "keywords");
     pill.lastElementChild.textContent = mode === "api" ? `AI: Claude API (${SQ.d.model})` : mode === "claude-code" ? "AI: Claude Code" : "No AI: keyword matching";
+    // How old the event import is: a warning here (the admin side) when it's more than 8 days, as in the server log
+    let age = document.getElementById("side-data");
+    if (!age) {
+      age = document.createElement("p");
+      age.id = "side-data";
+      age.className = "side-data";
+      age.setAttribute("role", "status");
+      pill.insertAdjacentElement("afterend", age);
+    }
+    const h = SQ.d.dataHealth || {};
+    age.hidden = h.days == null;
+    age.classList.toggle("stale", !!h.stale);
+    age.textContent = h.days == null ? "" : h.stale ? `Event data is ${h.days} days old. The weekly import may not be reaching this server.` : `Event data imported ${h.days === 0 ? "today" : `${h.days} day${h.days === 1 ? "" : "s"} ago`}.`;
     const role = SQ.screens[SQ.u.screen].role;
     document.querySelectorAll("#side-role button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.role === role)));
     const groups = { attendee: "Attendee app", host: "Host app" };

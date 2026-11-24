@@ -1390,3 +1390,29 @@ a.tab { text-decoration: none; }
 @keyframes pend-dot { 50% { opacity: 1; } }
 .btn.is-done { background: var(--status-success-tint); color: #b5ecc6; }
 @media (prefers-reduced-motion: reduce) { .pend-dots i { animation: none; opacity: 0.7; } }
+
+/* ---------- Search and personalisation: price badge, card actions, Wildcard, crew match, Your taste ---------- */
+.price-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; margin-right: 6px; border-radius: var(--r-full); border: 1px solid var(--border-default); color: var(--text-secondary); font-weight: 500; font-size: 12px; line-height: 16px; vertical-align: middle; }
+.lx-ctx { font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.lx-acts { display: flex; align-self: stretch; gap: 8px; margin-top: 8px; }
+.lx-act { flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 10px; border-radius: var(--r-full); border: 1px solid var(--border-default); background: none; color: var(--text-primary); font-weight: 500; font-size: 13px; line-height: 18px; white-space: nowrap; }
+.lx-act .ic { width: 16px; height: 16px; flex: none; }
+.lx-act.on { background: var(--action-primary-tint); border-color: var(--action-primary-edge); color: var(--text-accent); }
+.lx-card.wild { background: color-mix(in srgb, var(--action-primary-tint) 35%, var(--bg-base)); }
+.kt.ev.wild { background: var(--action-primary); color: var(--text-on-action); }
+.crew-who { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--text-accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crew-who .ic { width: 14px; height: 14px; flex: none; }
+.taste-row { display: grid; grid-template-columns: minmax(0, 1fr) 56px auto; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border-subtle); }
+.taste-name { display: flex; flex-direction: column; min-width: 0; }
+.taste-v { font-weight: 600; font-size: 14px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taste-bar { height: 6px; border-radius: var(--r-full); background: var(--bg-raised); overflow: hidden; }
+.taste-bar i { display: block; height: 100%; border-radius: inherit; background: var(--action-primary); }
+.taste-ctrls { display: flex; align-items: center; gap: 2px; }
+.taste-ctrls .icon-btn { background: none; }
+.taste-ctrls .icon-btn .ic { width: 18px; height: 18px; }
+.taste-ctrls .icon-btn[disabled] { opacity: 0.4; }
+.taste-txt { min-width: 44px; min-height: 44px; padding: 0 4px; font-weight: 500; font-size: 13px; line-height: 18px; color: var(--text-accent); }
+.taste-row.out .taste-v { color: var(--text-tertiary); text-decoration: line-through; }
+.side-data { margin: 0; font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.side-data.stale { padding: 8px 10px; border-radius: var(--r-md); background: var(--status-warning-tint); color: var(--text-primary); font-weight: 500; }
+.ranked .text > .crew-who { display: flex; }

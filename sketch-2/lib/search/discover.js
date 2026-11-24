@@ -62,7 +62,8 @@ function noteWildcard(store, vibe, kind) {
 function wildcardFor(user, pool, { counts = {}, exclude = new Set(), seed } = {}) {
   const w = taste.weights(user);
   const top = Object.entries(w.vibes).filter(([, x]) => x > 0).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([v]) => v);
-  const cands = pool.filter((e) => !exclude.has(e.id) && (e.vibes || []).length && !taste.fit(w, e).strongDislike);
+  // Exploring means new ground, not things they've passed on: no vibe or organizer they've marked down
+  const cands = pool.filter((e) => !exclude.has(e.id) && (e.vibes || []).length && taste.fit(w, e).score >= 0 && !(e.vibes || []).some((v) => (w.vibes[v] || 0) < 0));
   const rand = rank.rng(seed != null ? seed : Math.floor(Date.now() / 3600000)); // a new draw each hour
   const soon = (e) => -Math.max(0, (Date.parse(e.startsAt) - Date.now()) / DAY);
   const out = rank.wildcard(cands, { counts, avoid: top, scoreOf: (e) => soon(e) + (e.price === 0 ? 1 : 0), rand });

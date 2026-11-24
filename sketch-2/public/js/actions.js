@@ -281,8 +281,29 @@
     const r = await SQ.act("follow", { host });
     toast(r.following ? `Following ${host}. You'll hear about their next quest.` : `Unfollowed ${host}.`);
   };
+  // ---------- Cards shown and tapped: ids, the screen and the position only (click-through, "seen and ignored") ----------
+  const shownSig = {};
+  const shownTimer = {};
+  SQ.cardOrder = {};
+  SQ.cardsShown = (surface, ids) => {
+    const list = ids.map(Number).filter(Number.isFinite).slice(0, 20);
+    const sig = list.join(",");
+    if (!SQ.userId() || !list.length || shownSig[surface] === sig) return;
+    shownSig[surface] = sig;
+    SQ.cardOrder[surface] = list;
+    clearTimeout(shownTimer[surface]);
+    // After the screen has settled, so a card that flashed past during a re-render isn't counted
+    shownTimer[surface] = setTimeout(() => {
+      fetch("/api/cards", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ user: SQ.userId(), surface, ids: list }) }).catch(() => {});
+    }, 800);
+  };
+  const cardAt = (id) => {
+    const surface = U().screen;
+    const pos = (SQ.cardOrder[surface] || []).indexOf(Number(id));
+    return { surface, position: pos >= 0 ? pos : undefined };
+  };
   A.save = async (id) => {
-    const r = await SQ.act("save", { eventId: Number(id) });
+    const r = await SQ.act("save", { eventId: Number(id), ...cardAt(id) });
     toast(r.saved ? "Saved to your Quest Log." : "Removed from saved.");
   };
   A.share = (id) => A.copyLink(id); // sharing an event copies its link
@@ -322,10 +343,29 @@
   };
   A.addQuestTicket = () => A.addTicket(U().quest);
   A.notForMe = async (id) => {
-    await SQ.act("notForMe", { eventId: Number(id) });
-    toast("Got it. Your taste avatar will skip things like that.");
+    await SQ.act("notForMe", { eventId: Number(id), ...cardAt(id) });
+    toast("Got it. Fewer like this, and less from that organizer.");
     if (U().screen === "quest") SQ.back();
   };
+  A.undoNotForMe = async (id) => {
+    await SQ.act("undoNotForMe", { eventId: Number(id) });
+    toast("Back in your picks.");
+  };
+  // "More like this": that event's vibes count for more in your taste (tap again to take it back)
+  A.moreLike = async (id) => {
+    const r = await SQ.act("moreLikeThis", { eventId: Number(id), ...cardAt(id) });
+    toast(r.more ? `More like this: ${(r.vibes || []).slice(0, 2).join(" and ").toLowerCase() || "noted"}.` : "Taken back.");
+  };
+  // Profile > Your taste: nudge a vibe up or down, take it out, or put it back to automatic
+  A.tasteUp = (v) => setTaste(v, +1);
+  A.tasteDown = (v) => setTaste(v, -1);
+  A.tasteOut = (v) => SQ.act("setTaste", { vibe: v, value: 0 }).then(() => toast(`${v} is out of your taste.`));
+  A.tasteAuto = (v) => SQ.act("setTaste", { vibe: v, value: null }).then(() => toast(`${v} is back to automatic.`));
+  function setTaste(v, step) {
+    const row = ((SQ.me().taste || {}).rows || []).find((r) => r.vibe === v);
+    const now = row ? (row.edited != null ? row.edited : Math.round(Math.max(0, Math.min(5, row.weight)))) : 0;
+    return SQ.act("setTaste", { vibe: v, value: Math.max(0, Math.min(5, now + step)) });
+  }
 
   // ---------- events found by attendees: a link, a screenshot, or typed in -> draft -> unverified event ----------
   // open: the draft form is showing; mode: what filled it ("listing" = the page's own event data, or the AI)

@@ -374,7 +374,13 @@
     return t > -3 * 36e5 && t < 7 * 864e5;
   };
   const live = (e, u = me()) => !e.over && !e.ended && !u.notForMe.includes(e.id) && inWeek(e) && !(u.adult === false && SQ.is19(e));
-  const weekly = () => SQ.d.events.filter((e) => live(e) && pick(e)).sort((a, b) => matchOf(b) - matchOf(a) || a.startsAt.localeCompare(b.startsAt));
+  // The feed's own order when it has one (best match first, with near-duplicates and things you've passed on moved down)
+  const feedRank = (u = me()) => {
+    const order = (u.feed && u.feed.order) || [];
+    return new Map(order.map((id, i) => [id, i]));
+  };
+  const byFeed = (rk) => (a, b) => (rk.has(a.id) && rk.has(b.id) ? rk.get(a.id) - rk.get(b.id) : 0) || matchOf(b) - matchOf(a) || a.startsAt.localeCompare(b.startsAt);
+  const weekly = () => SQ.d.events.filter((e) => live(e) && pick(e)).sort(byFeed(feedRank()));
   // A Vibe Mix: everything this week in a tile's vibes that fits your budget and trip time, ranked by match
   const MIX_PHOTO = { "Live Sets": "jazz-band", "Food Pop-ups": "string-lights", Markets: "beer-garden" };
   function mixEvents(label) {
@@ -441,20 +447,33 @@
      your location and the places search are run by launch.js. */
   const TIME = (e) => new Date(e.startsAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: TZ }).replace(":00", "");
   const lxWhen = (e) => `${isToday(e) ? "Today" : new Date(e.startsAt).toLocaleDateString("en-US", { weekday: "short", timeZone: TZ })} · starts ${TIME(e)}`;
-  const lxPrice = (e) => (e.price == null ? "Price on the listing" : e.price === 0 ? "Free" : `$${e.price} ticket`);
+  const lxPrice = (e) => (e.price == null ? "" : e.price === 0 ? "Free" : `$${e.price} ticket`);
+  // An unknown price is said plainly, never passed off as fitting a budget
+  const noPrice = (e) => (e.price == null ? `<span class="price-badge">Price not listed</span>` : "");
+  // Why it's here beyond taste, when the context changed things ("Rain is forecast, so indoor picks first")
+  const ctxOf = (e) => { const c = (me().feed && me().feed.context) || {}; return c[e.id] || ""; };
   const TIER_WORD = { strong: "Strong match", close: "Close match", low: "Worth a look" };
   // Option A cards (PK2), the same design the Sidekick call uses: a tag with an icon, the facts that matter, one link
-  function lxEventCard(e, { row = false, sel = false } = {}) {
+  // row cards (the list) carry "More like this" and "Not for me"; wild: the labelled Wildcard, with its reason
+  function lxEventCard(e, { row = false, sel = false, wild = null } = {}) {
     const t = pick(e) ? SQ.matchTier(matchOf(e)) : null;
     const link = e.ticketLink || e.sourceUrl;
-    return `<div class="lx-card ev${row ? " row" : ""}${sel ? " on" : ""}" data-id="e${e.id}"${row ? "" : ' role="listitem"'}>
+    const why = pick(e) && pick(e).reason;
+    const ctx = ctxOf(e);
+    const more = (me().moreLike || []).includes(e.id);
+    return `<div class="lx-card ev${row ? " row" : ""}${sel ? " on" : ""}${wild ? " wild" : ""}" data-id="e${e.id}"${row ? "" : ' role="listitem"'}>
       <button class="lx-main" data-act="openQuest" data-arg="${e.id}">
-        <span class="lx-top"><span class="kt ev">${icon("ticket", "xs")}Event</span>${t ? `<span class="lx-match ${t}"><i></i>${TIER_WORD[t].replace(" match", "")}</span>` : ""}</span>
+        <span class="lx-top">${wild ? `<span class="kt ev wild">${icon("dice", "xs")}Wildcard</span>` : `<span class="kt ev">${icon("ticket", "xs")}Event</span>`}${t && !wild ? `<span class="lx-match ${t}"><i></i>${TIER_WORD[t].replace(" match", "")}</span>` : ""}</span>
         <span class="lx-title">${esc(e.title)}</span>
         <span class="lx-when">${esc(lxWhen(e))}</span>
-        <span class="lx-meta">${esc([lxPrice(e), e.neighbourhood].filter(Boolean).join(" · "))}</span>
-        ${pick(e) && pick(e).reason ? `<span class="lx-why">${esc(pick(e).reason)}</span>` : ""}
+        <span class="lx-meta">${noPrice(e)}${esc([lxPrice(e), e.neighbourhood].filter(Boolean).join(" · "))}</span>
+        ${wild ? `<span class="lx-why">${esc(wild)}</span>` : why ? `<span class="lx-why">${esc(why)}</span>` : ""}
+        ${ctx && !wild && !(why || "").toLowerCase().includes(ctx.toLowerCase()) ? `<span class="lx-ctx">${esc(ctx.replace(/^./, (c) => c.toUpperCase()))}</span>` : ""}
       </button>
+      ${row ? `<div class="lx-acts">
+        <button class="lx-act${more ? " on" : ""}" data-act="moreLike" data-arg="${e.id}" aria-pressed="${more}">${icon("thumbUp", "sm")}More like this</button>
+        <button class="lx-act" data-act="notForMe" data-arg="${e.id}">${icon("thumbDown", "sm")}Not for me</button>
+      </div>` : ""}
       ${link ? `<a class="lx-link" href="${esc(link)}" target="_blank" rel="noopener">See tickets<span aria-hidden="true">›</span><span class="sr-only"> for ${esc(e.title)} (opens in a new tab)</span></a>`
         : `<button class="lx-link" data-act="openQuest" data-arg="${e.id}">See details<span aria-hidden="true">›</span></button>`}
     </div>`;
@@ -498,6 +517,13 @@
       if (i < ce.length && (i % 2 || j >= cp.length)) continue;
       if (j < cp.length) cards.push(lxPlaceCard(cp[j++], { sel: sel === cp[j - 1].id }));
     }
+    // The Wildcard: one labelled pick from outside your usual vibes, fourth in the list (a simple exploration rule)
+    const wc = u.feed && u.feed.wildcard;
+    const wild = wc && L.show.events ? SQ.d.events.find((e) => e.id === wc.id && live(e) && passes(e) && !evs.slice(0, 20).includes(e)) : null;
+    const wildWhy = wc ? wc.why : null;
+    const listRows = evs.slice(0, 20);
+    if (wild) listRows.splice(Math.min(3, listRows.length), 0, wild);
+    SQ.cardsShown("discover", (L.stop === "peek" ? ce : listRows).map((e) => e.id));
     const nE = evs.length, nP = pls.length;
     const count = [L.show.events ? `${nE} event${nE === 1 ? "" : "s"}` : "", L.show.places && L.places ? `${nP} place${nP === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "Nothing shown";
     const sub = !u.feed && U().feedLoading ? "Picking your matches…" : picked ? "Best matches first, this week" : "This week, soonest first";
@@ -513,7 +539,7 @@
       : `<div class="empty-state"><span class="illo">${icon("search")}</span><p class="t-title-l">${activeFilters().length ? "No sidequests match these filters." : "Nothing on this week yet."}</p>
         <p class="t-body-l c-secondary">Loosen a filter, or ask hosts to put this on. When enough people ask, you hear first.</p>
         <div class="btn-row">${btn("Clear filters", { "data-act": "dfClear" }, "outline m")}${btn("Request it", { "data-go": "request-new" }, "primary m", "bulb")}</div></div>`;
-    else list = `        ${evs.length ? `<section class="lx-sec lx-pad"><h2 class="lx-h"><span class="kt ev">${icon("ticket", "xs")}Events</span>Shows with set times</h2>${evs.slice(0, 20).map((e) => lxEventCard(e, { row: true, sel: sel === `e${e.id}` })).join("")}
+    else list = `        ${evs.length ? `<section class="lx-sec lx-pad"><h2 class="lx-h"><span class="kt ev">${icon("ticket", "xs")}Events</span>Shows with set times</h2>${listRows.map((e) => lxEventCard(e, { row: true, sel: sel === `e${e.id}`, wild: wild && e === wild ? wildWhy : null })).join("")}
           ${evs.length > 20 && picked ? `<button class="lx-more" data-go="weekly">See all ${evs.length} picks</button>` : ""}</section>` : ""}
         ${pls.length ? `<section class="lx-sec lx-pad"><h2 class="lx-h"><span class="kt pl">${icon("pin", "xs")}Places</span>Drop in any time</h2>${pls.map((p) => lxPlaceCard(p, { row: true, sel: sel === p.id })).join("")}</section>` : ""}
         ${placesDue ? `<section class="lx-sec lx-pad">${SQ.sk.after(L.placesSince, `<div class="wait-sk">${SQ.sk.rows(2)}</div>`)}</section>` : ""}
@@ -745,7 +771,7 @@
         ${e.description ? `<div class="qd-group"><span class="overline">About</span><p class="t-body-m c-secondary">${esc(e.description)}</p></div>` : ""}
         ${verifyCard(e)}
         ${flagSection(e)}
-        ${!logged ? `<button class="btn btn-ghost m" data-act="notForMe" data-arg="${e.id}">${icon("thumbDown")}Not for me</button>` : ""}
+        ${!logged ? `<div class="row" style="gap:8px"><button class="btn btn-ghost m" data-act="moreLike" data-arg="${e.id}" aria-pressed="${(me().moreLike || []).includes(e.id)}">${icon("thumbUp")}More like this</button><button class="btn btn-ghost m" data-act="notForMe" data-arg="${e.id}">${icon("thumbDown")}Not for me</button></div>` : ""}
       </div>`, { footer, cls: "bleed" });
   } };
 
@@ -993,7 +1019,7 @@
         const e = ev(m.id);
         if (!e) return "";
         return `<button class="ranked${i ? "" : " first"}" data-act="openQuest" data-arg="${e.id}"><span class="rank t-display-m">${i + 1}</span>${poster(e)}
-          <span class="text"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-body-m c-secondary ellipsis">${tierWord(m.match)}${i ? "" : ` for all ${people.length}`}${e.price == null ? "" : ` · ${esc(priceLabel(e))}`}</span></span></button>
+          <span class="text"><span class="t-title-m ellipsis">${esc(e.title)}</span><span class="t-body-m c-secondary ellipsis">${m.crewMatch != null ? `${m.crewMatch}% crew match` : `${tierWord(m.match)}${i ? "" : ` for all ${people.length}`}`}${e.price == null ? " · Price not listed" : ` · ${esc(priceLabel(e))}`}</span>${m.who ? `<span class="crew-who">${icon("crew", "xs")}${esc(m.who)}</span>` : ""}</span></button>
           ${i === 0 && m.reason ? `<div class="reason-box t-body-m">${esc(m.reason)}</div>` : ""}`;
       }).join("") : `<p class="t-body-m c-secondary">${theme ? `No ${esc(theme[0].toLowerCase())} in this blend yet.` : "Nothing suits everyone within these limits."}</p>`}
       ${!u.demo && b.unmet && b.unmet.length ? `<div class="notice hot">${icon("bulb")}<span>Nothing fit ${esc(b.unmet[0].person)}'s ${esc(b.unmet[0].interest)}.</span><button class="action" data-act="requestGap" data-arg="${esc(b.unmet[0].interest)}">Request it</button></div>` : ""}`;
@@ -1448,6 +1474,31 @@
   const settingRow = (ic, title, sub, a) => `<button class="list-row" ${Object.entries(a).map(([k, v]) => `${k}="${esc(v)}"`).join(" ")}><span class="lead-ic">${icon(ic)}</span><span class="text"><span>${esc(title)}</span><span>${esc(sub)}</span></span>${icon("chevR")}</button>`;
   const DAYS_LABEL = { weekends: "Weekends", weeknights: "Weeknights", both: "Any day" };
 
+  // Profile > Your taste: each vibe's weight now (onboarding plus what you saved, accepted, rated and passed on, fading
+  // over a month), with controls to turn it up or down, take it out, or put it back to automatic. Only you see this.
+  function tasteSection(u) {
+    const t = u.taste || { rows: [], actions: 0 };
+    const rows = t.rows.slice(0, 8);
+    const top = Math.max(5, ...rows.map((r) => r.weight));
+    const line = (r) => {
+      const out = r.edited === 0;
+      const w = Math.max(0, r.weight);
+      const note = out ? "Out of your taste" : r.edited != null ? "Set by you" : r.learned > 0.2 ? "Learned from what you do" : r.learned < -0.2 ? "Less, from what you passed on" : r.picked ? "From sign-up" : "";
+      return `<div class="taste-row${out ? " out" : ""}">
+        <span class="taste-name"><span class="taste-v">${esc(r.vibe)}</span><span class="t-caption c-secondary">${esc(note)}</span></span>
+        <span class="taste-bar" role="meter" aria-label="${esc(r.vibe)} weight" aria-valuemin="0" aria-valuemax="${top}" aria-valuenow="${Math.round(w * 10) / 10}"><i style="width:${Math.round((100 * w) / top)}%"></i></span>
+        <span class="taste-ctrls">
+          <button class="icon-btn" data-act="tasteDown" data-arg="${esc(r.vibe)}" aria-label="Less ${esc(r.vibe)}"${out ? " disabled" : ""}>${icon("minus")}</button>
+          <button class="icon-btn" data-act="tasteUp" data-arg="${esc(r.vibe)}" aria-label="More ${esc(r.vibe)}">${icon("plus")}</button>
+          ${out || r.edited != null ? `<button class="taste-txt" data-act="tasteAuto" data-arg="${esc(r.vibe)}">Reset</button>` : `<button class="taste-txt" data-act="tasteOut" data-arg="${esc(r.vibe)}" aria-label="Take ${esc(r.vibe)} out of your taste">Remove</button>`}
+        </span>
+      </div>`;
+    };
+    return `<div class="stack" style="gap:8px"><div class="section-head"><span class="t-title-l">Your taste</span><span class="t-caption c-secondary">${t.actions} action${t.actions === 1 ? "" : "s"} so far</span></div>
+      ${rows.length ? rows.map(line).join("") : '<p class="t-body-m c-secondary">Save, accept or rate a few sidequests and this fills in.</p>'}
+      <p class="t-caption c-tertiary">Learned from what you save, accept, rate, and mark More like this or Not for me. Older taps fade over a month. Only you see this.</p></div>`;
+  }
+
   S.profile = { role: "attendee", label: "Profile", render: () => {
     const u = me();
     const went = Object.values(u.log).filter((l) => l.status === "went").length;
@@ -1469,6 +1520,7 @@
         <div class="stack" style="gap:10px"><div class="section-head"><span class="t-title-l">What your taste avatar knows</span></div>
           <div class="chips">${[...tiles, ...TILES.map((t) => t[0]).filter((t) => !tiles.includes(t))].slice(0, Math.max(4, tiles.length + 1)).map((t) => chip(t, tiles.includes(t), { "data-act": "toggleTile", "data-arg": t })).join("")}</div>
           <p class="t-caption c-tertiary">${U().feedLoading ? "Updating what it knows… " : u.feed && u.feed.avatar ? `${esc(u.feed.avatar)} ` : ""}Based on ${went} sidequest${went === 1 ? "" : "s"}, ${checkins} check-in${checkins === 1 ? "" : "s"} and your ratings. Friends never see this.</p></div>
+        ${tasteSection(u)}
         <div class="stack" style="gap:10px"><div class="section-head"><span class="t-title-l">When you go out</span></div>
           <div class="chips">${whens.map(([w, ic]) => `<span class="chip">${icon(ic)}${esc(w)}</span>`).join("")}${u.days ? `<span class="chip">${esc(DAYS_LABEL[u.days] || u.days)}</span>` : ""}${!whens.length && !u.days ? '<span class="t-body-m c-secondary">Not set yet. Edit your profile to add it.</span>' : ""}</div></div>
         <div class="stack" style="gap:0"><div class="section-head"><span class="t-title-l">Settings</span></div>
