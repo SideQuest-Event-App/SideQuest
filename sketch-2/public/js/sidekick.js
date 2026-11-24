@@ -28,6 +28,9 @@
     lock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
     invite: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/></svg>',
     speaker: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+    pin: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
+    ticket: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8a2 2 0 0 0 2-2h14a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2H5a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2.5"/></svg>',
+    mappin: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
   };
   const PRIVATE_OPTS = {
     budget: [["20", "Under $20"], ["30", "Under $30"], ["50", "Under $50"], ["any", "Doesn't matter"]],
@@ -89,6 +92,80 @@
   });
   const picked = (name) => [...app.querySelectorAll(`.chips[data-name="${name}"] .chip[aria-pressed=true]`)].map((c) => c.dataset.value);
 
+  // ---------- Starting from: my location by default ----------
+  // "Use my location" is preselected on the start screen and the join card. The browser is only asked
+  // when the person taps Start, Join or Send; never on page load. Denied, timed out (8 s) or no
+  // geolocation: Union is selected with a short note, no error. If location is already blocked for
+  // this site (no prompt can show), Union is selected as the page opens. The phone rounds the point to
+  // about 1 km before sending it; the crew only ever sees a neighbourhood.
+  const HAS_GEO = "geolocation" in navigator;
+  const GEO_WHY = "Sidekick uses it to find spots near you. Your friends only see your neighbourhood.";
+  const GEO_NONE = "Location isn't available here, so you're starting from Union. Change it if another station is closer.";
+  const GEO_OFF = "Couldn't get your location, so you're starting from Union. Change it if another station is closer.";
+  const GEO_BLOCKED = "Location is off for this site, so you're starting from Union. Change it if another station is closer.";
+  let geoState = null; // the browser's permission state, when it can tell us without asking
+  function originPicker() {
+    const here = HAS_GEO ? `<button type="button" class="chip" data-group="origin" data-value="here" aria-pressed="true">${ICON.pin}Use my location</button>` : "";
+    return `<div class="stack" id="originBox"><p style="font-weight:600" id="originLabel">Starting from</p>
+      <div class="chips" data-name="origin" role="group" aria-labelledby="originLabel">${here}${PRIVATE_OPTS.origin.map(([v, l]) => chip("origin", v, l, !HAS_GEO && v === "union")).join("")}</div>
+      <p class="small geo-note${HAS_GEO ? "" : " fallback"}" id="originNote" role="status">${HAS_GEO ? GEO_WHY : GEO_NONE}</p></div>`;
+  }
+  function originFallback(text) {
+    app.querySelectorAll('.chips[data-name="origin"] .chip').forEach((x) => x.setAttribute("aria-pressed", x.dataset.value === "union"));
+    const note = document.getElementById("originNote");
+    if (note) { note.textContent = text; note.classList.add("fallback"); }
+  }
+  // After the picker is on screen: reading the permission state never shows a prompt
+  function initOrigin() {
+    if (!HAS_GEO || !navigator.permissions || !navigator.permissions.query) return;
+    navigator.permissions.query({ name: "geolocation" }).then((s) => {
+      geoState = s.state;
+      if (s.state === "denied" && picked("origin")[0] === "here") originFallback(GEO_BLOCKED);
+    }).catch(() => {});
+  }
+  // The note under the chips follows the choice: why we ask (location) or nothing (a station)
+  app.addEventListener("click", (e) => {
+    const c = e.target.closest('.chips[data-name="origin"] .chip');
+    const note = document.getElementById("originNote");
+    if (!c || !note) return;
+    note.textContent = c.dataset.value === "here" ? GEO_WHY : "";
+    note.classList.remove("fallback");
+  });
+  function getLocation() {
+    return new Promise((resolve) => {
+      if (!HAS_GEO) return resolve(null);
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; clearTimeout(timer); resolve(v); } };
+      const timer = setTimeout(() => finish(null), 8000);
+      const r2 = (n) => Math.round(n * 100) / 100;
+      try {
+        navigator.geolocation.getCurrentPosition((p) => finish({ lat: r2(p.coords.latitude), lng: r2(p.coords.longitude) }), () => finish(null), { timeout: 8000, maximumAge: 600000, enableHighAccuracy: false });
+      } catch { finish(null); }
+    });
+  }
+  // What to send for "Starting from": a station, or { lat, lng }. Null means the person said no at the
+  // prompt (or it took too long): Union is now selected with a note, so they can check it and tap again.
+  async function originAnswer(btn) {
+    const v = picked("origin")[0];
+    if (v !== "here") return v || null;
+    if (geoState === "denied") { originFallback(GEO_BLOCKED); return "union"; } // blocked already: no prompt, nothing to wait for
+    const label = btn.textContent;
+    const note = document.getElementById("originNote");
+    btn.disabled = true;
+    btn.textContent = "Finding your neighbourhood…";
+    if (note) note.textContent = GEO_WHY;
+    const asked = Date.now();
+    const at = await getLocation();
+    btn.disabled = false;
+    btn.textContent = label;
+    if (at) return at;
+    // Refused faster than anyone could answer a prompt: the browser said no on its own (settings or
+    // policy), so there's nothing to check. Carry on from Union, quietly.
+    if (Date.now() - asked < 400) { originFallback(GEO_BLOCKED); return "union"; }
+    originFallback(GEO_OFF);
+    return null;
+  }
+
   // ---------- 1. Start a call ----------
   async function startScreen() {
     let nights = [];
@@ -104,15 +181,19 @@
       <div class="stack"><p style="font-weight:600">Which nights could work?</p>
         <div class="chips" data-name="nights" data-multi>${nights.map((n) => chip("nights", n.date, n.label, defaults.includes(n.date), ` <small>${n.events}</small>`)).join("") || '<p class="small">No nights found.</p>'}</div>
         <p class="small">The number is how many events are listed that night.</p></div>
+      ${originPicker()}
       <button class="btn pri" id="go">Start the call</button>`;
+    initOrigin();
     document.getElementById("go").onclick = async (e) => {
       const name = document.getElementById("name").value.trim();
       const crew = document.getElementById("crew").value.trim() || "The crew";
       const chosen = picked("nights");
       if (!name) return toast("Add your name so your crew knows who's planning.");
       if (!chosen.length) return toast("Pick at least one night.");
-      e.target.disabled = true;
       unlockAudio();
+      const origin = await originAnswer(e.target);
+      if (!origin) return; // no location: Union is now selected, with a note; the next tap starts
+      e.target.disabled = true;
       try {
         const out = STUDY ? await studyApi("call", { n: 1, name, crew, nights: chosen }) : await api("/api/sk/rooms", { name, crew, nights: chosen, persona: params.get("persona") || undefined });
         if (out.join) { location.href = `/sk/${out.room}?study=${encodeURIComponent(STUDY)}&v=1`; return; } // someone in the crew already started it
@@ -121,6 +202,7 @@
         roomId = out.room;
         me = { person: out.person, mode: "voice" };
         store.set(`sk:${roomId}`, me);
+        await api(`/api/sk/rooms/${roomId}/answer`, { p: me.person, slot: "origin", value: origin, source: "start" }).catch(() => {});
         // Stay on this page (no reload), so the tap that unlocked audio on iPhones still counts
         history.pushState(null, "", `/sk/${roomId}${STUDY ? `?study=${encodeURIComponent(STUDY)}&v=${out.n || 1}` : ""}`);
         connect();
@@ -157,8 +239,7 @@
         <div class="chips" data-name="nos" data-multi>${PRIVATE_OPTS.nos.map(([v, l]) => chip("nos", v, l, false)).join("")}</div>
         <p class="small">The group only ever sees "fits everyone's budget" or a group limit, never your answer.</p>
       </div>
-      <div class="stack"><p style="font-weight:600">Starting from</p>
-        <div class="chips" data-name="origin">${PRIVATE_OPTS.origin.map(([v, l]) => chip("origin", v, l, false)).join("")}</div></div>
+      ${originPicker()}
       <div class="stack" id="formExtra" hidden>
         <p style="font-weight:600">Which nights work?</p><div class="chips" data-name="night" data-multi>${info.nights.map((l, i) => chip("night", i, l, false)).join("")}</div>
         <p style="font-weight:600">What time?</p><div class="chips" data-name="time" data-multi>${PRIVATE_OPTS.time.map(([v, l]) => chip("time", v, l, false)).join("")}</div>
@@ -169,6 +250,7 @@
         <button class="btn out" data-mode="text">Join by text</button>
         <button class="btn out" id="formMode">Answer without calling</button>
       </div>`;
+    initOrigin();
     const extra = document.getElementById("formExtra");
     document.getElementById("formMode").onclick = (e) => {
       if (extra.hidden) {
@@ -189,7 +271,6 @@
       const answers = {};
       const one = (k) => picked(k)[0];
       if (one("budget")) answers.budget = one("budget");
-      if (one("origin")) answers.origin = one("origin");
       if (picked("nos").length) answers.nos = picked("nos");
       if (b.dataset.mode === "form") {
         // the night chips carry an index; the server knows the dates
@@ -198,8 +279,13 @@
         if (picked("time").length) answers.time = picked("time");
         if (picked("vibe").length) answers.vibe = picked("vibe");
       }
-      b.disabled = true;
       unlockAudio();
+      if (one("origin")) {
+        const origin = await originAnswer(b);
+        if (!origin) return; // no location: Union is now selected, with a note; the next tap joins
+        answers.origin = origin;
+      }
+      b.disabled = true;
       try {
         const out = await api(`/api/sk/rooms/${roomId}/join`, { name, mode: b.dataset.mode, answers });
         store.set("sk:name", name);
@@ -511,31 +597,39 @@
     const picks = view.picks.map((p) => {
       const voters = view.votes[p.id] || [];
       const fits = Object.entries(p.fits || {}).filter(([, v]) => v).map(([n, v]) => `<span><b>${esc(n)}</b> ${esc(v)}</span>`).join("");
-      return `<button class="pick" data-vote="${p.id}" aria-pressed="${view.myVote === p.id}">
-        ${p.kind === "place" ? '<span class="tag soc" style="align-self:flex-start">Place · no tickets</span>' : '<span class="tag pri" style="align-self:flex-start">Event</span>'}
-        <span class="row sb"><h2>${esc(p.title)}</h2>${avStack(voters)}</span>
-        <span class="small" style="color:var(--t2)">${esc([p.when, p.price, p.where].filter(Boolean).join(" · "))}</span>
+      // An event is a ticket for a set time; a place is somewhere to drop in while it's open
+      const ev = p.kind !== "place";
+      const tag = ev ? `<span class="tag pri kt">${ICON.ticket}Event</span>` : `<span class="tag soc kt">${ICON.mappin}Place</span>`;
+      const meta = ev
+        ? [p.price, p.where]
+        : [[p.price, p.where].filter(Boolean).join(" · "), p.rating ? `Rated ${p.rating} on Google${p.ratingCount ? ` · ${p.ratingCount} reviews` : ""}` : null];
+      const link = p.url ? `<a class="pk-link" href="${esc(p.url)}" target="_blank" rel="noopener">${ev ? "See tickets" : "Directions"}<span class="sr"> for ${esc(p.title)} (opens in a new tab)</span></a>` : "";
+      return `<div class="pick-card ${ev ? "ev" : "pl"}"><button class="pick" data-vote="${p.id}" aria-pressed="${view.myVote === p.id}">
+        <span class="row sb">${tag}${avStack(voters)}</span>
+        <h2>${esc(p.title)}</h2>
+        <span class="pk-when">${esc(p.when)}</span>
+        ${meta.filter(Boolean).map((m) => `<span class="pk-meta">${esc(m)}</span>`).join("")}
         ${p.reason ? `<span class="small" style="color:var(--acc)">${esc(p.reason)}</span>` : ""}
         ${fits ? `<span class="fits">${fits}</span>` : ""}
         ${p.stretch && p.stretch.length ? `<span class="small">Stretches: ${esc(p.stretch.join(", "))}</span>` : ""}
-        ${p.attribution ? `<span class="small">Place info from ${esc(p.attribution)}</span>` : ""}
         <span class="meter"><i style="width:${Math.round((voters.length / crewSize) * 100)}%"></i></span>
-      </button>`;
+      </button>${link || p.attribution ? `<div class="pk-foot">${link}${p.attribution ? `<span class="small">Place info from ${esc(p.attribution)}</span>` : ""}</div>` : ""}</div>`;
     }).join("");
+    const mixed = new Set(view.picks.map((p) => (p.kind === "place" ? "place" : "event"))).size > 1;
     const lock = view.me.planner
       ? `<button class="btn pri" id="lock" ${Object.keys(view.votes).length ? "" : "disabled"}>Lock in the plan</button>`
       : `<p class="small center">${esc(view.people.find((p) => p.planner)?.name || "The planner")} locks it in once you've voted.</p>`;
     document.getElementById("body").innerHTML = `<div class="board">${boardHead('<span class="tag ok">All set</span>')}<p class="small" style="padding:0 14px 12px;color:var(--t2)">${esc(summary)}</p></div>
-      <div class="q" style="border-radius:22px;border:1px solid var(--pri-e)"><span class="small">Two picks fit everyone · tap one to vote</span>${picks}</div>
+      <div class="q" style="border-radius:22px;border:1px solid var(--pri-e)"><span class="small">${mixed ? "A show to go to, or a spot to drop in. Tap one to vote." : "Two picks fit everyone · tap one to vote"}</span>${picks}</div>
       <p class="small">Picked for your crew's budget, distance and vibe. Venues can't pay to appear here.</p>
-      ${view.picks.filter((p) => p.url && p.kind === "place").map((p) => `<a class="small" style="color:var(--soc-x)" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)} on Google Maps</a>`).join("")}${lock}`;
+      ${lock}`;
     renderTicks();
   }
 
   function renderDone() {
     const L = view.locked;
     const plan = L
-      ? `<div class="board">${boardHead('<span class="tag ok">Locked</span>')}<div style="padding:0 14px 14px" class="stack"><h1>${esc(L.title)}</h1><p class="muted">${esc([L.when, L.price, L.where].filter(Boolean).join(" · "))}</p>${L.url ? `<a class="small" style="color:var(--soc-x)" href="${esc(L.url)}" target="_blank" rel="noopener">${L.kind === "place" ? "Open in Google Maps" : "See the listing"}</a>` : ""}${L.attribution ? `<span class="small">Place info from ${esc(L.attribution)}</span>` : ""}</div></div>`
+      ? `<div class="board">${boardHead('<span class="tag ok">Locked</span>')}<div style="padding:0 14px 14px" class="stack"><h1>${esc(L.title)}</h1><p class="muted">${esc([L.when, L.price, L.where].filter(Boolean).join(" · "))}</p>${L.url ? `<a class="small" style="color:var(--soc-x)" href="${esc(L.url)}" target="_blank" rel="noopener">${L.kind === "place" ? "Directions" : "See tickets"}</a>` : ""}${L.attribution ? `<span class="small">Place info from ${esc(L.attribution)}</span>` : ""}</div></div>`
       : `<h1>Call ended</h1><p class="muted">The transcript has been deleted.</p>`;
     const survey = view.surveyed
       ? `<div class="priv" style="border-style:solid;border-color:var(--bs)"><p>Thanks, that helps us improve Sidekick.</p></div>`

@@ -104,12 +104,43 @@ function suggestNights() {
 function setAnswer(room, person, slot, value, source) {
   const def = P.SLOTS[slot];
   if (!def) return false;
+  if (slot === "origin") return setOrigin(room, person, value, source);
   const valid = P.optionsFor(slot, room).map(([v]) => v);
   let v = def.multi ? [].concat(value).map(String).filter((x) => valid.includes(x)) : valid.includes(String(value)) ? String(value) : null;
   if (v == null || (Array.isArray(v) && !v.length && slot !== "nos")) return false;
   room.answers[person.id][slot] = { value: v, source, at: now() };
   track("response_submitted", { sessionId: room.id, persona: room.persona, slot, source, visibility: def.private ? "private" : "group" });
   return true;
+}
+
+// "Starting from": a station, or the person's own location. A location arrives as { lat, lng } and is
+// rounded to 2 decimals (about 1 km) straight away. The rounded point is kept only in that person's
+// private answers (answers.location), for this call: never in a view, broadcast, log, analytics event,
+// summary or AI prompt, and it's deleted when the call ends. Everything else uses what it stands for:
+// the nearest station (for travel times) and a neighbourhood ("near Koreatown").
+// "here" re-uses a location the person already shared (a tap on "My location", or "I'm at home").
+const round2 = (n) => Math.round(n * 100) / 100;
+function setOrigin(room, person, value, source) {
+  const mine = room.answers[person.id];
+  let loc = null;
+  if (value && typeof value === "object") {
+    const lat = Number(value.lat), lng = Number(value.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return false;
+    const at = { lat: round2(lat), lng: round2(lng) };
+    loc = mine.location = { ...at, station: places.nearestStation(at.lat, at.lng), near: places.nearLabel(at.lat, at.lng) };
+  } else if (value === "here") {
+    if (!mine.location) return false;
+    loc = mine.location;
+  } else if (!P.optionsFor("origin", room).some(([v]) => v === String(value))) return false;
+  mine.origin = loc ? { value: loc.station, here: true, near: loc.near, source, at: now() } : { value: String(value), source, at: now() };
+  track("response_submitted", { sessionId: room.id, persona: room.persona, slot: "origin", source, visibility: "group" });
+  return true;
+}
+// A person's own answers as their phone may see them: no coordinates, just whether they shared
+function ownAnswers(answers) {
+  if (!answers) return answers;
+  const { location, ...rest } = answers;
+  return rest;
 }
 
 // ---------- Several phones in one room ----------
@@ -315,7 +346,7 @@ async function extract(room, lines) {
   const names = P.crew(room).map((p) => p.name);
   const allowed = Object.keys(P.SLOTS).map((s) => `- ${s}: ${P.optionsFor(s, room).map(([v, l]) => `${v} (${l})`).join(", ")}`).join("\n");
   const user = `People on the call: ${names.join(", ")}.
-Allowed values per slot (night = dates; time: early is noon to 5, evening is 5 to 8, late is after 8; origin = the subway terminal nearest where they start; budget = max spend in dollars; nos = areas to avoid):
+Allowed values per slot (night = dates; time: early is noon to 5, evening is 5 to 8, late is after 8; origin = the subway terminal nearest where they start, or "here" when they say they're starting from home or where they are now; budget = max spend in dollars; nos = areas to avoid):
 ${allowed}
 
 Recent lines (earlier context, then the new lines to read):
@@ -326,6 +357,8 @@ Record what the NEW lines say. If someone accepts several options (e.g. "Friday 
   return out;
 }
 
+// "I'm at home", "where I am": the person's own location, if they shared it (else the origin card)
+const HOME = /\b(i'?m at home|at home|from home|leaving from home|where i am|where i'?m at|my (location|place)|from here|i'?m here)\b/;
 // No AI: simple keyword reading, good enough to test the flow
 function extractKeywords(room, lines) {
   const updates = [];
@@ -348,7 +381,7 @@ function extractKeywords(room, lines) {
     const money = t.match(/\$\s?(\d+)|(\d+)\s?(bucks|dollars)/);
     if (money) { const n = Number(money[1] || money[2]); add("budget", [n <= 20 ? "20" : n <= 30 ? "30" : n <= 50 ? "50" : "any"]); }
     else if (/\bbroke\b|cheap|free/.test(t)) add("budget", ["20"]);
-    const o = /union|downtown/.test(t) ? "union" : /finch|north york/.test(t) ? "finch" : /kennedy|scarborough/.test(t) ? "kennedy" : /kipling|etobicoke/.test(t) ? "kipling" : null;
+    const o = /union|downtown/.test(t) ? "union" : /finch|north york/.test(t) ? "finch" : /kennedy|scarborough/.test(t) ? "kennedy" : /kipling|etobicoke/.test(t) ? "kipling" : HOME.test(t) ? "here" : null;
     if (o) add("origin", [o]);
     const vibes = [];
     if (/music|jazz|band|gig|concert/.test(t)) vibes.push("music");
@@ -374,7 +407,8 @@ function applyUpdates(room, out, lines) {
     if (!def) continue;
     let values = (u.values || []).map(String);
     if (u.slot === "nos") values = [...new Set([...((room.answers[person.id].nos || {}).value || []), ...values])];
-    setAnswer(room, person, u.slot, def.multi ? values : values[0], line && line.kind === "typed" ? "call_text" : "call_speech");
+    const ok = setAnswer(room, person, u.slot, def.multi ? values : values[0], line && line.kind === "typed" ? "call_text" : "call_speech");
+    if (!ok && u.slot === "origin" && values[0] === "here") room.askOrigin = true; // they didn't share it: ask the usual card
   }
 }
 
@@ -417,7 +451,7 @@ async function speak(room, move, c = {}) {
       ask: c.slot === "budget" ? `Ask everyone to tap their max spend on their own screen, and say only you see it.` : `Ask the group: ${PROMPTS[c.slot]} (options on screen: ${opts}). Briefly read back what's settled first if it helps.`,
       conflict: `Name this disagreement without taking sides and offer a way forward: ${c.a} vs ${c.b}.`,
       nudge: `Gently invite ${c.person} in to answer: ${PROMPTS[c.slot]}`,
-      picks: `Introduce these two picks and ask everyone to vote. You may add one local detail from the event data.\n1) ${c.picks[0]}\n2) ${c.picks[1]}`,
+      picks: `Introduce these two picks and ask everyone to vote. Say which kind each one is (${c.kinds || "both fit the plan"}): a show has a start time and tickets, a place they can drop into any time it's open. You may add one local detail from the event data.\n1) ${(c.picks || [])[0]}\n2) ${(c.picks || [])[1]}`,
       none: c.relax ? `Nothing fits everything they've said. Say that ${c.relax} would open up ${c.n} options, and ask if they want to see them. Don't say whose answer is the tight one.` : `Nothing fits everything they've said. Ask whether anyone could be flexible on the time or the night.`,
       checkin: `This is the first time you speak. Welcome everyone to SideQuest, say this call is for planning their next night out, and ask whether they want you to lead the planning or sit back while they fill in the plan on their screens. Keep it to two short sentences.`,
       mode_lead: `The crew wants you to lead. Say you've got it, then ask: ${c.slot ? QUESTION_SPOKEN[c.slot] : "what works for everyone?"}`,
@@ -474,7 +508,7 @@ function lineContext(room, f, c) {
     name: c.person,
     a: c.aLabel, b: c.bLabel, a_count: c.aCount != null ? WORDS[c.aCount] || c.aCount : null, b_count: c.bCount != null ? WORDS[c.bCount] || c.bCount : null,
     loosen: c.relax, n: c.n != null ? WORDS[c.n] || c.n : null,
-    pick1: c.short && c.short[0], pick2: c.short && c.short[1], why1: c.why && c.why[0], why2: c.why && c.why[1], pick: c.pick,
+    pick1: c.short && c.short[0], pick2: c.short && c.short[1], why1: c.why && c.why[0], why2: c.why && c.why[1], pick: c.pick, kinds: c.kinds,
     missing: missing.length ? missing.slice(0, 2).join(" and ") : null,
     options: c.options,
     question: c.slot ? QUESTION_SPOKEN[c.slot] : null,
@@ -529,7 +563,7 @@ function cueFor(room, move, c, suggestion) {
   const opts = c.slot && c.slot !== "budget" ? P.optionsFor(c.slot, room).map(([, l]) => l).join(", ") : "";
   const detail = ["mode_lead", "mode_default", "switch_lead"].includes(move) && c.slot ? `Question: ${QUESTION_SPOKEN[c.slot]}`
     : move === "ask" || move === "welcome" ? `${PROMPTS[c.slot] || ""}${opts ? ` Options on screen: ${opts}.` : ""}${c.slot === "budget" ? " Everyone answers privately on their own screen." : ""}`
-    : move === "picks" ? (c.picks || []).map((x, i) => `${i + 1}) ${x}`).join(" ")
+    : move === "picks" ? `${(c.picks || []).map((x, i) => `${i + 1}) ${x}`).join(" ")}${c.kinds ? ` Say which is which: ${c.kinds}.` : ""}`
     : move === "guide" ? `Ideas: ${c.options}.`
     : move === "conflict" ? `${c.a} vs ${c.b}.`
     : move === "nudge" ? `Person: ${c.person}. Question: ${PROMPTS[c.slot] || ""}`
@@ -587,7 +621,12 @@ async function ensurePlaces(room, f) {
   room.placesTried = true;
   if (!(await places.available())) return;
   // Near the crew: everyone's starting points so far (from the join card or the call)
-  const origins = P.crew(room).map((p) => room.answers[p.id] && room.answers[p.id].origin && room.answers[p.id].origin.value).flat().filter(Boolean);
+  // A shared location counts as its rounded point; it goes only into the search circle, never a log
+  const origins = P.crew(room).map((p) => {
+    const a = room.answers[p.id] || {};
+    if (!a.origin) return null;
+    return a.origin.here && a.location ? { lat: a.location.lat, lng: a.location.lng } : a.origin.value;
+  }).filter(Boolean);
   const out = await places.forCall(f.vibe.value || [], { origins });
   room.places = out.places;
   track("sk_places_loaded", { sessionId: room.id, persona: room.persona, n: out.places.length, capped: out.capped || null });
@@ -665,7 +704,9 @@ async function decide(room, { forcePicks = false } = {}) {
     if (!room.card || room.card.slot !== "form") room.card = { slot: "form", at: now() };
     return;
   }
-  const slot = P.nextQuestion(events, room, f) || (f.budget.answered < P.need(room) ? "budget" : null);
+  const askOrigin = room.askOrigin && P.crew(room).some((p) => !(room.answers[p.id] || {}).origin);
+  room.askOrigin = false;
+  const slot = (askOrigin ? "origin" : null) || P.nextQuestion(events, room, f) || (f.budget.answered < P.need(room) ? "budget" : null);
   if (!slot) return;
   if (!room.card || room.card.slot !== slot) {
     const first = !room.said.length;
@@ -708,6 +749,15 @@ function nudgeTick() {
 }
 setInterval(nudgeTick, 5000).unref();
 
+// "Sat" and "7:30 PM" in Toronto time, for event picks; spoken: "7:30", "8"
+const dayShortFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Toronto", weekday: "short" });
+const timeFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Toronto", hour: "numeric", minute: "2-digit" });
+const startDay = (iso) => dayShortFmt.format(new Date(iso));
+function startTime(iso, spoken = false) {
+  const t = timeFmt.format(new Date(iso)).replace(":00", "");
+  return spoken ? t.replace(/\s?[AP]M$/, "") : t;
+}
+
 async function makePicks(room, list) {
   room.picks = [];
   const f = factsOf(room);
@@ -742,9 +792,11 @@ async function makePicks(room, list) {
       const night = f.night.known && f.night.value.length ? f.night.value[0] : room.nights[0];
       const b = f.time.known && f.time.value.length ? f.time.value[0] : "evening";
       const hours = places.closesLabel(e.hours, new Date(night + "T12:00:00").getDay(), { early: 15, evening: 19, late: 21 }[b]);
-      return { id: e.id, kind: "place", title: e.title, when: `${spokenDay(P.nightLabel(night))} · ${hours}`, stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `${e.priceNote ? `${e.priceNote} · ` : ""}about $${e.price} each` : e.priceNote || "Price not listed", where: [e.neighbourhood, e.rating ? `rated ${e.rating}` : null].filter(Boolean).join(" · "), reason: m.reason || "", fits: m.fits || {}, url: e.mapsUrl, attribution: "Google Maps" };
+      // A place: no start time and no ticket. Drop in while it's open; price is a rough spend per person.
+      return { id: e.id, kind: "place", title: e.title, when: `${hours} · drop in any time`, night: spokenDay(P.nightLabel(night)), stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `${e.priceNote ? `${e.priceNote} · ` : ""}about $${e.price} each` : e.priceNote || "Price not listed", where: e.neighbourhood || "", rating: e.rating || null, ratingCount: e.ratingCount || 0, placeType: places.placeType(e.tags), reason: m.reason || "", fits: m.fits || {}, url: e.mapsUrl, attribution: "Google Maps" };
     }
-    return { id: e.id, kind: "event", title: e.title, when: e.date, stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `$${e.price}` : "Price not listed", where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), reason: m.reason || "", fits: m.fits || {}, url: e.sourceUrl || null };
+    // An event: a day and a start time, and a ticket price
+    return { id: e.id, kind: "event", title: e.title, when: e.startsAt ? `${startDay(e.startsAt)} · starts ${startTime(e.startsAt)}` : e.date, stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `$${e.price} ticket` : "Price not listed", where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), startsAt: e.startsAt || null, reason: m.reason || "", fits: m.fits || {}, url: e.sourceUrl || null };
   });
   room.card = null;
   track("call_facts_complete", { sessionId: room.id, persona: room.persona, secs: Math.round((now() - room.createdAt) / 1000), questions: room.asked.length });
@@ -755,7 +807,9 @@ async function makePicks(room, list) {
     const vibe = (e.vibes || [])[0];
     return [[vibe && vibe.toLowerCase(), e.neighbourhood && `in ${e.neighbourhood}`].filter(Boolean).join(" "), e.price === 0 ? "and it's free" : e.price != null ? `about ${e.price} dollars` : null].filter(Boolean).join(", ");
   };
-  await speak(room, "picks", { why: room.picks.map(whyOf), short: room.picks.map((p) => cleanTitle(p.title)), picks: room.picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => room.picks.some((p) => p.id === e.id)) });
+  // Say out loud which is which: "one's a show at 7:30, the other's a bar you can drop into"
+  const kinds = personas.kindsLine(room.persona, room.picks.map((p) => ({ kind: p.kind, time: p.startsAt ? startTime(p.startsAt, true) : null, type: p.placeType })));
+  await speak(room, "picks", { kinds, why: room.picks.map(whyOf), short: room.picks.map((p) => cleanTitle(p.title)), picks: room.picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => room.picks.some((p) => p.id === e.id)) });
 }
 
 // ---------- Ending, saving the summary ----------
@@ -765,6 +819,7 @@ function endRoom(room, why) {
   room.status = "ended";
   room.lines = []; // the transcript is never kept
   room.pending = [];
+  for (const a of Object.values(room.answers)) delete a.location; // shared locations go with it
   const f = factsOf(room);
   const summary = {
     room: room.id,
@@ -795,12 +850,19 @@ function endRoom(room, why) {
 
 // ---------- What each person sees ----------
 
-function rows(room, f = factsOf(room)) {
+// The board. `viewer` (a person id) sees their own shared location as "near you"; everyone else sees
+// its neighbourhood ("near Koreatown"). Without a viewer (Sidekick's own prompt) it's the neighbourhood.
+function originLabel(room, x, viewer) {
+  if (!x.a.here) return P.labelOf("origin", x.a.value, room);
+  return x.person.id === viewer ? "near you" : x.a.near || "near their spot";
+}
+function rows(room, f = factsOf(room), viewer = null) {
   return ["night", "time", "budget", "origin", "vibe", ...(room.places && room.places.length ? ["kind"] : [])].map((slot) => {
     const g = f[slot];
     let value = null;
     let who = "";
     if (slot === "budget") { value = P.budgetLabel(f, room); who = g.answered ? `private · ${g.answered} of ${P.crew(room).length}` : ""; }
+    else if (slot === "origin" && g.value && g.value.length) { value = [...new Set(P.answersFor(room, "origin").map((x) => originLabel(room, x, viewer)))].join(", "); who = [...new Set(Object.values(g.supporters).flat())].join(", "); }
     else if (slot === "vibe") { value = g.value && g.value.length ? g.value.slice(0, 2).map((v) => P.labelOf(slot, v, room)).join(" + ") : null; who = g.value && g.value[0] ? (g.supporters[g.value[0]] || []).join(", ") : ""; }
     else if (g.value && g.value.length) { value = [].concat(g.value).map((v) => P.labelOf(slot, v, room)).join(slot === "origin" ? ", " : " or "); who = [...new Set(Object.values(g.supporters).flat())].join(", "); }
     const state = g.conflict ? "conflict" : room.card && room.card.slot === slot ? "asking" : g.known ? "done" : "todo";
@@ -809,6 +871,19 @@ function rows(room, f = factsOf(room)) {
 }
 
 const MODE_OPTIONS = [["lead", "Take the lead"], ["sidelines", "We'll fill it in"]];
+// A card's options with who picked each. "Starting from" adds "My location" for someone who shared
+// theirs, and never puts a location-sharer's initial on a station chip.
+function slotOptions(room, person, slot) {
+  const mine = room.answers[person.id] || {};
+  const voters = {};
+  for (const x of P.answersFor(room, slot)) {
+    if (slot === "origin" && x.a.here) { if (x.person.id === person.id) voters.here = [initial(x.person.name)]; continue; }
+    for (const v of [].concat(x.a.value)) voters[v] = [...(voters[v] || []), initial(x.person.name)];
+  }
+  const chosen = !mine[slot] ? [] : slot === "origin" && mine.origin.here ? ["here"] : [].concat(mine[slot].value);
+  const opts = slot === "origin" && mine.location ? [["here", "My location"], ...P.optionsFor(slot, room)] : P.optionsFor(slot, room);
+  return opts.map(([value, label]) => ({ value, label, voters: voters[value] || [], mine: chosen.includes(value) }));
+}
 function cardFor(room, person) {
   const mine = room.answers[person.id] || {};
   if (room.status !== "live" || room.picks) return null;
@@ -818,12 +893,7 @@ function cardFor(room, person) {
     return { slot: "mode", private: false, multi: false, prompt: "How should Sidekick help?", note: "Tap or just say it. Sidekick leads if nobody answers.", options: MODE_OPTIONS.map(([value, label]) => ({ value, label, voters: votes[value] || [], mine: room.modeVotes[person.id] === value })) };
   }
   if (room.mode === "sidelines") {
-    const slotCard = (slot) => {
-      const voters = {};
-      for (const x of P.answersFor(room, slot)) for (const v of [].concat(x.a.value)) voters[v] = [...(voters[v] || []), initial(x.person.name)];
-      const chosen = mine[slot] ? [].concat(mine[slot].value) : [];
-      return { slot, prompt: PROMPTS[slot], multi: P.SLOTS[slot].multi, options: P.optionsFor(slot, room).map(([value, label]) => ({ value, label, voters: voters[value] || [], mine: chosen.includes(value) })) };
-    };
+    const slotCard = (slot) => ({ slot, prompt: PROMPTS[slot], multi: P.SLOTS[slot].multi, options: slotOptions(room, person, slot) });
     const slots = [...(room.nights.length > 1 ? ["night"] : []), "time", "vibe", "origin", ...(room.places && room.places.length ? ["kind"] : [])];
     return {
       form: true,
@@ -838,16 +908,13 @@ function cardFor(room, person) {
   }
   if (!room.card) return null;
   const slot = room.card.slot;
-  const voters = {};
-  for (const x of P.answersFor(room, slot)) for (const v of [].concat(x.a.value)) voters[v] = [...(voters[v] || []), initial(x.person.name)];
-  const chosen = mine[slot] ? [].concat(mine[slot].value) : [];
-  return { slot, private: false, prompt: PROMPTS[slot], multi: P.SLOTS[slot].multi, options: P.optionsFor(slot, room).map(([value, label]) => ({ value, label, voters: voters[value] || [], mine: chosen.includes(value) })) };
+  return { slot, private: false, prompt: PROMPTS[slot], multi: P.SLOTS[slot].multi, options: slotOptions(room, person, slot) };
 }
 
 function viewFor(room, pid) {
   const me = room.people.find((p) => p.id === pid);
   const f = factsOf(room);
-  const r = rows(room, f);
+  const r = rows(room, f, pid);
   const votes = {};
   for (const [p, ev] of Object.entries(room.votes)) {
     const who = room.people.find((x) => x.id === p);
@@ -858,7 +925,7 @@ function viewFor(room, pid) {
     crew: room.crew,
     status: room.status,
     nights: room.nights.map((d) => P.nightLabel(d)),
-    me: me && { id: me.id, name: me.name, mode: me.mode, planner: me.role === "planner", answers: room.answers[me.id] },
+    me: me && { id: me.id, name: me.name, mode: me.mode, planner: me.role === "planner", answers: ownAnswers(room.answers[me.id]), sharedLocation: Boolean((room.answers[me.id] || {}).location) },
     people: P.crew(room).map((p) => ({ id: p.id, name: p.name, initial: initial(p.name), mode: p.mode, talking: now() - p.lastSpokeAt < 3000, planner: p.role === "planner", online: room.streams.has(p.id), audio: Boolean(p.audio), muted: Boolean(p.muted) })),
     audioRoom: room.people.some((p) => p.audio),
     boot: BOOT,

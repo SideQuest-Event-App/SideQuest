@@ -92,7 +92,7 @@ const LINES = {
     guide: ["No stress if you're not sure. {night} has {options}. Any of those sound good?", "Lemme throw out some ideas: {options}. What's calling you?"],
     nudge: ["{name}, you've gone quiet. {night} good for you?", "{name}, no pressure, but what's your take?"],
     loosen: ["Ugh, nothing fits all of that. If we look at {loosen}, I've got {n}. Want to see?", "Tough one. {loosen} opens up {n} options. Should I show you?"],
-    picks: ["Found two. {pick1}, {why1}. Or {pick2}, {why2}. Which one?", "Okay, two good ones: {pick1}, {why1}. Or {pick2}. Vote away."],
+    picks: ["Found two, and {kinds}. {pick1}, {why1}. Or {pick2}, {why2}. Which one?", "Okay, two good ones, and {kinds}: {pick1}, {why1}. Or {pick2}. Vote away."],
     answer: ["Almost there. Tell me {missing} and I'll pull two picks.", "Give me one more answer and I've got you."],
     locked: ["Locked in. {pick}, {night}. That's a good one.", "Done. {night} is sorted, nobody has to chase anyone."],
     wrap: ["Last thing: two quick taps on your screen about how I did. Keeps me honest.", "Before you go, rate me on your screen. Be brutal."],
@@ -116,7 +116,7 @@ const LINES = {
     guide: ["If it helps, there's {options} that evening. Do any of those appeal?", "Some ideas, if you'd like: {options}. Which sounds closest?"],
     nudge: ["{name}, there's no rush. Does {night} work for you?", "{name}, I'd love to hear what you think, whenever you're ready."],
     loosen: ["Nothing fits everything just yet. With {loosen}, there are {n} good options. Shall I show them?", "I couldn't find a perfect match. {loosen} would give us {n} choices. Would that be alright?"],
-    picks: ["I've found two that suit everyone. {pick1}, {why1}. Or {pick2}, {why2}. Take your time.", "Here are two good options. {pick1}, or {pick2}. Either works well. Which feels right?"],
+    picks: ["I've found two that suit everyone; {kinds}. {pick1}, {why1}. Or {pick2}, {why2}. Take your time.", "Here are two good options, and {kinds}. {pick1}, or {pick2}. Either works well. Which feels right?"],
     answer: ["I don't have quite enough yet. Once I know {missing}, I'll suggest two options.", "Nearly there. One more answer and I'll share what fits."],
     locked: ["Wonderful. {pick} on {night} is locked in.", "That's settled. {pick}, {night}."],
     wrap: ["Before you go, there are two short questions on your screen. They help me improve.", "Thank you, everyone. If you have a moment, two quick questions are on your screen."],
@@ -129,12 +129,27 @@ const resolve = (id) => (PERSONAS[id] ? id : ALIAS[id] || "concierge");
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 const pickOne = (list) => list[Math.floor(Math.random() * list.length)];
 
+// How each persona says what kind the two picks are, in pick order. list: [{ kind: "event"|"place",
+// time: "7:30" (events), type: "bar" (places) }]. Fills {kinds} in the picks lines.
+const KIND_WORDS = {
+  friend: { show: (t) => `a show${t ? ` at ${t}` : ""}`, spot: (type) => `a ${type || "spot"} you can drop into`, mixed: (a, b) => `one's ${a}, the other's ${b}`, events: "both are shows", places: "both are spots you can just drop into" },
+  concierge: { show: (t) => (t ? `a show starting at ${t}` : "a ticketed show"), spot: (type) => `a ${type || "place"} you can drop into whenever suits`, mixed: (a, b) => `one is ${a}, the other ${b}`, events: "both are ticketed shows", places: "both are places you can drop into" },
+};
+function kindsLine(id, list) {
+  const w = KIND_WORDS[resolve(id)];
+  const items = (list || []).slice(0, 2);
+  if (items.length < 2) return null;
+  const one = (x) => (x.kind === "place" ? w.spot(x.type) : w.show(x.time));
+  if (items[0].kind !== items[1].kind) return w.mixed(one(items[0]), one(items[1]));
+  return items[0].kind === "place" ? w.places : w.events;
+}
+
 // c: { crew, nights, night, name, a, b, a_count, b_count, loosen, n, pick1, pick2, why1, why2, pick, missing, options }
 // recent: Sidekick's last few lines, so a version that starts the same way isn't used again
 function fallbackLine(id, move, c, recent = []) {
   const set = LINES[resolve(id)];
   const versions = set[move] || set.answer;
-  const fill = (t) => cap(t.replace(/\{(\w+)\}/g, (_, k) => (c[k] != null && c[k] !== "" ? c[k] : DEFAULTS[k] || "")).replace(/\s+([,.?!])/g, "$1").replace(/,\s*,/g, ",").replace(/([.!?]\s+)([a-z])/g, (_, p, ch) => p + ch.toUpperCase()));
+  const fill = (t) => cap(t.replace(/\{(\w+)\}/g, (_, k) => (c[k] != null && c[k] !== "" ? c[k] : DEFAULTS[k] || "")).replace(/\s+([,.?!])/g, "$1").replace(/,\s*,/g, ",").replace(/,([.?!:])/g, "$1").replace(/([.!?]\s+)([a-z])/g, (_, p, ch) => p + ch.toUpperCase()));
   // A version that needs a fact we don't have (e.g. {why1}) is skipped when another version works
   const usable = versions.filter((t) => (t.match(/\{(\w+)\}/g) || []).every((m) => { const k = m.slice(1, -1); return (c[k] != null && c[k] !== "") || DEFAULTS[k]; }));
   const pool = (usable.length ? usable : versions).map(fill);
@@ -143,7 +158,7 @@ function fallbackLine(id, move, c, recent = []) {
   const fresh = pool.filter((t) => !used.has(opener(t)));
   return pickOne(fresh.length ? fresh : pool);
 }
-const DEFAULTS = { question: "what works for everyone?", crew: "crew", nights: "Friday or Saturday", night: "That night", missing: "a couple more things", loosen: "loosening one thing", n: "a few", options: "a few different options" };
+const DEFAULTS = { kinds: "both fit the plan", question: "what works for everyone?", crew: "crew", nights: "Friday or Saturday", night: "That night", missing: "a couple more things", loosen: "loosening one thing", n: "a few", options: "a few different options" };
 
 const BANNED = [/as an ai/i, /i'?d be happy to/i, /great question/i, /i'?ll (come|be there|join you)/i, /\bi feel\b/i, /\b(um|uh)\b/i];
 function acceptable(text) {
@@ -151,4 +166,4 @@ function acceptable(text) {
   return !BANNED.some((re) => re.test(text));
 }
 
-module.exports = { PERSONAS, PERSONA_IDS, LINES, resolve, systemPrompt, fallbackLine, acceptable };
+module.exports = { PERSONAS, PERSONA_IDS, LINES, resolve, systemPrompt, fallbackLine, acceptable, kindsLine };

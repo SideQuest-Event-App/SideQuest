@@ -23,10 +23,21 @@ const km = (a, b) => {
   const r = Math.PI / 180, dLat = (b[0] - a[0]) * r, dLng = (b[1] - a[1]) * r;
   return 12742 * Math.asin(Math.sqrt(Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLng / 2) ** 2));
 };
+// Someone's shared location (already rounded to about 1 km): the station whose travel times stand in
+// for theirs, and the neighbourhood the crew sees ("near Koreatown"). Coordinates go no further.
+function nearestStation(lat, lng) {
+  return Object.entries(STATIONS).map(([k, p]) => [k, km([lat, lng], p)]).sort((a, b) => a[1] - b[1])[0][0];
+}
+function nearLabel(lat, lng) {
+  const where = place(lat, lng, "Toronto");
+  return where.area === "Beyond Toronto" ? "outside Toronto" : `near ${where.neighbourhood}`;
+}
 // The search circle for a crew: centred between everyone's starting points, wide enough to reach
 // the middle from each of them (5 to 15 km). No known starting points: downtown, 15 km.
+// An origin is a station ("union") or a shared location ({ lat, lng }, rounded).
 function nearCrew(origins) {
-  const pts = [...new Set(origins || [])].map((o) => STATIONS[o]).filter(Boolean);
+  const pt = (o) => (o && typeof o === "object" ? (Number.isFinite(o.lat) && Number.isFinite(o.lng) ? [o.lat, o.lng] : null) : STATIONS[o]);
+  const pts = [...new Map((origins || []).map(pt).filter(Boolean).map((p) => [p.join(","), p])).values()];
   if (!pts.length) return { center: CENTER, radius: 15000 };
   const mid = [pts.reduce((t, p) => t + p[0], 0) / pts.length, pts.reduce((t, p) => t + p[1], 0) / pts.length];
   const reach = Math.max(...pts.map((p) => km(p, mid)));
@@ -126,6 +137,14 @@ async function forCall(vibes, opts) {
   return { places: [...seen.values()], capped };
 }
 
+// What kind of place it is, in a word Sidekick can say ("a bar you can drop into")
+const TYPE_WORDS = [["karaoke", "karaoke spot"], ["night_club", "club"], ["comedy_club", "comedy club"], ["live_music_venue", "music bar"], ["video_arcade", "arcade"], ["amusement_center", "arcade"], ["bowling_alley", "bowling alley"], ["art_gallery", "gallery"], ["museum", "museum"], ["movie_theater", "cinema"], ["bar", "bar"], ["pub", "pub"], ["cafe", "cafe"], ["restaurant", "restaurant"]];
+function placeType(types) {
+  const t = types || [];
+  const hit = TYPE_WORDS.find(([k]) => t.includes(k));
+  return hit ? hit[1] : "spot";
+}
+
 // Is a place open at local hour `hour` on weekday `day` (0 = Sunday)? null when we don't know.
 function openAt(periods, day, hour) {
   if (!periods || !periods.length) return null;
@@ -160,4 +179,4 @@ function closesLabel(periods, day, hour) {
   return "Open that evening";
 }
 
-module.exports = { configured, available, search, forCall, openAt, closesLabel, toCandidate, nearCrew, FIELDS, _numId: numId };
+module.exports = { configured, available, search, forCall, openAt, closesLabel, toCandidate, nearCrew, nearestStation, nearLabel, placeType, FIELDS, _numId: numId };
