@@ -38,6 +38,18 @@ Open `/sk` to start a planning call. Pick your nights, share the link, and frien
 
 **Voice agent (ElevenLabs):** with `ELEVENLABS_API_KEY` and the two agent IDs set, the planner sees "Turn on Sidekick's voice". The planner's phone then runs the ElevenLabs agent as Sidekick's voice, while our server still decides every move and sends it to the agent as a cue. Minutes are capped the same way. If ElevenLabs can't be reached, the call carries on with the built-in voice. Create the agents with `node tools/elevenlabs-agents.js --create`. Details: `reference/elevenlabs-agent-spec.md`.
 
+**Several phones in one room:** every phone's mic hears everyone, so the server drops a line when another phone sent nearly the same words in the last 4 seconds (the first phone's speaker keeps it), and drops lines that repeat what Sidekick said in the last 12 seconds (another phone reading Sidekick aloud). Typed lines are never dropped.
+
+**Talk in the app (in-app audio):** for friends who aren't together. Voice joiners tap "Talk in the app" and hear each other phone to phone (WebRTC, 2 to 6 people). The server only passes the connection messages along (`/api/sk/rooms/:id/signal`); audio never goes through it. The mute button mutes both the call and captions. A green dot on an avatar means you're connected to that person (yellow: connecting, grey: muted).
+- Captions keep running alongside on Chrome and Android. iPhones can't caption while a call uses the mic, so captions pause there and the phone shows the text box.
+- While anyone is in in-app audio, every phone in it reads Sidekick aloud with the browser voice, so remote friends hear it too. Their mic is muted for that moment so Sidekick isn't sent twice.
+- The ElevenLabs voice agent still runs on the planner's phone only, and remote friends don't hear it through in-app audio; their phones read its words with the browser voice once it has said them, so they hear it a moment late.
+- **TURN:** phones connect directly using Google's public STUN server. Some mobile networks and strict wifi block direct connections, and then audio says "connecting" and never connects. A TURN relay fixes that: create a free one (for example Metered's free tier at metered.ca, "Open Relay" / TURN server, about 20 GB a month) and set `SIDEKICK_TURN_URL` (comma-separated, e.g. `turn:global.relay.metered.ca:80,turns:global.relay.metered.ca:443?transport=tcp`), `SIDEKICK_TURN_USER` and `SIDEKICK_TURN_PASS`. They're sent only to phones that join audio.
+
+**Invite links:** `/sk/<room>` has link-preview tags, so iMessage, WhatsApp, Instagram DMs, Messenger, Slack and Discord show a card: the "Who's in?" image (`public/og/invite.jpg`, 1200 x 630, and a 1200 x 1200 square), with "<crew>: help plan our next night" and the nights under it. Only the crew name and nights are used, never names or answers. The planner's invite has Share (the phone's share sheet), Copy, WhatsApp, Messages, Messenger, Telegram and "Instagram: copy link, then paste in your DM" (Instagram has no share link). To change the card, edit `public/og/invite.html` and run `node tools/render-og.js`. Apps cache previews, so a changed card can take a while to show for a link already shared.
+
+**Reconnects:** if a phone locks or loses signal, it reconnects on its own and stays in the call; a small "Reconnecting…" shows only if it takes more than 2 seconds. Calls live in the server's memory, so when the app restarts (a deploy, or Render's free plan sleeping) every call ends, and phones say "This call ended when the app restarted. Start a new one".
+
 All the settings are listed in `.env.example`.
 
 **Test it:**
@@ -46,7 +58,19 @@ All the settings are listed in `.env.example`.
 node test/sidekick-eval.js              # scripted calls, both personas, checked against everyone's limits
 node test/sidekick-eval.js --keywords   # the same without AI calls for understanding speech
 node test/sidekick-integrations.js      # spending caps, places and the voice agent, with Google and ElevenLabs faked
+node test/sidekick-modes.js             # the opening check-in: lead or sit back
+node test/sidekick-multiphone.js        # duplicate and echo lines from several phones, ICE settings
+node test/sidekick-share.js             # link-preview tags, the card image, signalling (starts its own server)
+node test/sidekick-audio.e2e.js         # three Chromium "phones" connect in-app audio (needs Playwright)
 ```
+
+### How to test with friends
+
+1. Deploy to Render (below) and open the Render link, `https://<your-app>.onrender.com/sk`, on your phone. On the free plan, open it a minute early: a sleeping app takes about 30 seconds to wake, and waking ends any call that was running.
+2. One person starts the call, picks the nights and taps Start. Share the link from the invite panel (Share, WhatsApp, Messages...). Everyone else opens the link on their own phone and taps "Join with voice" (or "Join by text", or "Answer without calling").
+3. **In the same room:** leave the captions mic on for everyone, but only the planner's phone reads Sidekick aloud (the speaker button). The app drops the duplicate captions. If it's noisy, mute all phones except one and let that phone hear the room.
+4. **Not together:** everyone taps "Talk in the app" (headphones stop echo). Each phone then reads Sidekick aloud. If someone stays on "connecting", set up TURN (above). FaceTime or another call app works too: then leave in-app audio off.
+5. Allow the microphone when asked. On iPhone, use Safari and tap the page once if Sidekick is silent.
 
 ## Put it online (Render)
 
@@ -56,7 +80,7 @@ Sketch 2 runs on Render the same way as Sketch 1, as a second web service from t
 2. On Render: **New > Web Service**, pick this repo, and copy Sketch 1's service settings with these changes:
    - **Root Directory:** leave it empty. Sketch 2 reads Sketch 1's events and importer (`../sketch-1/seed`, `../sketch-1/import`), so it needs the whole repo.
    - **Start Command:** `node sketch-2/server.js`. There's nothing to install, so the build command can be the same as Sketch 1's.
-   - **Environment variables:** `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (the same values as Sketch 1's service) and `ANTHROPIC_API_KEY`. Render sets `PORT` itself.
+   - **Environment variables:** `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (the same values as Sketch 1's service) and `ANTHROPIC_API_KEY`. Render sets `PORT` itself. For in-app audio on mobile networks, also `SIDEKICK_TURN_URL`, `SIDEKICK_TURN_USER` and `SIDEKICK_TURN_PASS` (see "Talk in the app" above).
 3. Deploy. The log's first lines should say `Database: Supabase` and `Matching with AI via the Anthropic API`.
 
 Render has no Claude Code, so online the AI runs on the API key, and every feed, search page, Crew Blend and poster read is billed. Search asks for 10 picks at a time and only asks for the next 10 once you've scrolled through them. Without `ANTHROPIC_API_KEY` the online app falls back to keyword matching. On your own computer, leave the key out of `.env` to run the AI on your Claude subscription instead.
