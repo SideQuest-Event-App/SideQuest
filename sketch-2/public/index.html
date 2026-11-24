@@ -21,12 +21,14 @@
        The headline waits 0.3 s before fading in, so a fast load never flashes text; past 1 s a line says what's
        happening, with real counts. Reduced motion: a still version, no fades. */
     #boot { position: fixed; inset: 0; z-index: 100; overflow: hidden; background: #0e0b15; color: #f6f2ff; font-family: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif; transition: opacity .15s ease-out; }
-    #boot::before { content: ""; position: absolute; inset: 0; background:
+    /* The lights are their own layer, so the opening (opening.js) can zoom into them without repainting the page */
+    .b-lights { position: absolute; inset: 0; pointer-events: none; transform-origin: 60% 45%; background:
       radial-gradient(min(70vw, 420px) min(56vw, 340px) at 75% 30%, rgba(242, 201, 76, .45), transparent 70%),
       radial-gradient(min(60vw, 360px) min(48vw, 280px) at 85% 65%, rgba(242, 141, 200, .4), transparent 70%),
       radial-gradient(min(54vw, 320px) min(44vw, 260px) at 30% 75%, rgba(92, 207, 230, .3), transparent 70%); }
     #boot.out { opacity: 0; pointer-events: none; }
     .b-in { position: absolute; left: 24px; right: 24px; bottom: max(64px, 12vh); display: flex; flex-direction: column; gap: 14px; max-width: 560px; }
+    @media (min-width: 761px) { .b-in { left: clamp(24px, 7vw, 112px); bottom: max(64px, 14vh); max-width: 720px; } }
     .b-wm { font-weight: 600; font-size: 22px; line-height: 28px; letter-spacing: -.02em; }
     .b-hl { margin: 0; font-weight: 600; font-size: clamp(52px, 16vw, 88px); line-height: .92; letter-spacing: -.05em; opacity: 0; transform: translateY(10px); animation: b-rise .5s cubic-bezier(.23, 1, .32, 1) .3s forwards; }
     .b-hl em { font-style: normal; color: #c2a5f6; }
@@ -52,6 +54,7 @@
 </head>
 <body>
   <div id="boot" role="status" aria-live="polite" aria-label="Sidequest is loading">
+    <div class="b-lights"></div>
     <div class="b-in">
       <span class="b-wm">sidequest</span>
       <p class="b-hl">Who's <em>in</em><br />tonight?</p>
@@ -79,20 +82,21 @@
           el.querySelector("b").textContent = fmt(n[k[0]]) + " " + k[2] + (n[k[0]] === 1 ? "" : "s");
         });
       }
+      function stop() { clearTimeout(slow); clearTimeout(wake); window.SQboot.doneAt = performance.now(); }
       window.SQboot = {
         counts: function (c) { for (var k in c) if (c[k] != null) n[k] = c[k]; if (b.isConnected) paint(); },
         done: function () {
           if (b.dataset.done) return;
           b.dataset.done = "1";
-          clearTimeout(slow);
-          clearTimeout(wake);
-          window.SQboot.doneAt = performance.now();
+          stop();
           var still = matchMedia("(prefers-reduced-motion: reduce)").matches;
           b.classList.add("out");
           var meta = document.querySelector('meta[name="theme-color"]');
           if (meta) meta.content = "#13101b";
           setTimeout(function () { b.remove(); }, still ? 0 : 180);
         },
+        // The loader stays as the stage for "Are you demoing SideQuest or testing it?": its timers stop, the lights stay
+        hold: function () { if (b.dataset.done) return null; b.dataset.done = "1"; stop(); return b; },
       };
     })();
   </script>
@@ -137,6 +141,8 @@
   <script src="./js/screens-host.js"></script>
   <script src="./js/actions.js"></script>
   <script src="./js/launch.js"></script>
+  <script src="./js/motion.js"></script>
+  <script src="./js/opening.js"></script>
   <script src="./js/wallet.js"></script>
   <script src="./js/app.js"></script>
 </body>

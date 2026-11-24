@@ -226,7 +226,7 @@
     if (!q) return toast("Say what you're in the mood for, like \"jazz and cheap eats\".");
     if (!again && q === s.ran && (s.result || s.loading) && SQ.u.screen !== "search") return "search";
     const run = ++searchRun;
-    Object.assign(s, { ran: q, loading: true, result: null, error: null, matches: [], shown: REVEAL, more: false, loadingMore: false, sig: SQ.filterSig() });
+    Object.assign(s, { ran: q, loading: true, since: Date.now(), result: null, error: null, matches: [], shown: REVEAL, more: false, loadingMore: false, sig: SQ.filterSig() });
     if (SQ.u.screen !== "search") SQ.go("search");
     else SQ.render();
     SQ.post("/api/search", { userId: SQ.userId(), query: q, only: SQ.filteredIds() })
@@ -243,6 +243,7 @@
         SQ.render();
       });
   };
+  A.searchRetry = () => A.search(null, null, true); // "Try again" after a failed search: the same words and filters
   // The results page reached its end: show the next 5, fetching another page first if they've all been shown
   A.searchMore = async () => {
     const s = U().search;
@@ -735,6 +736,7 @@
   A.switchToAttendee = () => (me() ? (me().registered ? "discover" : "ob-vibes") : "landing");
   A.signOut = () => {
     SQ.setIds({ user: null });
+    SQ.demoSession(false); // signed out on purpose: a reload stays signed out
     SQ.u.history = [];
     toast("Signed out.");
     return SQ.refresh().then(() => "landing");

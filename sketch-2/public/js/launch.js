@@ -57,30 +57,25 @@
   SQ.lx = { state, DOWNTOWN };
 
   // ---------- "Are you demoing SideQuest or testing it?" ----------
-  // The first screen on a new device (after the loader, before the start page). The answer is kept on this device:
-  // "demo" opens the demo account on the map; "test" opens the voice study at /study, whose checklist links back
-  // into the demo app (/?demo=1&study=<id>). Shared links (/sk, /study?s=…, ?quest=) never see the question.
+  // Asked on every fresh visit, after the loader (opening.js draws it on the loader's lights and runs the zoom into
+  // the app). The answer is kept for this tab only, so a reload in the same tab doesn't ask again: "demo" opens the
+  // demo account on the map; "test" opens the voice study at /study, whose checklist links back into the demo app
+  // (/?demo=1&study=<id>). Shared links (/sk, /study?s=…, ?quest=, ?demo=1) never see the question.
   const MODE_KEY = "sq2.mode";
   SQ.mode = {
-    get: () => (["demo", "test"].includes(local.get(MODE_KEY)) ? local.get(MODE_KEY) : null),
-    set: (v) => local.set(MODE_KEY, v),
+    get: () => (["demo", "test"].includes(session.get(MODE_KEY)) ? session.get(MODE_KEY) : null),
+    set: (v) => session.set(MODE_KEY, v),
   };
   SQ.studyId = () => {
     const s = session.get("sq2.study");
     return s && /^[\w-]{4,80}$/.test(s) ? s : null;
   };
   SQ.planHref = () => (SQ.studyId() ? `/sk?study=${encodeURIComponent(SQ.studyId())}` : "/sk");
-  SQ.screens.mode = { role: "attendee", label: "Demoing or testing?", render: () => SQ.screen(`<div class="mode lights">
-      <div class="mode-in">
-        <span class="mode-wm">sidequest</span>
-        <h1 class="mode-h">Are you demoing SideQuest or testing it?</h1>
-        <div class="mode-picks">
-          <button class="mode-pick pri" data-act="modeDemo"><span class="mode-t">Demoing</span><span class="mode-s">Go straight into the full app: the map, Plan with Sidekick, and sample friends.</span></button>
-          <button class="mode-pick" data-act="modeTest"><span class="mode-t">Testing</span><span class="mode-s">Take part in the Sidekick voice study. A short checklist walks you through it.</span></button>
-        </div>
-        <p class="mode-note">We'll remember this on this device. You can switch from the start page or your profile.</p>
-      </div>
-    </div>`, { cls: "bleed" }) };
+  // The screen under the question: the same lights, so nothing flashes if the question's stage is still fading in
+  SQ.screens.mode = { role: "attendee", label: "Demoing or testing?", render: () => {
+    setTimeout(() => { if (U().screen === "mode" && !SQ.opening.active()) SQ.opening.ask(); });
+    return SQ.screen('<div class="mode lights" aria-hidden="true"></div>', { cls: "bleed" });
+  } };
 
   // ---------- Actions ----------
   const A = SQ.actions;
@@ -127,23 +122,19 @@
     if (L.sel && L.stop === "full") setStop("peek", false);
   };
 
-  A.modeDemo = async () => {
-    SQ.mode.set("demo");
-    await SQ.act("demoLogin");
-    return "discover";
-  };
-  A.modeTest = () => {
-    SQ.mode.set("test");
-    location.href = "/study";
-    return new Promise(() => {}); // the page is leaving
-  };
-  // "Switch to demo / testing": forget the answer (and the account on this device) and ask again
+  // "Switch to demo / testing": forget this tab's answer (and the account on this device) and ask again
   A.modeSwitch = async () => {
     SQ.mode.set(null);
+    SQ.demoSession(false);
     SQ.setIds({ user: null });
     U().history = [];
     await SQ.refresh();
     return "mode";
+  };
+
+  // "Try again" when the matches couldn't be picked: clearing the error lets the next render ask again
+  A.feedRetry = () => {
+    U().feedError = null;
   };
 
   // ---------- Places: once per map session ----------
@@ -151,6 +142,7 @@
     const L = state();
     if (L.placesState !== "idle") return;
     L.placesState = "loading";
+    L.placesSince = Date.now();
     const at = L.loc || DOWNTOWN;
     try {
       const r = await SQ.post("/api/places", { lat: round2(at.lat), lng: round2(at.lng), vibes: (SQ.d.user && SQ.d.user.vibes) || [] });
@@ -212,6 +204,7 @@
   function onDown(e) {
     const p = parts();
     if (!p || !e.target.closest(".lx-head") || e.target.closest(".lx-views") || (e.pointerType === "mouse" && e.button)) return;
+    if (document.documentElement.dataset.layout === "desktop") return; // a side panel there, not a sheet
     const h = heights(p);
     drag = { p, h, y0: e.clientY, t0: performance.now(), vis0: h[state().stop], vis: h[state().stop], moved: false };
   }
@@ -281,6 +274,8 @@
     label(p, L.stop);
     apply(p, L.stop);
     requestAnimationFrame(() => p.sheet.classList.remove("still"));
+    // Streets first, then each pin fades in as it arrives (the opening flies them in itself)
+    SQ.pinsArrive(root, SQ.opening.active());
     const card = L.sel && p.cards.querySelector(`[data-id="${CSS.escape(L.sel)}"]`);
     if (card) p.cards.scrollLeft = Math.max(0, card.offsetLeft - 16);
     if (SQ.d && SQ.d.user) ensurePlaces();

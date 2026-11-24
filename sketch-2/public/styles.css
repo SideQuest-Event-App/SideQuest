@@ -69,6 +69,13 @@
   --font: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
+  /* Motion (design AN2): three durations, ease-out entering, ease-in leaving. motion.js uses the same numbers. */
+  --dur-fast: 150ms; /* tabs, fades, button labels */
+  --dur-base: 250ms; /* screens sliding in and out, sheets */
+  --dur-slow: 400ms; /* the loader hand-off, picks arriving */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+
   /* Sketch 1 names, mapped onto the new tokens */
   --sq-bg-base: var(--bg-base);
   --sq-bg-surface: var(--bg-surface);
@@ -1280,8 +1287,9 @@ a.tab { text-decoration: none; }
 }
 .lx-more { min-height: 44px; font-weight: 600; font-size: 14px; color: var(--text-accent); align-self: flex-start; }
 
-/* ---------- "Are you demoing SideQuest or testing it?" (the first screen on a new device) ----------
-   The loader's city lights carry straight on behind it, so the hand-off doesn't jump. Gradient only on the primary choice. */
+/* ---------- "Are you demoing SideQuest or testing it?" (every fresh visit; opening.js) ----------
+   Drawn on the loader's own stage (#boot) and lights, so the hand-off doesn't jump. Gradient only on the primary choice.
+   .lights is the screen underneath it: the same lights. */
 .lights { position: relative; background: #0e0b15; overflow: hidden; }
 .lights::before { content: ""; position: absolute; inset: 0; pointer-events: none; background:
   radial-gradient(min(70vw, 420px) min(56vw, 340px) at 75% 30%, rgba(242, 201, 76, 0.45), transparent 70%),
@@ -1307,3 +1315,78 @@ a.tab { text-decoration: none; }
 .study-bar { position: absolute; left: 0; right: 0; top: 0; z-index: 20; height: 44px; display: flex; align-items: center; gap: 6px; padding: 0 16px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); color: var(--text-accent); font-weight: 600; font-size: 14px; line-height: 18px; text-decoration: none; }
 .study-bar[hidden] { display: none; }
 .phone.studying #screen { top: 44px; }
+
+/* Desktop Discover (design FL2 4A): the sheet becomes a side panel with the list, the map fills the rest.
+   Search and the location chip sit at the top of the panel; no grabber and no List / Map switch. */
+[data-layout="desktop"] .lx { --lx-panel: 400px; }
+[data-layout="desktop"] .disc-map.lx > .map { left: var(--lx-panel); }
+[data-layout="desktop"] .lx .map-ctrls { left: 0; right: auto; width: var(--lx-panel); max-width: none; z-index: 4; padding-top: 20px; }
+[data-layout="desktop"] .lx-sheet { top: 0; right: auto; width: var(--lx-panel); height: auto !important; transform: none !important; border-radius: 0; border-top: 0; border-right: 1px solid var(--border-subtle); box-shadow: none; padding-top: 136px; transition: none; }
+[data-layout="desktop"] .lx-head { cursor: default; touch-action: auto; }
+[data-layout="desktop"] .lx-grab, [data-layout="desktop"] .lx-views { display: none; }
+[data-layout="desktop"] .lx .lx-cards { display: none !important; }
+[data-layout="desktop"] .lx .lx-list { display: block !important; flex: 1; min-height: 0; height: auto !important; }
+[data-layout="desktop"] .lx-float { left: calc(var(--lx-panel) + var(--sp-xl)); right: var(--sp-xl); bottom: var(--sp-xl); transform: none; }
+[data-layout="desktop"] .lx[data-stop="full"] .lx-float { opacity: 1; visibility: visible; }
+[data-layout="desktop"] .lx .maplibregl-ctrl-bottom-right { bottom: 84px; }
+
+/* The question on the loader's stage (designs FL1 mobile, FL2 desktop) */
+#boot.asking { z-index: 100; }
+.b-q { position: absolute; left: 24px; right: 24px; bottom: max(32px, env(safe-area-inset-bottom)); max-width: 560px; max-height: calc(100% - 48px); overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; }
+.b-q .mode-h { outline: none; }
+.mode-pick:focus-visible { outline: 2px solid var(--text-accent); outline-offset: 3px; }
+.b-wait { position: absolute; left: 24px; right: 24px; top: 50%; margin: 0; text-align: center; font-weight: 500; font-size: 17px; line-height: 24px; color: var(--text-primary); opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); pointer-events: none; }
+.b-wait.on { opacity: 1; }
+.b-veil { position: absolute; inset: 0; background: var(--bg-base); opacity: 0; pointer-events: none; }
+.b-err { position: absolute; left: 24px; right: 24px; bottom: max(48px, 12vh); max-width: 420px; margin: 0 auto; background: rgba(29, 24, 40, 0.92); border-radius: 22px; }
+@media (min-width: 761px) {
+  .b-q { left: clamp(24px, 7vw, 112px); right: clamp(24px, 7vw, 112px); bottom: max(48px, 14vh); max-width: 980px; gap: 20px; }
+  .b-q .mode-h { font-size: clamp(44px, 5vw, 64px); line-height: 1.02; max-width: 900px; }
+  .b-q .mode-picks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; max-width: 880px; }
+  .b-q .mode-pick { min-height: 112px; padding: 20px 24px; }
+  .b-q .mode-s { font-size: 15px; line-height: 22px; }
+}
+
+/* ---------- Moving between screens (motion.js) ----------
+   A copy of the screen being left: on top while it fades (tabs) or slides away (Back), underneath while a pushed
+   screen slides in over it. It never takes taps. */
+.nav-ghost { position: absolute; z-index: 2; overflow: hidden; pointer-events: none; }
+.nav-ghost.push { z-index: -1; }
+.nav-ghost > .screen { position: absolute; inset: 0; }
+
+/* ---------- Waits (motion.js SQ.waiting) ----------
+   Nothing shows for the first 300 ms; then skeletons in the real layout; a message at 1 s; progress at 10 s.
+   Each part waits with an animation delay (counted from when the wait began), and only its opacity changes. */
+.wait { display: flex; flex-direction: column; gap: 14px; width: 100%; }
+.wait > *, .sk-after { opacity: 0; animation: wait-in var(--dur-fast) var(--ease-out) forwards; }
+@keyframes wait-in { to { opacity: 1; } }
+.wait-msg { margin: 0; font-size: 14px; line-height: 20px; color: var(--text-secondary); }
+.wait-sk { display: flex; flex-direction: column; gap: 16px; }
+.wait-slow { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 18px; color: var(--text-secondary); }
+.wait-bar { display: block; height: 4px; border-radius: 2px; background: var(--bg-raised); overflow: hidden; }
+.wait-bar i { display: block; width: 40%; height: 100%; border-radius: 2px; background: var(--action-primary); animation: wait-bar 1.4s var(--ease-out) infinite; will-change: transform; }
+@keyframes wait-bar { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.sk { display: block; border-radius: 6px; background: var(--bg-raised); max-width: 100%; }
+.sk-row { display: flex; align-items: center; gap: 14px; }
+.sk-poster { width: 64px; height: 64px; border-radius: var(--r-lg); flex: none; }
+.sk-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.sk-card { flex: none; width: calc((100% - 10px) / 2); min-height: 132px; display: flex; flex-direction: column; gap: 10px; padding: 14px 12px; border-radius: 18px; background: var(--bg-base); border: 1px solid var(--border-subtle); }
+:is([data-layout="tablet"], [data-layout="desktop"]) .sk-card { width: 240px; }
+@media (prefers-reduced-motion: reduce) { .wait-bar i { animation: none; transform: translateX(75%); } }
+
+/* ---------- When something fails: a plain sentence and "Try again", in place of the content ---------- */
+.err-block { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 16px; text-align: center; width: 100%; }
+.err-t { margin: 0; font-weight: 600; font-size: 16px; line-height: 22px; color: var(--text-primary); }
+.err-s { margin: 0 0 8px; font-size: 14px; line-height: 20px; color: var(--text-secondary); max-width: 34ch; }
+.err-block .btn { width: auto; min-width: 160px; height: 44px; }
+
+/* ---------- Buttons that wait: the label changes in place; the button keeps its size ---------- */
+.btn.is-pending, .btn.is-done { overflow: hidden; }
+.btn.is-pending { cursor: progress; }
+.pend-dots { display: inline-flex; gap: 4px; margin-left: 2px; }
+.pend-dots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.35; animation: pend-dot 1s ease-in-out infinite; }
+.pend-dots i:nth-child(2) { animation-delay: 0.15s; }
+.pend-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes pend-dot { 50% { opacity: 1; } }
+.btn.is-done { background: var(--status-success-tint); color: #b5ecc6; }
+@media (prefers-reduced-motion: reduce) { .pend-dots i { animation: none; opacity: 0.7; } }

@@ -504,6 +504,10 @@
     const where = L.loc ? `You · ${L.loc.label}` : L.locState === "asking" ? "Finding you…" : "Downtown Toronto · change";
     const center = L.loc || SQ.lx.DOWNTOWN;
     const m = mixes();
+    // Places are on their way: skeleton cards at the end of the row (after 300 ms), until they arrive
+    const placesDue = L.show.places && L.placesState !== "done";
+    if (placesDue && !L.placesSince) L.placesSince = Date.now();
+    const skel = placesDue ? SQ.sk.cards(1, L.placesSince) : "";
     let list;
     if (!evAll.length && !(L.places || []).length) list = !u.feed && U().feedLoading ? `<div class="lx-pad">${thinking("Picking this week's sidequests…")}</div>`
       : `<div class="empty-state"><span class="illo">${icon("search")}</span><p class="t-title-l">${activeFilters().length ? "No sidequests match these filters." : "Nothing on this week yet."}</p>
@@ -512,6 +516,7 @@
     else list = `        ${evs.length ? `<section class="lx-sec lx-pad"><h2 class="lx-h"><span class="kt ev">${icon("ticket", "xs")}Events</span>Shows with set times</h2>${evs.slice(0, 20).map((e) => lxEventCard(e, { row: true, sel: sel === `e${e.id}` })).join("")}
           ${evs.length > 20 && picked ? `<button class="lx-more" data-go="weekly">See all ${evs.length} picks</button>` : ""}</section>` : ""}
         ${pls.length ? `<section class="lx-sec lx-pad"><h2 class="lx-h"><span class="kt pl">${icon("pin", "xs")}Places</span>Drop in any time</h2>${pls.map((p) => lxPlaceCard(p, { row: true, sel: sel === p.id })).join("")}</section>` : ""}
+        ${placesDue ? `<section class="lx-sec lx-pad">${SQ.sk.after(L.placesSince, `<div class="wait-sk">${SQ.sk.rows(2)}</div>`)}</section>` : ""}
         ${m.length && L.show.events ? `<section class="lx-sec"><div class="section-header lx-pad"><h2>Vibe Mixes</h2><button data-go="weekly">See all (${wk.length})</button></div>
           <div class="hscroll">${m.map(([l, p, n]) => `<button class="mix" data-act="openMix" data-arg="${esc(l)}" aria-label="${esc(l)}, ${n} sidequest${n === 1 ? "" : "s"} this week"><span class="mix-cover">${ph(p)}<span class="scrim"></span><span class="mix-count">${n}</span><span class="t-title-m">${esc(l)}</span></span></button>`).join("")}</div></section>` : ""}`;
     return screen(`<div class="disc-map lx" data-stop="${L.stop}">
@@ -545,8 +550,8 @@
             </div>
           </div>
         </div>
-        <div class="lx-cards hscroll" role="list" aria-label="Top picks">${cards.join("") || `<p class="t-body-m c-secondary lx-pad">${!u.feed && U().feedLoading ? "Picking this week's sidequests…" : "Nothing to show with these filters."}</p>`}</div>
-        <div class="lx-list">${U().feedError ? `<div class="lx-pad"><div class="notice hot">${icon("x")}<span>${esc(U().feedError)}</span></div></div>` : ""}${list}</div>
+        <div class="lx-cards hscroll" role="list" aria-label="Top picks">${cards.length ? cards.join("") + skel : !u.feed && U().feedLoading ? SQ.sk.cards(2, U().feedSince) : skel || `<p class="t-body-m c-secondary lx-pad">Nothing to show with these filters.</p>`}</div>
+        <div class="lx-list">${U().feedError ? `<div class="lx-pad">${SQ.errorBlock("Couldn't pick your matches", "Something went wrong on our side. The list below is this week's, soonest first.", "feedRetry")}</div>` : ""}${list}</div>
       </section>
     </div>`, { tabbar: attendeeTabs("discover"), cls: "bleed" });
   } };
@@ -613,8 +618,9 @@
     // A filter changed (here, in the Filters sheet, or on Discover) since these results: search again with it
     if (s.ran && !s.loading && s.sig !== SQ.filterSig()) setTimeout(() => SQ.actions.search(null, null, true));
     let body = "";
-    if (s.loading) body = thinking(`Finding sidequests for "${s.ran}"…`);
-    else if (s.error) body = `<div class="notice hot">${icon("x")}<span>${esc(s.error)}</span></div>`;
+    // Skeleton rows after 300 ms (nothing before: most searches are back by then), a message at 1 s
+    if (s.loading) body = SQ.waiting(s.since, { skeleton: SQ.sk.rows(5), message: `Finding sidequests for "${s.ran}"…` });
+    else if (s.error) body = SQ.errorBlock("Couldn't load your results", "Something went wrong on our side. Your search is still here.", "searchRetry");
     else if (r) {
       const hits = s.matches.filter((m) => ev(m.id) && !u.notForMe.includes(m.id));
       const shown = hits.slice(0, s.shown);
@@ -687,7 +693,7 @@
         : btn("Import event ticket", { "data-act": "addTicket", "data-arg": e.id }, "danger", "ticket"))
       : logged ? btn("In your Sidequests", { "data-go": "questlog" }, "secondary", "check")
       : ticketsSold(e) ? btn(`Get tickets on ${sourceOf(e)}`, { "data-act": "getTickets", "data-arg": e.id }, "primary", "external")
-      : btn("I'm going", { "data-act": "getTickets", "data-arg": e.id }, "primary", "check");
+      : btn("I'm going", { "data-act": "getTickets", "data-arg": e.id, "data-pending": "Joining", "data-done": "You're in" }, "primary", "check");
     const footer = `<div class="footer-bar row qd-buy">
         ${isPast(e) || logged ? "" : `<span class="qd-price"><span class="t-title-l">${esc(priceLabel(e))}</span><span class="t-caption c-tertiary">${e.price === 0 ? "no ticket needed" : e.price == null ? "see listing" : "per ticket"}</span></span>`}
         ${cta}
@@ -981,7 +987,7 @@
     const inTheme = (m) => !theme || ((ev(m.id) || {}).vibes || []).some((v) => theme[2].includes(v));
     let picks;
     if (!p.members.length) picks = `<p class="t-body-m c-secondary">Add friends to get group picks.</p>`;
-    else if (!b) picks = thinking(`Blending ${people.length} tastes…`);
+    else if (!b) picks = SQ.waiting(U().blendSince, { skeleton: SQ.sk.rows(3), message: `Blending ${people.length} tastes…` });
     else picks = `${U().blendLoading ? thinking("Re-blending for the new line-up…") : ""}
       ${b.matches.filter(inTheme).length ? b.matches.filter(inTheme).slice(0, 3).map((m, i) => {
         const e = ev(m.id);
@@ -1010,7 +1016,7 @@
         ${(big ? ranked : opts).map(voteRow).join("") || `<p class="t-body-m c-secondary">Send a sidequest to the party to start the vote.</p>`}
       </div>
       ${p.locked && ev(p.locked) ? btn(`See the plan for ${ev(p.locked).title}`, { "data-go": "group-plan" }, "social", "crew")
-        : Object.keys(t).length ? btn("Lock in the plan", { "data-act": "lockPoll" }, "primary", "check") : ""}`;
+        : Object.keys(t).length ? btn("Lock in the plan", { "data-act": "lockPoll", "data-pending": "Locking it in", "data-done": "Locked in" }, "primary", "check") : ""}`;
     const chat = `<div class="stack" style="gap:10px">
         <div class="section-head"><span class="t-title-l">Party chat</span></div>
         <div class="bubbles">${p.chat.slice(-6).map((m) => m.from === "Sidequest" ? `<p class="bubble system">${esc(m.text)}</p>` : `<p class="bubble${m.from === myName() ? " mine" : ""}"><b>${esc(m.from)}</b>${esc(m.text)}</p>`).join("")}</div>

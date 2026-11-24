@@ -11,9 +11,17 @@
 //  g. The sheet's stops work by drag and by the List and Map buttons, and the last stop is remembered.
 //  h. Plan opens /sk; Add Event is reachable from Sidequests.
 //  i. At 375 and 1280 px: no sideways overflow, nothing under the tab bar, 44 px targets, weights 400/500/600 only.
-//  j. "Are you demoing SideQuest or testing it?" on first load; Demoing opens the demo app's map; Testing opens
-//     /study, whose Discover step lands in the demo app with a bar back to the checklist; the choice is
-//     remembered; shared links skip the question.
+//
+// The opening flow (designs FL1, FL2, AN1 option C) and the loading system (AN2), the "flow" checks:
+//  a. a brand-new visit: loader, then "Are you demoing SideQuest or testing it?", never the old start page;
+//  b. the old bug: an earlier visit's sq2.mode and sq2.screen="landing", no server session -> still the question,
+//     and Demoing lands on the map, signed in;
+//  c. after a server restart (the demo account forgotten) Demoing still signs in; mid-visit it signs in quietly;
+//  d. a reload in the same tab doesn't ask again;  e. deep links skip the question; Testing opens /study;
+//  f. the zoom: lights past 1.5x, pins moving, on the map within 1.5 s;  g. a tap mid-way jumps to the end;
+//  h. reduced motion: no transforms;  i. the same at 1280 px, with the desktop layout;
+//  j. tabs crossfade, pushed screens slide, Back reverses;  k. slow lists: skeletons after 300 ms, none when fast;
+//  l. a waiting button keeps its width;  m. an API error shows "Try again", and it works.
 //
 // The server runs in this process so Google Places can be faked: nothing here ever calls Google. Every other
 // outside request (map tiles, the MapLibre script, fonts) is blocked, so the light map stands in.
@@ -21,6 +29,7 @@
 //
 //   NODE_PATH=/opt/node-tools/node_modules node test/launch.e2e.js
 //   LAUNCH_SHOTS=/some/folder ... to keep the screenshots (375 px, 2x)
+//   ONLY="flow" ... to run only the checks whose names contain that text
 
 const fs = require("fs");
 const os = require("os");
@@ -35,6 +44,7 @@ fs.mkdirSync(SHOTS, { recursive: true });
 
 let failures = 0;
 async function test(name, fn) {
+  if (process.env.ONLY && !name.includes(process.env.ONLY)) return; // ONLY="flow j" runs just the checks named so
   try { await fn(); console.log(`PASS  ${name}`); } catch (err) { failures++; console.log(`FAIL  ${name}\n      ${err.stack || err.message}`); }
 }
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, () => { const p = s.address().port; s.close(() => resolve(p)); }); });
@@ -111,6 +121,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
         if (sessionStorage.getItem("__seeded")) return; // only the first page load starts signed in this way
         sessionStorage.setItem("__seeded", "1");
         localStorage.setItem("sq2.user", uid);
+        sessionStorage.setItem("sq2.mode", "demo"); // the question was answered in this tab (these checks are about the map)
         if (stop) localStorage.setItem(`sq2.sheet.${uid}`, stop);
       } catch {}
     }, [user, sheet || null]);
@@ -502,56 +513,172 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       });
     }
 
-    // ---------- j ----------
+    // ---------- The opening flow (FL1, FL2, AN1 option C) and the loading system (AN2) ----------
     const mapUp = (page) => page.waitForFunction(() => window.SQ && SQ.u && SQ.u.screen === "discover" && document.querySelector(".disc-map.lx") && !document.getElementById("boot"), null, { timeout: 20000 });
-    await test("j. First load on a new device asks 'Are you demoing SideQuest or testing it?', before the start page", async () => {
-      const { ctx, page } = await phone({ user: null });
+    const question = (page) => page.waitForFunction(() => { const q = document.querySelector("#boot .b-q"); return q && q.getAnimations().every((a) => a.playState !== "running") && getComputedStyle(q).opacity === "1"; }, null, { timeout: 20000 });
+    const demoUsers = () => Object.values(dbm.data.users).filter((u) => u.demo || /^@?demo$/i.test(String(u.handle || u.username || "")));
+    const forgetDemo = () => { for (const u of demoUsers()) { delete dbm.data.users[u.id]; delete dbm.data.parties[u.id]; } }; // what a Render restart does to the demo account
+    const dbm = require(path.join(ROOT, "lib", "db"));
+    // Samples the zoom every frame from just before the tap: the lights' scale, the pins' transforms, the stage
+    const sampleZoom = () => {
+      window.__z = [];
+      const t0 = performance.now();
+      const tick = () => {
+        const b = document.getElementById("boot"), l = b && b.querySelector(".b-lights"), q = b && b.querySelector(".b-q");
+        const m = l ? new DOMMatrixReadOnly(getComputedStyle(l).transform === "none" ? undefined : getComputedStyle(l).transform) : null;
+        const pins = [...document.querySelectorAll("#screen .map-pin2 > i")].slice(0, 8).map((i) => getComputedStyle(i).transform);
+        window.__z.push({ t: performance.now() - t0, boot: !!b, scale: m ? m.a : null, lightsT: l ? getComputedStyle(l).transform : null, qT: q ? getComputedStyle(q).transform : null, op: b ? Number(getComputedStyle(b).opacity) : 0, pins, screen: SQ.u.screen });
+        if (performance.now() - t0 < 2500) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+    const moved = (t) => t && t !== "none" && t !== "matrix(1, 0, 0, 1, 0, 0)";
+
+    await test("flow a. A brand-new visit shows the loader, then the question (headline out, question rises 12 px), never the old start page", async () => {
+      const { ctx, page } = await phone({ user: null, init: () => {
+        window.__seen = { boot: 0, landing: 0, rise: [] };
+        const tick = () => {
+          if (document.querySelector("#boot .b-in")) window.__seen.boot++;
+          if (document.querySelector(".landing-copy") || /Find your people in a new city/.test(document.body ? document.body.innerText : "")) window.__seen.landing++;
+          const q = document.querySelector("#boot .b-q");
+          if (q) { const t = getComputedStyle(q).transform; window.__seen.rise.push(t === "none" ? 0 : new DOMMatrixReadOnly(t).f); }
+          if (window.__seen.rise.length < 60) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      } });
       await page.goto(base);
-      await page.waitForSelector(".mode-h", { timeout: 20000 });
-      await page.waitForFunction(() => !document.getElementById("boot"));
+      await question(page);
+      const seen = await page.evaluate(() => window.__seen);
+      assert(seen.boot > 0, "the city-lights loader showed first");
+      assert.strictEqual(seen.landing, 0, "the old start page never showed");
+      assert(seen.rise.some((y) => y > 2 && y <= 12.01), `the question rose from 12 px below (${seen.rise.slice(0, 8).map((y) => y.toFixed(1)).join(", ")})`);
       assert.strictEqual((await page.textContent(".mode-h")).trim(), "Are you demoing SideQuest or testing it?");
+      assert(!(await page.$("#boot .b-in")), "the headline went");
+      assert(await page.$("#boot .b-lights"), "on the same lights (the loader's own layer)");
       const picks = await page.$$eval(".mode-pick", (bs) => bs.map((b) => ({ t: b.querySelector(".mode-t").textContent, bg: getComputedStyle(b).backgroundImage, h: b.getBoundingClientRect().height, w: b.getBoundingClientRect().width })));
       assert.deepStrictEqual(picks.map((p) => p.t), ["Demoing", "Testing"]);
       assert(/gradient/.test(picks[0].bg) && !/gradient/.test(picks[1].bg), "the gradient is on the primary choice only");
       assert(picks.every((p) => p.h >= 44 && p.w >= 44));
       assert.strictEqual(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0);
-      const weights = await page.$$eval(".mode *", (els) => [...new Set(els.map((e) => getComputedStyle(e).fontWeight))]);
-      assert(weights.every((w) => ["400", "500", "600"].includes(w)), weights.join());
-      assert(!(await page.$("text=Find your people in a new city")), "the start page comes after the question");
-      await page.screenshot({ path: path.join(SHOTS, "question.png") });
+      const type = await page.$$eval("#boot .b-q *", (els) => els.map((e) => getComputedStyle(e)).map((c) => [c.fontWeight, parseFloat(c.fontSize)]));
+      assert(type.every(([w]) => ["400", "500", "600"].includes(w)), "weights 400/500/600");
+      assert(type.every(([, px]) => px >= 12), "text 12 px or larger");
       await ctx.close();
     });
 
-    await test("j. Demoing opens the demo account on the map, and a reload doesn't ask again", async () => {
-      const { ctx, page } = await phone({ user: null });
+    await test("flow b. The old bug: an earlier visit's sq2.mode and sq2.screen='landing', no server session -> still the question; Demoing lands on the map, signed in", async () => {
+      const { ctx, page } = await phone({ user: null, init: () => {
+        try {
+          if (sessionStorage.getItem("__pre")) return;
+          sessionStorage.setItem("__pre", "1");
+          localStorage.setItem("sq2.mode", "demo"); // answered on this device last week
+          localStorage.setItem("sq2.user", "u_gone_after_restart"); // an account the server no longer has
+          sessionStorage.setItem("sq2.screen", "landing"); // the old start page, saved by the earlier visit
+        } catch {}
+      } });
       await page.goto(base);
-      await page.waitForSelector(".mode-pick.pri");
-      await page.click(".mode-pick.pri");
+      await question(page);
+      assert(!(await page.$(".landing-copy")), "not the old start page");
+      await page.click('.mode-pick[data-pick="demo"]');
       await mapUp(page);
       assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.demo), true, "signed in to the demo");
-      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.mode")), "demo");
+      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.mode")), null, "the old per-device answer is gone");
+      assert.strictEqual(await page.evaluate(() => sessionStorage.getItem("sq2.mode")), "demo", "answered for this tab");
+      await ctx.close();
+    });
+
+    await test("flow c. After a server restart (the demo account forgotten), Demoing still signs in and lands on the map; mid-visit it signs in again quietly", async () => {
+      const { ctx, page } = await phone({ user: null });
+      await page.goto(base);
+      await question(page);
+      await page.click('.mode-pick[data-pick="demo"]');
+      await mapUp(page);
+      const first = await page.evaluate(() => SQ.userId());
+      // Restart: the server no longer knows the demo account. A reload in the same tab signs in again, no start page.
+      forgetDemo();
+      await page.reload();
+      await mapUp(page);
+      assert(!(await page.$(".mode-h")), "no question on a reload");
+      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.demo), true, "signed in again");
+      assert.notStrictEqual(await page.evaluate(() => SQ.userId()), first, "a new demo account");
+      // Mid-visit: the next change finds the account gone, signs in again and goes through
+      forgetDemo();
+      const id = await page.evaluate(() => SQ.d.events.find((e) => !e.over).id);
+      const r = await page.evaluate(async (eventId) => { try { return await SQ.act("save", { eventId }); } catch (e) { return { error: e.message }; } }, id);
+      assert(!r.error, `the change went through: ${JSON.stringify(r)}`);
+      assert.strictEqual(await page.evaluate(() => SQ.u.screen), "discover");
+      // A fresh tab after another restart: the question, then the demo, on the map
+      forgetDemo();
+      const tab = await ctx.newPage();
+      await tab.route("**/*", (rt) => (new URL(rt.request().url()).hostname === "localhost" ? rt.continue() : rt.abort()));
+      await tab.goto(base);
+      await question(tab);
+      await tab.click('.mode-pick[data-pick="demo"]');
+      await mapUp(tab);
+      assert.strictEqual(await tab.evaluate(() => SQ.d.user && SQ.d.user.demo), true);
+      await ctx.close();
+    });
+
+    await test("flow d. A reload in the same tab doesn't ask again; a new tab does", async () => {
+      const { ctx, page } = await phone({ user: null });
+      await page.goto(base);
+      await question(page);
+      await page.click('.mode-pick[data-pick="demo"]');
+      await mapUp(page);
       await page.reload();
       await mapUp(page);
       assert(!(await page.$(".mode-h")), "not asked again");
-      // Exit the demo: the start page (not the question), with a way to switch
+      const tab = await ctx.newPage();
+      await tab.route("**/*", (rt) => (new URL(rt.request().url()).hostname === "localhost" ? rt.continue() : rt.abort()));
+      await tab.goto(base);
+      await question(tab);
+      // Exit the demo: the start page, with "Switch to demo / testing", which asks again
       await page.click('nav.tabs .tab:has-text("Exit demo")');
       await page.waitForSelector(".mode-switch");
+      await page.reload();
+      await page.waitForSelector(".mode-switch"); // signed out on purpose stays signed out
       await page.click(".mode-switch");
-      await page.waitForSelector(".mode-h");
-      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.mode")), null, "switching forgets the answer");
+      await question(page);
       await ctx.close();
     });
 
-    await test("j. Testing opens /study; its Discover step lands in the demo app with a '← Study checklist' bar", async () => {
+    await test("flow e. Deep links skip the question: /sk, /sk/<room>, /study?s=…, ?quest= and ?demo=1 (which always signs into the demo)", async () => {
+      const { ctx, page } = await phone({ user: null });
+      const made = await (await realFetch(`${base}/api/sk/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Asia", crew: "Launch test" }) })).json();
+      for (const link of ["/sk", `/sk/${made.room}`, "/study?s=nothere123"]) {
+        await page.goto(base + link);
+        await wait(700);
+        assert(!(await page.$(".mode-h")), `${link} shows no question`);
+        assert(new URL(page.url()).pathname === link.split("?")[0], `${link} stays put (${page.url()})`);
+      }
+      const quest = await page.evaluate(async () => (await (await fetch("/api/events")).json()).events.find((e) => !e.over).id);
+      const p2 = await ctx.newPage();
+      await p2.route("**/*", (rt) => (new URL(rt.request().url()).hostname === "localhost" ? rt.continue() : rt.abort()));
+      await p2.goto(`${base}/?quest=${quest}`);
+      await p2.waitForFunction(() => window.SQ && SQ.u && SQ.d && !document.getElementById("boot"), null, { timeout: 20000 });
+      assert(!(await p2.$(".mode-h")), "a shared sidequest link shows no question");
+      assert.strictEqual(await p2.evaluate(() => SQ.u.screen), "quest", "it opens the sidequest");
+      // The study's link, from a browser still signed in to someone else: always the demo account
+      const { ctx: c3, page: p3 } = await phone({ user: userId });
+      await p3.goto(`${base}/?demo=1&study=launchstudy1`);
+      await mapUp(p3);
+      assert(!(await p3.$(".mode-h")));
+      assert.strictEqual(await p3.evaluate(() => SQ.d.user && SQ.d.user.demo), true, "signed in to the demo");
+      assert(await p3.isVisible("#study-bar"), "with the bar back to the checklist");
+      await c3.close();
+      await ctx.close();
+    });
+
+    await test("flow e. Testing opens /study; its Discover step lands in the demo app with a '← Study checklist' bar", async () => {
       const { ctx, page } = await phone({ user: null });
       await page.goto(base);
-      await page.waitForSelector(".mode-pick:not(.pri)");
-      await Promise.all([page.waitForURL(/\/study$/), page.click(".mode-pick:not(.pri)")]);
-      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.mode")), "test");
-      // Remembered: the start page sends a tester back to the study
+      await question(page);
+      await Promise.all([page.waitForURL(/\/study$/), page.click('.mode-pick[data-pick="test"]')]);
+      assert.strictEqual(await page.evaluate(() => sessionStorage.getItem("sq2.mode")), "test");
+      await page.waitForSelector("#agree");
+      // The start page in the same tab sends a tester back to the study
       await page.goto(base);
       await page.waitForURL(/\/study/);
-      // The study: agree, start, open "Look around Discover", and follow its link
       await page.check("#agree");
       await page.click("#start");
       await page.waitForURL(/\/study\?s=/);
@@ -568,29 +695,212 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       assert(bar.shown >= 44, "the bar shows, 44px tall");
       assert.strictEqual(bar.text, "← Study checklist");
       assert.strictEqual(bar.href, `/study?s=${encodeURIComponent(sid)}#discover`);
-      const screenTop = await page.$eval("#screen", (s) => s.getBoundingClientRect().top);
-      assert(screenTop >= bar.shown, "the app sits below the bar, not under it");
       assert.strictEqual(await page.getAttribute('nav.tabs a.tab:has-text("Plan")', "href"), `/sk?study=${encodeURIComponent(sid)}`, "Plan keeps the study");
-      await page.click("#study-bar");
-      await page.waitForURL(/\/study\?s=/);
-      await page.waitForSelector(".steps");
       await ctx.close();
     });
 
-    await test("j. Shared links skip the question: /sk, /sk/<room>, /study?s=… and ?quest=", async () => {
+    for (const [w, h] of [[375, 812], [1280, 800]]) {
+      await test(`flow f${w === 1280 ? "/i" : ""}. ${w} px: the zoom into the city: lights past 1.5x, pins flying in, on the map within 1.5 s`, async () => {
+        const { ctx, page } = await phone({ user: null, width: w, height: h });
+        await page.goto(base);
+        await question(page);
+        if (w === 1280) {
+          const r = await page.$$eval(".mode-pick", (bs) => bs.map((b) => b.getBoundingClientRect()).map((r) => ({ top: Math.round(r.top), left: r.left, right: r.right })));
+          assert(r[0].top === r[1].top && r[1].left >= r[0].right, "the two choices sit side by side");
+        }
+        await page.evaluate(sampleZoom);
+        const t0 = Date.now();
+        await page.click('.mode-pick[data-pick="demo"]');
+        await mapUp(page);
+        const took = Date.now() - t0;
+        await wait(300);
+        const z = await page.evaluate(() => window.__z);
+        const maxScale = Math.max(...z.filter((f) => f.scale).map((f) => f.scale));
+        const end = z.find((f) => !f.boot && f.screen === "discover");
+        const flying = z.filter((f) => f.boot && f.pins.some(moved));
+        const pinPath = new Set(flying.map((f) => f.pins[0]));
+        console.log(`      lights to ${maxScale.toFixed(2)}x; pins moving in ${flying.length} frames; on the map at ${end ? Math.round(end.t) : "?"} ms (${took} ms by the clock)`);
+        assert(maxScale > 1.5, `lights scaled ${maxScale}`);
+        assert(flying.length >= 3 && pinPath.size >= 3, "the pins moved (their transforms changed frame to frame)");
+        assert(end && end.t <= 1500, `on the map at ${end && end.t} ms`);
+        assert(z.filter((f) => !f.boot).every((f) => f.pins.every((t) => !moved(t))), "the pins end in their real spots");
+        if (w === 1280) {
+          const lay = await page.evaluate(() => ({ panel: document.querySelector(".lx-sheet").getBoundingClientRect().toJSON(), map: document.querySelector(".disc-map.lx > .map").getBoundingClientRect().toJSON(), list: getComputedStyle(document.querySelector(".lx-list")).display }));
+          assert(lay.panel.width >= 360 && lay.panel.width <= 440 && lay.panel.top <= 1, `a side panel: ${JSON.stringify(lay.panel)}`);
+          assert(lay.map.left >= lay.panel.right - 1, "the map fills the rest");
+          assert.notStrictEqual(lay.list, "none", "the list shows in the panel");
+        }
+        assert.strictEqual(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, "no sideways scroll");
+        await ctx.close();
+      });
+    }
+
+    await test("flow g. A tap during the zoom jumps to its end", async () => {
       const { ctx, page } = await phone({ user: null });
-      const made = await (await realFetch(`${base}/api/sk/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Asia", crew: "Launch test" }) })).json();
-      for (const link of ["/sk", `/sk/${made.room}`, "/study?s=nothere123"]) {
-        await page.goto(base + link);
-        await wait(700);
-        assert(!(await page.$(".mode-h")), `${link} shows no question`);
-        assert(new URL(page.url()).pathname === link.split("?")[0], `${link} stays put (${page.url()})`);
-      }
-      const quest = await page.evaluate(async () => (await (await fetch("/api/events")).json()).events.find((e) => !e.over).id);
-      await page.goto(`${base}/?quest=${quest}`);
-      await page.waitForFunction(() => window.SQ && SQ.u && !document.getElementById("boot"), null, { timeout: 20000 });
-      await wait(300);
-      assert(!(await page.$(".mode-h")), "a shared sidequest link shows no question");
+      await page.goto(base);
+      await question(page);
+      await page.click('.mode-pick[data-pick="demo"]');
+      await wait(200);
+      const t0 = Date.now();
+      await page.mouse.click(180, 300);
+      await mapUp(page);
+      const took = Date.now() - t0;
+      const still = await page.evaluate(() => [...document.querySelectorAll("#screen .map-pin2 > i")].filter((i) => i.getAnimations().length).length);
+      console.log(`      on the map ${took} ms after the tap`);
+      assert(took < 400, `jumped to the end (${took} ms)`);
+      assert.strictEqual(still, 0, "no pin still flying");
+      // And a tap during the question's rise shows it at once
+      const { ctx: c2, page: p2 } = await phone({ user: null });
+      await p2.goto(base);
+      await p2.waitForSelector("#boot .b-q");
+      await p2.mouse.click(10, 10);
+      await p2.waitForFunction(() => getComputedStyle(document.querySelector("#boot .b-q")).opacity === "1", null, { timeout: 300 });
+      await c2.close();
+      await ctx.close();
+    });
+
+    await test("flow h. Reduced motion: crossfades only, no transforms (question, lights, pins)", async () => {
+      const { ctx, page } = await phone({ user: null, reducedMotion: "reduce", init: () => {
+        window.__qt = [];
+        const tick = () => { const q = document.querySelector("#boot .b-q"); if (q) window.__qt.push(getComputedStyle(q).transform); if (window.__qt.length < 40) requestAnimationFrame(tick); };
+        requestAnimationFrame(tick);
+      } });
+      await page.goto(base);
+      await question(page);
+      assert((await page.evaluate(() => window.__qt)).every((t) => !moved(t)), "the question fades in without moving");
+      await page.evaluate(sampleZoom);
+      await page.click('.mode-pick[data-pick="demo"]');
+      await mapUp(page);
+      await wait(200);
+      const z = await page.evaluate(() => window.__z);
+      assert(z.some((f) => f.boot && f.op > 0.05 && f.op < 0.95), "it crossfades to the map");
+      assert(z.every((f) => !moved(f.lightsT) && !moved(f.qT) && f.pins.every((t) => !moved(t))), "no transforms anywhere");
+      await ctx.close();
+    });
+
+    await test("flow j. Tabs crossfade (150 ms, no slide); pushed screens slide in from the right (250 ms); Back reverses it", async () => {
+      const { ctx, page } = await phone();
+      await page.goto(base);
+      await ready(page);
+      const watch = () => page.evaluate(() => { window.__nav = []; const t0 = performance.now(); const tick = () => { const g = document.querySelector(".nav-ghost"); const s = document.querySelector("#screen > .screen"); window.__nav.push({ t: performance.now() - t0, ghost: g ? g.className : null, gOp: g ? Number(getComputedStyle(g).opacity) : null, gT: g ? getComputedStyle(g).transform : null, sT: s ? getComputedStyle(s).transform : null }); if (performance.now() - t0 < 600) requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
+      const xOf = (t) => { const m = /matrix\(([^)]+)\)/.exec(t || ""); return m ? Number(m[1].split(",")[4]) : 0; };
+      await watch();
+      await page.click('nav.tabs .tab:has-text("Community")');
+      await wait(650);
+      let f = await page.evaluate(() => window.__nav);
+      const fade = f.filter((x) => x.ghost && /fade/.test(x.ghost));
+      assert(fade.some((x) => x.gOp > 0.05 && x.gOp < 0.95), "the old tab fades out over the new one");
+      assert(f.every((x) => !moved(x.gT) && !moved(x.sT)), "no slide between tabs");
+      assert(Math.max(...fade.map((x) => x.t)) < 260, "about 150 ms");
+      assert.strictEqual(await page.evaluate(() => SQ.u.screen), "parties");
+      // Into a sidequest: it slides in from the right
+      await page.click('nav.tabs .tab:has-text("Discover")');
+      await ready(page);
+      await wait(250);
+      const id = await page.$eval(".lx-cards .lx-card.ev .lx-main", (b) => b.dataset.arg);
+      await watch();
+      await page.click(`.lx-cards .lx-main[data-arg="${id}"]`);
+      await wait(650);
+      f = await page.evaluate(() => window.__nav);
+      const push = f.filter((x) => xOf(x.sT) > 1);
+      assert(push.length >= 2, "the new screen moved in from the right");
+      assert(push.every((x, k) => !k || xOf(x.sT) <= xOf(push[k - 1].sT) + 0.5), "right to left");
+      assert(f.some((x) => x.ghost && /push/.test(x.ghost)), "the old screen stays underneath");
+      assert.strictEqual(await page.evaluate(() => SQ.u.screen), "quest");
+      assert(!moved(await page.$eval("#screen > .screen", (s) => getComputedStyle(s).transform)), "and settles with no transform");
+      // Back: the sidequest slides back out to the right
+      await watch();
+      await page.click("[data-back]");
+      await wait(650);
+      f = await page.evaluate(() => window.__nav);
+      const back = f.filter((x) => x.ghost && /back/.test(x.ghost) && xOf(x.gT) > 1);
+      assert(back.length >= 2 && back.every((x, k) => !k || xOf(x.gT) >= xOf(back[k - 1].gT) - 0.5), "Back slides it out to the right");
+      assert.strictEqual(await page.evaluate(() => SQ.u.screen), "discover");
+      assert(!(await page.$(".nav-ghost")), "and the copy goes away");
+      await ctx.close();
+    });
+
+    await test("flow k. A slow list (search results) shows skeleton rows after 300 ms, a message at 1 s; a fast one shows none", async () => {
+      let delay = 1800;
+      const { ctx, page } = await phone({ route: (r, u) => (u.pathname === "/api/search" && delay ? wait(delay).then(() => r.continue()) : r.continue()) });
+      await page.goto(base);
+      await ready(page);
+      const search = async (q) => {
+        await page.fill(".lx .search input", q);
+        await page.evaluate(() => {
+          window.__sk = []; const t0 = performance.now();
+          const tick = () => { const w = document.querySelector(".wait-sk"), m = document.querySelector(".wait-msg"); window.__sk.push({ t: performance.now() - t0, sk: w ? Number(getComputedStyle(w).opacity) : 0, rows: w ? w.querySelectorAll(".sk-row").length : 0, msg: m ? Number(getComputedStyle(m).opacity) : 0, spin: !!document.querySelector("#screen .thinking") }); if (performance.now() - t0 < 2200) requestAnimationFrame(tick); };
+          requestAnimationFrame(tick);
+        });
+        await page.press(".lx .search input", "Enter");
+        await wait(2300);
+        return page.evaluate(() => window.__sk);
+      };
+      let f = await search("jazz");
+      assert(f.filter((x) => x.t < 250).every((x) => x.sk < 0.05), "nothing in the first 300 ms");
+      const shown = f.find((x) => x.sk > 0.9);
+      assert(shown && shown.t >= 290 && shown.t < 700 && shown.rows >= 3, `skeleton rows from ${shown && Math.round(shown.t)} ms`);
+      assert(f.filter((x) => x.t < 950).every((x) => x.msg < 0.05) && f.some((x) => x.t > 1100 && x.msg > 0.9), "the message after 1 s");
+      assert(f.every((x) => !x.spin), "no spinner");
+      await page.screenshot({ path: path.join(SHOTS, "k-search-results.png") });
+      delay = 0;
+      await page.click("[data-back]");
+      await ready(page);
+      f = await search("comedy");
+      assert(f.every((x) => x.sk < 0.05), "a fast search never shows a skeleton");
+      assert(await page.$(".search-hit, .search-end"), "the results came");
+      await ctx.close();
+    });
+
+    await test("flow l. A waiting button changes its label in place ('Joining' with three dots, then '✓ You're in') and never changes width", async () => {
+      const { ctx, page } = await phone({ route: (r, u) => (u.pathname === "/api/act" && /"type":"accept"/.test(r.request().postData() || "") ? wait(900).then(() => r.continue()) : r.continue()) });
+      await page.goto(base);
+      await ready(page);
+      const found = await page.evaluate(async () => {
+        for (const e of SQ.d.events) {
+          if (e.over || SQ.is19(e) || e.price !== 0 || SQ.d.user.log[e.id]) continue;
+          SQ.u.quest = e.id;
+          SQ.go("quest");
+          if (document.querySelector('[data-act="getTickets"][data-pending]')) return e.id;
+        }
+        return null;
+      });
+      assert(found, "a free sidequest to join");
+      await wait(400);
+      const sel = '[data-act="getTickets"][data-pending]';
+      const before = await page.$eval(sel, (b) => b.getBoundingClientRect().width);
+      await page.evaluate((s) => {
+        const b = document.querySelector(s); window.__btn = [];
+        const tick = () => { if (b.isConnected) { window.__btn.push({ w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height, text: b.textContent.trim(), pend: b.classList.contains("is-pending"), dots: b.querySelectorAll(".pend-dots i").length }); requestAnimationFrame(tick); } };
+        requestAnimationFrame(tick);
+      }, sel);
+      await page.click(sel);
+      await page.waitForFunction(() => SQ.u.screen === "questlog", null, { timeout: 5000 });
+      const f = await page.evaluate(() => window.__btn);
+      assert(f.some((x) => x.pend && x.text === "Joining" && x.dots === 3), "'Joining' with three dots");
+      assert(f.some((x) => x.text === "You're in"), "then '✓ You're in'");
+      assert(f.every((x) => Math.abs(x.w - before) < 0.6), `the width stayed ${before}px (${[...new Set(f.map((x) => x.w))].join(", ")})`);
+      await ctx.close();
+    });
+
+    await test("flow m. An API error shows a plain sentence and 'Try again' in place of the results, keeps the words typed, and Try again works", async () => {
+      let fail = true;
+      const { ctx, page } = await phone({ route: (r, u) => (u.pathname === "/api/search" && fail ? r.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "boom" }) }) : r.continue()) });
+      await page.goto(base);
+      await ready(page);
+      await page.fill(".lx .search input", "live jazz tonight");
+      await page.press(".lx .search input", "Enter");
+      await page.waitForSelector(".err-block");
+      const text = await page.textContent(".err-block");
+      assert.match(text, /Couldn't load your results/);
+      assert.match(text, /Try again/);
+      assert(!/boom|you|your fault|invalid/i.test(text.replace(/your results|Your search/g, "")), `doesn't blame the person: ${text}`);
+      assert.strictEqual(await page.inputValue(".search input"), "live jazz tonight", "what they typed stays");
+      await page.screenshot({ path: path.join(SHOTS, "m-error.png") });
+      fail = false;
+      await page.click(".err-retry");
+      await page.waitForSelector(".search-hit, .search-end", { timeout: 8000 });
+      assert(!(await page.$(".err-block")), "the error is gone");
       await ctx.close();
     });
   } finally {

@@ -313,6 +313,14 @@
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refresh(); });
 
   // ---------- Start ----------
+  // Arriving from the app's "Testing" choice (its zoom into the city lights): the rows fade in, once
+  try {
+    if (sessionStorage.getItem("sq2.arrive") === "zoom") {
+      sessionStorage.removeItem("sq2.arrive");
+      document.documentElement.classList.add("arrive");
+      setTimeout(() => document.documentElement.classList.remove("arrive"), 2000);
+    }
+  } catch {}
   if (!sid) introScreen(false);
   else if (!tid) introScreen(true);
   else refresh().then(() => { if (!view && tid) introScreen(false); });

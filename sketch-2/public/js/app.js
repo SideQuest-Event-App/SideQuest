@@ -124,23 +124,52 @@
     state.events = events.list;
     return state;
   }
+  // "In the demo, in this tab": set when this tab signs into the demo account, cleared by signing out or switching.
+  // The demo account lives in the server's memory (on Render, a restart or a sleep forgets it), so while this is
+  // set a missing account is signed in again quietly instead of dropping the person on the start page.
+  SQ.demoSession = (on) => {
+    try {
+      if (on === undefined) return sessionStorage.getItem("sq2.demo") === "1";
+      if (on) sessionStorage.setItem("sq2.demo", "1");
+      else sessionStorage.removeItem("sq2.demo");
+    } catch {}
+    return !!on;
+  };
+  async function relogin() {
+    const r = await request("/api/act", { user: null, host: ids.host, type: "demoLogin" });
+    SQ.setIds({ user: r.result.userId });
+    SQ.d = await withEvents(r.state);
+  }
   SQ.refresh = async () => {
     const state = await request(`/api/state?user=${encodeURIComponent(ids.user || "")}&host=${encodeURIComponent(ids.host || "")}`);
     if (window.SQboot) window.SQboot.counts({ events: state.eventsCount }); // the loader's "1,240 events", while the listings download
     SQ.d = await withEvents(state);
-    if (ids.user && !SQ.d.user) SQ.setIds({ user: null }); // the database was reset
+    if (ids.user && !SQ.d.user) {
+      SQ.setIds({ user: null }); // the database was reset, or the server restarted
+      if (SQ.demoSession()) await relogin().catch(() => {});
+    }
     if (ids.host && !SQ.d.host) SQ.setIds({ host: null });
   };
   // Every change goes through here, and comes back with fresh state
-  SQ.act = async (type, args) => {
+  SQ.acts = 0; // how many changes have gone through (a waiting button shows "done" only if one did)
+  SQ.act = async (type, args, retried) => {
     try {
       const r = await request("/api/act", { user: ids.user, host: ids.host, type, args });
       if (r.result.userId) SQ.setIds({ user: r.result.userId });
       if (r.result.hostId) SQ.setIds({ host: r.result.hostId });
+      if (type === "demoLogin") SQ.demoSession(true);
       SQ.d = await withEvents(r.state);
       SQ.reportStale = true;
+      SQ.acts++;
       return r.result;
     } catch (err) {
+      // The server forgot the demo account mid-visit (a restart): sign in again quietly and try once more
+      if (!retried && type !== "demoLogin" && SQ.demoSession() && /^Sign up first/.test(err.message)) {
+        try {
+          await relogin();
+          return await SQ.act(type, args, true);
+        } catch {}
+      }
       toast(err.message);
       throw err;
     }
@@ -151,6 +180,7 @@
     const u = SQ.d.user;
     if (!u || SQ.u.feedLoading) return;
     SQ.u.feedLoading = true;
+    SQ.u.feedSince = Date.now();
     SQ.u.feedError = null;
     render();
     try {
@@ -166,6 +196,7 @@
     const p = SQ.d.party;
     if (!p || SQ.u.blendLoading) return;
     SQ.u.blendLoading = true;
+    SQ.u.blendSince = Date.now();
     render();
     try {
       SQ.d.party.blend = await SQ.post("/api/blend", { userId: ids.user, force });
@@ -226,7 +257,9 @@
     fetch("/api/track", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), keepalive: true }).catch(() => {});
   }
 
-  let direction = "";
+  // How the next render moves: "fade" between tabs, "push" into a screen, "back" out of one (motion.js)
+  let navKind = null;
+  let quietAt = 0;
   SQ.go = (id) => {
     const target = guard(id);
     if (SQ.u.screen !== target) trackScreen(target, SQ.u.screen);
@@ -237,8 +270,16 @@
       SQ.u.searchOpen = true;
     }
     else if (SQ.u.screen !== target) SQ.u.history.push(SQ.u.screen);
-    direction = SQ.u.screen === target ? "" : "enter";
+    navKind = SQ.u.screen === target ? null : ROOTS.includes(target) ? "fade" : "push";
     SQ.u.screen = target;
+    // Tabs show what's cached at once and refresh it quietly (at most every 30 s)
+    if (navKind === "fade" && ["parties", "questlog"].includes(target) && Date.now() - quietAt > 30000) {
+      quietAt = Date.now();
+      SQ.refresh().then(() => {
+        const a = document.activeElement;
+        if (SQ.u.screen === target && !(a && screenEl.contains(a) && a.dataset.bind)) render(false);
+      }, () => {});
+    }
     if (target === "notifications" && SQ.d.user && SQ.d.user.notifications.some((n) => !n.read)) SQ.act("readNotifications").then(render, () => {});
     try {
       sessionStorage.setItem("sq2.screen", target);
@@ -248,11 +289,24 @@
   };
   SQ.back = () => {
     const prev = SQ.u.history.pop();
-    direction = "enter-back";
+    navKind = "back";
     const from = SQ.u.screen;
     if (from === "search") SQ.u.searchOpen = false; // leaving the results with back closes the search
     SQ.u.screen = guard(prev || (SQ.screens[SQ.u.screen].role === "host" ? "host-demand" : "discover"));
     if (SQ.u.screen !== from) trackScreen(SQ.u.screen, from);
+    else navKind = null;
+    render(true);
+  };
+  // Straight onto a screen with no movement and a fresh history (the opening hands over to the map this way)
+  SQ.enter = (id) => {
+    const target = guard(id);
+    trackScreen(target, SQ.u.screen);
+    Object.assign(SQ.u, { screen: target, history: [], searchOpen: false });
+    navKind = null;
+    try {
+      sessionStorage.setItem("sq2.screen", target);
+      sessionStorage.setItem("sq2.searchOpen", "");
+    } catch {}
     render(true);
   };
 
@@ -270,10 +324,10 @@
 
     if (!SQ.u.reqDraft) SQ.u.reqDraft = SQ.defaultReqDraft();
     if (!SQ.u.hostDraft) SQ.u.hostDraft = SQ.emptyHostDraft();
+    const kind = resetScroll ? navKind : null;
+    navKind = null;
+    const snap = kind ? SQ.navSnapshot(screenEl) : null;
     screenEl.innerHTML = scr.render();
-    const first = screenEl.firstElementChild;
-    if (first && direction && resetScroll) first.classList.add(direction);
-    direction = "";
     const scroll = screenEl.querySelector(".scroll");
     if (scroll && !resetScroll) scroll.scrollTop = top;
     if (bind) {
@@ -296,6 +350,7 @@
     watchReveal(screenEl.querySelector("[data-reveal]"));
     renderSide();
     ensure();
+    if (snap) SQ.navMotion(screenEl, snap, kind);
   }
   SQ.render = () => render(false);
 
@@ -407,12 +462,15 @@
       if (!fn) return console.warn("Unknown action:", name);
       if (busy) return;
       busy = true;
-      let next;
+      let next, ok = false;
+      const pend = SQ.pendingButton(el), acts = SQ.acts; // "Joining…" in place, the button keeping its size
       try {
         next = await fn(el.getAttribute("data-arg"), el);
+        ok = true;
       } catch (err) {
         console.error(err);
       }
+      if (pend) await pend.done(ok && SQ.acts > acts);
       busy = false;
       const then = el.getAttribute("data-then");
       if (typeof next === "string" || then) SQ.go(typeof next === "string" ? next : then);
@@ -587,16 +645,35 @@
   });
 
   // ---------- Start ----------
+  // Every fresh visit (a new tab or session) goes: city-lights loader -> "Are you demoing SideQuest or testing it?".
+  // The answer is kept for this tab only (sessionStorage), so a reload in the same tab doesn't ask again; a screen
+  // saved by an earlier visit is ignored until the question has been answered here. Shared links skip the question:
+  // ?quest=<id> and the study's ?demo=1&study=<id> (the /sk and /study pages are pages of their own).
+  SQ.actions.bootRetry = () => location.reload();
+  SQ.opening.enterDemo = async () => {
+    await SQ.act("demoLogin"); // always, even over a stale session or another account
+    SQ.u.search = { ...SQ.u.search, result: null, ran: "", error: null };
+    SQ.enter("discover");
+  };
   (async function start() {
-    // Links into the app from the voice study (/?demo=1&study=<id>): the demo account, and a bar back to the checklist
     const params = new URLSearchParams(location.search);
+    try { localStorage.removeItem("sq2.mode"); } catch {} // the old per-device answer: not used any more
+    // Links into the app from the voice study (/?demo=1&study=<id>): the demo account, and a bar back to the checklist
     const study = params.get("study");
     if (study && /^[\w-]{4,80}$/.test(study)) {
       try {
         sessionStorage.setItem("sq2.study", study);
       } catch {}
-      SQ.mode.set("test");
     }
+    // "Switch to demo / testing" from the study page: forget this tab's answer and the account, and ask again
+    if (params.get("switch")) {
+      SQ.mode.set(null);
+      SQ.demoSession(false);
+      SQ.setIds({ user: null });
+      history.replaceState(null, "", location.pathname);
+    }
+    if (params.get("demo")) SQ.mode.set(SQ.studyId() ? "test" : "demo");
+    else if (params.get("quest") && !SQ.mode.get()) SQ.mode.set("demo");
     const sid = SQ.studyId();
     if (sid) {
       const bar = document.getElementById("study-bar");
@@ -604,53 +681,58 @@
       bar.hidden = false;
       document.getElementById("phone").classList.add("studying");
     }
-    // A tester coming back to the start page goes back to their study (the question isn't asked twice)
-    if (SQ.mode.get() === "test" && !ids.user && !ids.host && !location.search) {
+    // A tester coming back to the start page in the same tab goes back to their study (the question isn't asked twice)
+    if (SQ.mode.get() === "test" && !sid && !ids.user && !ids.host && !location.search) {
       location.replace("/study");
       return;
     }
-    if (params.get("switch")) {
-      SQ.mode.set(null);
-      SQ.setIds({ user: null });
-      history.replaceState(null, "", location.pathname);
-    }
+    const failed = () => {
+      screenEl.innerHTML = `<div class="screen"><main class="scroll"><div class="pad stack" style="padding-top:80px">${SQ.errorBlock("Couldn't reach Sidequest", "The server may be waking up. Give it a moment, then try again.", "bootRetry")}</div></main></div>`;
+      if (window.SQboot) window.SQboot.done();
+    };
     try {
       await SQ.refresh();
     } catch (err) {
-      screenEl.innerHTML = `<div class="screen"><main class="scroll"><div class="pad stack" style="padding-top:80px">${SQ.empty("x", err.message)}</div></main></div>`;
-      if (window.SQboot) window.SQboot.done();
+      return failed();
+    }
+    restoreSearch();
+    // Not answered in this tab yet: the question, on the loader's lights (opening.js). Nothing saved is restored.
+    if (!SQ.mode.get()) {
+      SQ.u.screen = "mode";
+      trackScreen("mode", null);
+      render(true);
+      SQ.opening.ask();
       return;
+    }
+    // The study's links always sign into the demo; so does a demo tab whose account the server forgot
+    if (params.get("demo") || (!SQ.d.user && (SQ.demoSession() || (params.get("quest") && SQ.mode.get() === "demo")))) {
+      try {
+        await SQ.act("demoLogin");
+      } catch {
+        return failed();
+      }
     }
     let last = null;
     try {
       last = sessionStorage.getItem("sq2.screen");
     } catch {}
     const u = SQ.d.user;
-    restoreSearch();
     if (last === "search" && SQ.u.search.result) SQ.u.history = ["discover"];
     // A reload elsewhere keeps the Discover tab pointing at the results if they were still open
     try {
       SQ.u.searchOpen = !!SQ.u.search.result && (last === "search" || sessionStorage.getItem("sq2.searchOpen") === "1");
     } catch {}
-    // Someone new on this device is asked first: demoing or testing? (A shared ?quest= link skips the question.)
-    const fallback = u ? (u.registered ? "discover" : "ob-vibes") : SQ.mode.get() || params.get("quest") ? "landing" : "mode";
-    SQ.u.screen = guard(last && SQ.screens[last] && !["quest", "tickets", "rate", "eventday", "eventday-chat", ...(SQ.u.search.result ? [] : ["search"]), "host-request", "host-checkin", "host-recap", "host-published", "host-create", "host-create-dayinfo", "host-draft-test", "spot", "add-event"].includes(last) ? last : fallback);
-    // The study's "Look around Discover" link: into the demo account, on the map
-    if (params.get("demo") && !SQ.d.user) {
-      try {
-        await SQ.act("demoLogin");
-        SQ.u.screen = "discover";
-      } catch {}
-    }
-    if (params.get("demo") || study) history.replaceState(null, "", location.pathname);
+    const fallback = u ? (u.registered ? "discover" : "ob-vibes") : "landing";
+    const skip = ["mode", "quest", "tickets", "rate", "eventday", "eventday-chat", ...(SQ.u.search.result ? [] : ["search"]), "host-request", "host-checkin", "host-recap", "host-published", "host-create", "host-create-dayinfo", "host-draft-test", "spot", "add-event", ...(u ? ["landing"] : [])];
+    SQ.u.screen = guard(params.get("demo") ? "discover" : last && SQ.screens[last] && !skip.includes(last) ? last : fallback);
     // A shared link to one sidequest (?quest=id) opens it
-    const linked = Number(new URLSearchParams(location.search).get("quest"));
-    if (linked && SQ.ev(linked) && SQ.d.user) { // (signed out, it opens the start page: the sidequest screen needs an account)
+    const linked = Number(params.get("quest"));
+    if (linked && SQ.ev(linked) && SQ.d.user) {
       SQ.u.quest = linked;
       SQ.u.history = [SQ.u.screen];
       SQ.u.screen = "quest";
-      history.replaceState(null, "", location.pathname);
     }
+    if (params.get("demo") || params.get("study") || params.get("quest")) history.replaceState(null, "", location.pathname);
     trackScreen(SQ.u.screen, null);
     try {
       render(true);
