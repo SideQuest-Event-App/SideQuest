@@ -51,9 +51,13 @@ function config(a) {
           llm: process.env.ELEVENLABS_LLM || "claude-haiku-4-5",
           temperature: 0.6,
           max_tokens: 120,
+          ignore_default_personality: true, // use only our persona prompt
+          // skip_turn lets Sidekick stay quiet while people talk among themselves
+          built_in_tools: { skip_turn: { type: "system", name: "skip_turn", description: "Stay silent when people are talking among themselves and nobody needs Sidekick.", params: { system_tool_type: "skip_turn" } } },
         },
       },
-      tts: { voice_id: a.voice || VOICE_DEFAULT, model_id: process.env.ELEVENLABS_TTS_MODEL || "eleven_flash_v2_5", stability: 0.45, similarity_boost: 0.8, speed: a.speed },
+      // ElevenLabs requires a "flash v2" or "turbo v2" model for English agents
+      tts: { voice_id: a.voice || VOICE_DEFAULT, model_id: process.env.ELEVENLABS_TTS_MODEL || "eleven_flash_v2", stability: 0.45, similarity_boost: 0.8, speed: a.speed },
       turn: { turn_timeout: 7, turn_eagerness: "patient" },
       conversation: { max_duration_seconds: MAX_MIN * 60 },
     },
@@ -66,7 +70,7 @@ function config(a) {
 
 // Settings to check by hand in the dashboard after creating (names vary between dashboard versions)
 const MANUAL = [
-  "Tools: turn ON the system tool skip_turn, so Sidekick can stay quiet. Turn OFF end_call.",
+  "Tools: check skip_turn is ON (set by this script) and end_call is OFF.",
   "Interruptions: ON (Sidekick stops talking when someone talks over it).",
   "Security: authentication ON, and add your app's web address to the allowlist.",
   "Privacy: confirm voice recording is off and retention is as short as your plan allows (zero retention is Enterprise-only).",
