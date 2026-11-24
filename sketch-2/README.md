@@ -169,19 +169,35 @@ The exceptions, each marked in the code with a `ponytail:` comment:
 
 ## Where the events come from (automatic import)
 
-Sketch 1's importer (`sketch-1/import/`) gathers the next three months of in-person GTA events. A GitHub Action (`.github/workflows/import-events.yml`) runs it on its own and puts the result in Supabase Storage. This server checks for a new import every 6 hours, so you don't need to commit, redeploy or restart.
+Sketch 1's importer (`sketch-1/import/`) gathers the next three months of in-person GTA events. A GitHub Action (`.github/workflows/import-events.yml`) runs it on its own and puts the result in Supabase: one row per event in the `listings` table, and (during the switch) the whole import as a file in Storage. This server checks for a new import every hour, so you don't need to commit, redeploy or restart.
 
-- **Monday:** every source. **Thursday:** Ticketmaster and Instagram only; the other sources keep Monday's events.
+- **Every day except Monday, about 07:17 UTC:** the quick sources (Ticketmaster, City of Toronto, Toronto Public Library, Luma, DICE, Instagram); the others keep their last events. **Monday, about 06:23 UTC:** every source (Meetup alone takes about 35 minutes). GitHub often starts scheduled runs late, sometimes by hours.
 - **Order** (the earlier source wins a tie between duplicates): Ticketmaster, Instagram, DICE, Meetup, Luma, City of Toronto, Toronto Public Library, Eventbrite.
-- **Instagram is read by hand,** with Claude Code (no extra cost): from `sketch-1/`, run `node import/instagram.js` once or twice a week, before Monday. It reads only posts it hasn't read yet, saves their events to Supabase, and updates the numbers in `reference/instagram-accounts.md`. To add or drop an account, edit that file. The scheduled runs never use the AI.
+- **Where this server reads them from,** in order: the `listings` table (only events that haven't ended), the Storage file, then `sketch-1/seed/events.json`. Its log says which, e.g. `Events: table (2319 upcoming, updated 2026-11-25T07:31:02.000Z)`. `/api/health` shows the same, plus how old the newest import is; over 36 hours, the log and `/api/health` carry a `WARNING: the newest event import is … old` line.
+- **Instagram is automatic once its two secrets are added** (`INSTAGRAM_USER_ID`, `INSTAGRAM_ACCESS_TOKEN`; step by step: [`sketch-1/import/README-instagram.md`](../sketch-1/import/README-instagram.md)). Each day it reads the accounts' recent posts through Instagram's official Graph API, uses what the AI already read, and reads new captions with plain rules (no AI). Without the secrets it uses the events saved by the last by-hand `node import/instagram.js` (from `sketch-1/`, with Claude Code), which still gives the best results because the AI reads the posters too. To add or drop an account, edit `reference/instagram-accounts.md`.
+- **Eventbrite is blocked from GitHub's servers** (since 19 Oct 2026 every listing page answers 405, Eventbrite's CAPTCHA). The import now says so in one line and keeps last run's Eventbrite events, if any. To bring them back, run it from a home connection: from `sketch-1/` with the Supabase keys in `.env`, `UPLOAD=1 ONLY=Eventbrite MERGE=1 node import/run.js`.
 - **Not imported:** NOW Toronto (it turns automated visitors away), Resident Advisor, Partiful and blogTO (their robots.txt or terms rule it out).
 
-One-time setup: on GitHub, go to Settings → Secrets and variables → Actions and add `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `TICKETMASTER_API_KEY` (the same values as in `sketch-1/.env`). Then on the Actions tab, open "Import events" and click "Run workflow" for the first import. Until that first import exists, the server uses `sketch-1/seed/events.json`.
+### One-time setup: the events table
+
+Do this once, in the Supabase project the app uses. Until you do, everything keeps working from the Storage file.
+
+1. Open [supabase.com](https://supabase.com), sign in, and open the SideQuest project.
+2. In the left sidebar, click **SQL Editor**, then **New query**.
+3. Open `sketch-2/supabase/schema.sql` from this repo, copy **all** of it, and paste it into the editor. (It's safe to run again: it only creates what's missing and doesn't touch `sketch2_events`, `sketch2_accounts` or `app_state`.)
+4. Click **Run**. It should say "Success. No rows returned".
+5. Check: in the left sidebar, click **Table Editor**. You should see two new tables, `listings` (empty for now) and `event_imports`.
+6. On GitHub, open the **Actions** tab, click **Import events**, then **Run workflow** (leave "only" empty for every source, or type `Ticketmaster,City of Toronto` for a quick test of about a minute). When it's done, the run's summary should say `... to seed/events.json and Supabase Storage and the events table` and show an `Events table: N new, ...` line.
+7. In the Table Editor, `listings` now has a row per event. In Render > sidequest-sidekick > Logs, within the hour (or right after a restart) you should see `Events: table (N upcoming, updated …)`.
+
+Past events can be deleted every night with `supabase/cleanup-past-events.sql` (it explains how to schedule it with pg_cron). It isn't switched on: the server only ever asks for upcoming events, so it isn't needed yet.
+
+One-time setup: on GitHub, go to Settings → Secrets and variables → Actions and add `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `TICKETMASTER_API_KEY` (the same values as in `sketch-1/.env`), and, for automatic Instagram, `INSTAGRAM_USER_ID` and `INSTAGRAM_ACCESS_TOKEN`. Then on the Actions tab, open "Import events" and click "Run workflow" for the first import. Until that first import exists, the server uses `sketch-1/seed/events.json`.
 
 Guardrails:
 - Every site is read within its robots.txt, including its Crawl-delay. A site that answers 403 or 429 (blocked or rate-limited) isn't asked again that run.
 - If a source fails, or brings back under half of last run's events, it keeps last run's events.
-- Instagram makes at most `IG_MAX_CALLS` AI calls per run (default 40), reads 2 images per post, and reads each post only once. It pauses accounts with 20 posts read and no events, and deletes downloaded images once they're read.
+- The scheduled runs never use the AI (`AI=off`). The by-hand Instagram run (or a run with `IG_AI=1`) makes at most `IG_MAX_CALLS` AI calls per run (default 40), reads 2 images per post, and reads each post only once. It pauses accounts with 20 posts read and no events, and deletes downloaded images once they're read.
 - Only events in the next three months are kept. Neither the import nor its download cache is committed to git.
 
 ## Kept from Sketch 1 beyond the design
