@@ -31,6 +31,7 @@ const { toEvent, dropReason, retag, NA } = require("./normalize");
 const tags = require("./tags");
 const { dedupe } = require("./dedupe");
 const store = require("../lib/store");
+const eventsTable = require("../lib/events-table");
 const { fetchDice } = require("./sources/dice");
 const { fetchEventbrite } = require("./sources/eventbrite");
 const { fetchTicketmaster } = require("./sources/ticketmaster");
@@ -150,11 +151,25 @@ async function previousImport() {
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, JSON.stringify(file, null, 0).replace(/\},\{"id"/g, '},\n{"id"') + "\n");
   let where = "seed/events.json";
+  let tableLine = null;
   if (process.env.UPLOAD) {
     await store.put("events.json", file);
     where += " and Supabase Storage";
+    // The events table (sketch-2/supabase/schema.sql): only the events that changed are sent. The Storage file above
+    // stays the fallback during the switch, so a missing table or a failed upsert never fails the import.
+    try {
+      const counts = await eventsTable.sync(file, { log });
+      if (counts) {
+        where += " and the events table";
+        tableLine = `  Events table: ${counts.inserted} new, ${counts.updated} changed, ${counts.unchanged} unchanged, ${counts.removed} removed`;
+      }
+    } catch (err) {
+      tableLine = err.missingTable ? "  Events table: not there yet; run sketch-2/supabase/schema.sql once in Supabase's SQL Editor (the Storage file was still uploaded)" : `  Events table: upsert failed (${err.message}); the Storage file was still uploaded`;
+      log(tableLine.trim());
+    }
   }
   const lines = [`Wrote ${events.length} events (${all.length - events.length} duplicates merged${previous ? `, ${events.length - prevEvents.length >= 0 ? "+" : ""}${events.length - prevEvents.length} since last run` : ""}) to ${where}`];
+  if (tableLine) lines.push(tableLine);
   for (const [name] of SOURCES) if (report[name]) lines.push(`  ${name}: ${report[name].kept} kept${report[name].note ? ` (${report[name].note})` : ""}`);
   const missing = { price: events.filter((e) => e.price == null).length, image: events.filter((e) => !e.image).length, description: events.filter((e) => e.description === NA).length };
   lines.push(`  N/A counts: ${Object.entries(missing).map(([k, n]) => `${k} ${n}`).join(", ")}`);
