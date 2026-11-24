@@ -1,4 +1,4 @@
-// Sidekick's two personas for the A/B test: the Plugged-In Friend (A) and the Calm Concierge (B),
+// Sidekick's two personas for the A/B test: the Calm Concierge (A) and the Plugged-In Friend (B),
 // chosen from the persona board, with the team's edited lines. Both share one set of rules (SHARED),
 // the same way of guiding the group (GUIDE), the same rules for sounding natural out loud (EAR) and the
 // same knowledge of the city (LOCAL). They differ only in how they talk. The plan engine (plan.js and

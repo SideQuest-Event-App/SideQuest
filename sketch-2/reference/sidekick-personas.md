@@ -21,7 +21,7 @@ The prompts are in `lib/sidekick/personas.js`.
 
 ## The two personas
 
-| | The Plugged-In Friend (A) | The Calm Concierge (B) |
+| | The Plugged-In Friend (B) | The Calm Concierge (A) |
 |---|---|---|
 | Feel | Warm, casual, lightly funny, honest, low-key confident, like a voice note from your best friend | Unhurried, reassuring and precise, like a great hotel concierge in your pocket |
 | Signature | Every pick comes with a reason | Gives people time and lays out the choice ("Either works well." "Take your time.") |
