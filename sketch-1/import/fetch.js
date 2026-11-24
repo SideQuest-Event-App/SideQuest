@@ -7,7 +7,7 @@ const path = require("path");
 const crypto = require("crypto");
 
 const UA = "SidequestSketch/1.0 (university student prototype; low-volume event import)";
-const CACHE_DIR = path.join(__dirname, ".cache");
+const CACHE_DIR = process.env.IMPORT_CACHE_DIR || path.join(__dirname, ".cache"); // tests point this at a temp folder
 const CACHE_HOURS = Number(process.env.CACHE_HOURS || 12);
 const GAP_MS = Number(process.env.GAP_MS || 900); // between requests to the same host
 
@@ -122,7 +122,8 @@ async function get(url, { json = false, headers = {}, extract = null, timeoutMs 
       }
       // A site that turns us away isn't asked again this run
       if (res.status === 403 || res.status === 401) blocked[host] = `turned us away (${res.status}), so we stopped asking it this run`;
-      if (!res.ok) throw new Error(`${res.status} ${url}`);
+      // status and the AWS WAF action header (405 + "captcha" is a bot check) go with the error, for the callers' logs
+      if (!res.ok) throw Object.assign(new Error(`${res.status} ${url}`), { status: res.status, wafAction: res.headers.get("x-amzn-waf-action") || null });
       const body = await res.text();
       if (extract) {
         const value = extract(body);

@@ -9,6 +9,14 @@
 // page waits and tries again instead of blocking the host, and (3) every JSON-LD event on the page is read for
 // offers (nested AggregateOffers, "CA$25.00" strings), with the page's own "is free" flag as a last resort.
 
+// Blocked since 19 Oct 2026 (Nov 2026 finding): every listing page answers HTTP 405 within a quarter of a second, from
+// GitHub's servers. 405 to a plain GET is what AWS WAF sends for its CAPTCHA action (with an x-amzn-waf-action: captcha
+// header), so Eventbrite's bot protection is asking data-centre visitors to solve a CAPTCHA. We don't get around a
+// CAPTCHA. So the first blocked page now stops the source with one clear line (instead of 14 failed weeks), the run
+// keeps last run's Eventbrite events if it has any, and the listing page's JSON-LD is read when __SERVER_DATA__ is
+// missing. What works instead: run it from a home connection (UPLOAD=1 ONLY=Eventbrite MERGE=1 node import/run.js),
+// or set EVENTBRITE=off. Eventbrite's official API has no public event search (removed in 2020).
+
 const { get, jsonLdEvents, embeddedObject, sleep } = require("../fetch");
 const { parsePrice, offersPrice, toCad } = require("../price");
 const PAGE_CAP = 49;
@@ -38,6 +46,57 @@ function listingPrice(r) {
   const cur = (ta.minimum_ticket_price && ta.minimum_ticket_price.currency) || null;
   return { low, high: high != null ? high : low, currency: cur && String(cur).toUpperCase() };
 }
+
+// A listing page's events: the page's __SERVER_DATA__ search results, or, when that's missing, the schema.org
+// events in its JSON-LD (turned into the same shape). Returns { results, pagination } or null.
+function parseListing(html) {
+  const data = embeddedObject(html, "window.__SERVER_DATA__");
+  const found = data && data.search_data && data.search_data.events;
+  if (found && Array.isArray(found.results)) return found;
+  const lds = jsonLdEvents(html).filter((x) => x.url && x.startDate);
+  if (!lds.length) return null;
+  const results = lds.map(fromJsonLd).filter(Boolean);
+  // JSON-LD has no page count: keep paging while pages come back full (an empty page stops the loop)
+  return { results, pagination: { object_count: results.length, page_count: results.length >= PAGE_SIZE ? PAGE_CAP : 1 } };
+}
+// "2026-11-27T19:00:00-05:00" -> ["2026-11-27", "19:00"] (Eventbrite writes local Toronto time with its offset)
+const localParts = (s) => {
+  const m = String(s || "").match(/^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}))?/);
+  return m ? [m[1], m[2] || null] : [null, null];
+};
+function fromJsonLd(x) {
+  const id = (String(x.url).match(/-(\d{6,})(?:[/?#]|$)/) || [])[1];
+  const [startDate, startTime] = localParts(x.startDate);
+  if (!id || !startDate) return null;
+  const [endDate, endTime] = localParts(x.endDate);
+  const loc = [].concat(x.location || [])[0] || {};
+  const addr = loc.address || {};
+  const geo = loc.geo || {};
+  const online = /OnlineEventAttendanceMode/.test(x.eventAttendanceMode || "") || loc["@type"] === "VirtualLocation";
+  const address = typeof addr === "string" ? addr : [addr.streetAddress, addr.addressLocality, addr.addressRegion].filter(Boolean).join(", ");
+  const offers = [].concat(x.offers || []);
+  const low = offers.map((o) => parseFloat(o.lowPrice != null ? o.lowPrice : o.price)).filter((n) => Number.isFinite(n));
+  return {
+    id,
+    name: x.name,
+    url: x.url,
+    summary: x.description || "",
+    start_date: startDate,
+    start_time: startTime || "19:00",
+    end_date: endDate,
+    end_time: endTime,
+    is_online_event: online,
+    is_cancelled: /EventCancelled/.test(x.eventStatus || ""),
+    primary_venue: online ? null : { name: loc.name, address: { localized_address_display: address, latitude: geo.latitude != null ? Number(geo.latitude) : undefined, longitude: geo.longitude != null ? Number(geo.longitude) : undefined, city: typeof addr === "object" ? addr.addressLocality : undefined } },
+    image: x.image ? { image_sizes: { large: [].concat(x.image)[0] } } : null,
+    ticket_availability: low.length ? { minimum_ticket_price: { major_value: String(Math.min(...low)), currency: (offers[0] && offers[0].priceCurrency) || "CAD" } } : undefined,
+    tags: [],
+  };
+}
+
+// An error from fetch.get that means "blocked by a bot check", not "this page is missing"
+const isBotBlock = (err) => !!err && (err.status === 405 || err.status === 403 || /captcha|challenge/i.test(err.wafAction || ""));
+const BLOCKED_NOTE = (err) => `blocked by Eventbrite's bot protection (HTTP ${err.status}${err.wafAction ? `, x-amzn-waf-action: ${err.wafAction}` : ", the AWS WAF CAPTCHA answer"}) from this network. GitHub's servers have been blocked since 19 Oct 2026. Not working around a CAPTCHA: run it from a home connection with \`UPLOAD=1 ONLY=Eventbrite MERGE=1 node import/run.js\` (from sketch-1/), or set EVENTBRITE=off`;
 
 // Only what we use from an event page, so the cache stays small
 function eventPageInfo(html) {
@@ -81,15 +140,17 @@ async function readEventPage(url, log) {
 }
 
 async function fetchEventbrite({ start, end, max, log }) {
+  if (/^(off|0|false)$/i.test(process.env.EVENTBRITE || "")) return { skipped: "turned off (EVENTBRITE=off)" };
   const listed = new Map();
+  let blockedBy = null; // the first bot-check error: stops every other listing request this run
   const listingUrl = (s, e, page) => `https://www.eventbrite.ca/d/canada--toronto/all-events/?start_date=${s}&end_date=${e}&page=${page}`;
   // Listing pages rate-limit after a while: back off for a few minutes rather than leave a gap
   const readPage = async (s, e, page) => {
     for (let attempt = 1; ; attempt++) {
       try {
-        const data = embeddedObject(await get(listingUrl(s, e, page)), "window.__SERVER_DATA__");
-        return data && data.search_data && data.search_data.events;
+        return parseListing(await get(listingUrl(s, e, page)));
       } catch (err) {
+        if (isBotBlock(err)) throw Object.assign(err, { botBlock: true });
         if (!/^429/.test(err.message) || attempt >= 6) throw err;
         log(`  eventbrite: rate limited, waiting ${attempt} min`);
         await sleep(attempt * 60000);
@@ -106,11 +167,15 @@ async function fetchEventbrite({ start, end, max, log }) {
 
   // Read a date range, splitting it in half while it holds more than one query can show
   async function readRange(s, e) {
-    if (listed.size >= max) return;
+    if (listed.size >= max || blockedBy) return;
     let first;
     try {
       first = await readPage(s, e, 1);
     } catch (err) {
+      if (err.botBlock) {
+        blockedBy = err;
+        return;
+      }
       log(`  eventbrite ${s}..${e}: ${err.message}`);
       return;
     }
@@ -131,7 +196,8 @@ async function fetchEventbrite({ start, end, max, log }) {
         if (!res || !res.results.length) break;
         keep(res);
       } catch (err) {
-        log(`  eventbrite ${s}..${e} p${page}: ${err.message}`);
+        if (err.botBlock) blockedBy = err;
+        else log(`  eventbrite ${s}..${e} p${page}: ${err.message}`);
         break;
       }
     }
@@ -140,10 +206,15 @@ async function fetchEventbrite({ start, end, max, log }) {
 
   // A week at a time keeps most queries under the cap without splitting
   const last = ymd(end);
-  for (let s = ymd(start); s <= last && listed.size < max; s = addDays(s, 7)) {
+  for (let s = ymd(start); s <= last && listed.size < max && !blockedBy; s = addDays(s, 7)) {
     const e = addDays(s, 6) > last ? last : addDays(s, 6);
     await readRange(s, e);
   }
+  if (blockedBy && !listed.size) {
+    log(`  eventbrite: ${BLOCKED_NOTE(blockedBy)}`);
+    return { skipped: `Eventbrite ${BLOCKED_NOTE(blockedBy)}` };
+  }
+  if (blockedBy) log(`  eventbrite: stopped early, ${BLOCKED_NOTE(blockedBy)}; keeping the ${listed.size} listings read before that`);
 
   const chosen = [...listed.values()].slice(0, max);
   log(`  eventbrite: ${chosen.length} in-person listings, reading each event page for price and organizer`);
@@ -193,4 +264,4 @@ async function fetchEventbrite({ start, end, max, log }) {
   return out;
 }
 
-module.exports = { fetchEventbrite, torontoISO, eventPageInfo, listingPrice };
+module.exports = { fetchEventbrite, torontoISO, eventPageInfo, listingPrice, parseListing, isBotBlock };
