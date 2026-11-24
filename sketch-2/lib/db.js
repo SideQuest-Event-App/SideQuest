@@ -7,23 +7,48 @@ const fs = require("fs");
 const path = require("path");
 const { dedupe } = require("../../sketch-1/import/dedupe");
 const store = require("../../sketch-1/lib/store");
+const eventsTable = require("../../sketch-1/lib/events-table");
 
 const ROOT = path.join(__dirname, "..");
 const DATA_DIR = path.join(ROOT, "data");
 const DB_PATH = path.join(DATA_DIR, "db.json");
 // Sketch 2 shares Sketch 1's imported listings (read-only), so one import feeds both
 const readSeed = (name) => JSON.parse(fs.readFileSync(path.join(ROOT, "..", "sketch-1", "seed", name), "utf8"));
-// The import (sketch-1/import/run.js): real listings plus when they were imported. The weekly scheduled import
-// puts it in Supabase Storage; without Supabase (or before the first one) it's sketch-1/seed/events.json.
-async function seedEvents() {
+// The import (sketch-1/import/run.js): real listings plus when they were imported. Read, in order, from:
+//   1. the events table in Supabase ("listings", sketch-2/supabase/schema.sql): only upcoming events, by date;
+//   2. the import file in Supabase Storage (imports/events.json.gz), kept up to date during the switch;
+//   3. sketch-1/seed/events.json in the repo (no Supabase keys, or both of the above failed).
+// lastSource says which one was used, for the log line and /api/health.
+let lastSource = null;
+async function seedEvents({ quiet = false } = {}) {
+  const say = (s) => {
+    lastSource = s;
+    if (!quiet) console.log(`Events: ${s.from === "table" ? "table" : s.from === "storage" ? "Storage file" : "seed file"} (${s.upcoming} upcoming, ${s.from === "table" ? "updated" : "imported"} ${s.updatedAt || s.importedAt})`);
+  };
+  const upcomingCount = (events) => events.filter((e) => Date.parse(e.runsUntil || e.endsAt || e.startsAt) + (e.endsAt || e.runsUntil ? 0 : 3 * 3600000) > Date.now()).length;
+  try {
+    const t = await eventsTable.upcoming();
+    if (t && t.events.length) {
+      say({ from: "table", upcoming: t.events.length, importedAt: t.importedAt, updatedAt: t.updatedAt });
+      return { importedAt: t.importedAt, events: t.events };
+    }
+    if (eventsTable.configured()) console.warn("Events table is empty; using the Storage file");
+  } catch (err) {
+    console.warn(err.missingTable ? "No events table yet (run sketch-2/supabase/schema.sql once); using the Storage file" : `Couldn't read the events table (${err.message}); using the Storage file`);
+  }
   try {
     const stored = await store.get("events.json");
-    if (stored) return stored;
+    if (stored) {
+      say({ from: "storage", upcoming: upcomingCount(stored.events), importedAt: stored.importedAt });
+      return stored;
+    }
   } catch (err) {
     console.warn(`Couldn't read the import from Supabase Storage (${err.message}); using sketch-1/seed/events.json`);
   }
   const file = readSeed("events.json");
-  return Array.isArray(file) ? { importedAt: "sample", events: file } : file;
+  const out = Array.isArray(file) ? { importedAt: "sample", events: file } : file;
+  say({ from: "seed", upcoming: upcomingCount(out.events), importedAt: out.importedAt });
+  return out;
 }
 
 // Sample friends you can add to a party (not real people), with the taste profile Crew Blend reads.
@@ -170,10 +195,21 @@ async function takeImport(fresh) {
   await write();
   return true;
 }
-// The server calls this every few hours, so a new weekly import shows up without a restart
+// The server calls this every hour, so a new daily import shows up without a restart
 async function checkImport() {
   if (!data || !store.configured()) return false;
-  return takeImport(await seedEvents());
+  const before = lastSource && lastSource.from;
+  // Reading from the table and no import since: nothing to download
+  if (before === "table") {
+    try {
+      const latest = await eventsTable.latestImport();
+      if (latest && latest === data.eventsImportedAt) return false;
+    } catch {}
+  }
+  const fresh = await seedEvents({ quiet: true });
+  const took = await takeImport(fresh);
+  if (took || before !== lastSource.from) console.log(`Events: ${lastSource.from === "table" ? "table" : lastSource.from === "storage" ? "Storage file" : "seed file"} (${lastSource.upcoming} upcoming, ${lastSource.from === "table" ? "updated" : "imported"} ${lastSource.updatedAt || lastSource.importedAt})`);
+  return took;
 }
 
 // Accounts still in onboarding live in memory only: nothing about people who give up partway is stored
@@ -259,4 +295,8 @@ module.exports = {
   fetchAccount,
   refresh,
   FRIENDS,
+  seedEvents,
+  get eventsSource() {
+    return lastSource; // { from: "table" | "storage" | "seed", upcoming, importedAt, updatedAt }
+  },
 };
