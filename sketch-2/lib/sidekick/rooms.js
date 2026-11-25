@@ -1364,6 +1364,26 @@ function whyLine(room, e, f, closest) {
   return parts.join(" · ");
 }
 
+// The card's two plain facts (design: picks show 4 facts): who it's for, in their own words ("For Asia: Chinese
+// skewers"), and the trip ("15 min from Union", or the area). Never a score, a matcher's words or a private answer.
+function forLine(room, e, f, closest) {
+  if (!e) return "";
+  if (room.candidate != null && e.id === room.candidate) return "The one you saved";
+  if (closest) return "The closest we found to what you asked for";
+  const r = P.fitReasons(e, room, f);
+  const w = r.wants[0];
+  const v = r.vibes[0];
+  const hit = w ? { text: w.text, names: w.names } : v ? { text: KIND_WORD[v.v] || v.v, names: v.names } : null;
+  if (!hit) return "";
+  return `For ${hit.names.length ? talk.andList(hit.names.slice(0, 3)) : "the crew"}: ${hit.text}`;
+}
+function tripLine(room, e) {
+  if (!e) return "";
+  const origins = [...new Set(P.crew(room).map((p) => (room.answers[p.id] || {}).origin).filter((o) => o && !o.here).map((o) => o.value))];
+  const trip = origins.map((o) => [o, e.travel && e.travel.from && e.travel.from[o] && e.travel.from[o].minutes]).find(([, m]) => Number.isFinite(m));
+  return trip ? `${Math.round(trip[1])} min from ${ORIGIN_NAME[trip[0]] || trip[0]}` : "";
+}
+
 async function pickTwo(room, list, deadline) {
   const f = factsOf(room);
   const people = P.crew(room).map((p) => {
@@ -1433,6 +1453,8 @@ async function pickTwo(room, list, deadline) {
     const e = pool.find((x) => x.id === p.id);
     p.closest = !fits(e) || undefined;
     p.why = whyLine(room, e, f, p.closest);
+    p.forLine = forLine(room, e, f, p.closest);
+    p.trip = tripLine(room, e);
   }
   const whyOf = (p) => {
     const e = pool.find((x) => x.id === p.id);
@@ -2033,6 +2055,17 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       room.surveys[person.id] = { friend: clamp(body.friend), heard: clamp(body.heard), mode: person.mode };
       track("sk_survey", { sessionId: room.id, persona: room.persona, friend: clamp(body.friend), heard: clamp(body.heard), mode: person.mode });
       if (P.crew(room).every((p) => room.surveys[p.id])) endRoom(room, "surveyed");
+      broadcast(room);
+      return sendJSON(res, 200, { ok: true });
+    }
+    // "Just leave (they carry on)": the planner goes, and the next person in the call can lock the plan instead
+    if (action === "leave") {
+      if (person.role === "planner") {
+        const others = room.people.filter((p) => p.id !== person.id && p.mode !== "form");
+        const next = others.find((p) => room.streams.has(p.id)) || others[0];
+        if (next) { next.role = "planner"; person.role = "friend"; }
+      }
+      track("sk_left", { sessionId: room.id, persona: room.persona });
       broadcast(room);
       return sendJSON(res, 200, { ok: true });
     }
