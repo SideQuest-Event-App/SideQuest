@@ -9,11 +9,15 @@ const settings = require("./settings");
 const stats = require("./stats");
 const squads = require("./squads");
 const tastepage = require("./tastepage");
+const notify = require("./notify"); // quiet hours: notify(user, n) holds alerts back, deliver() lets them through after
+const lists = require("./lists"); // Taste > Lists: your own lists of events and places
+const join = require("./join"); // "Asking to join" for events you host
+const authuser = require("./authuser"); // Delete account also removes the Supabase Auth user
 
 const DAY = 86400000;
 const UNDO_KEEP = 12;
 
-let D = null; // deps from server.js: { db, findEvent, isOver, now, person, friendKeys, poolFor, clean }
+let D = null; // deps from server.js: { db, findEvent, isOver, now, person, friendKeys, poolFor, clean, edited }
 
 // ---------- Hosting: events this person added or published ----------
 function hostedIds(user) {
@@ -27,7 +31,8 @@ function hosting(user) {
   for (const g of db.data.logs.going) if (!g.sample && g.userId !== user.id) going[g.eventId] = (going[g.eventId] || 0) + 1;
   return hostedIds(user).map((id) => {
     const e = D.findEvent(id);
-    return { id, guests: (e.going || 0) + (going[id] || 0), asking: 0 };
+    const requests = join.forHost(e);
+    return { id, guests: (e.going || 0) + (going[id] || 0), approval: !!e.approval, asking: requests.filter((r) => r.status === "asking").length, requests };
   });
 }
 
@@ -152,12 +157,37 @@ function retunePairs(user) {
   return pairs.slice(0, 6);
 }
 
+// ---------- Quiet hours: deliver what's due, then send held ones as read (no badge) ----------
+function notifyView(user, now) {
+  notify.deliver(user, { now });
+  return notify.forApp(user.notifications);
+}
+// Lists friends shared with you (privacy: Friends), from accounts that are your friends
+function friendLists(user) {
+  const me = `u:${user.id}`;
+  const out = [];
+  for (const k of user.friends || []) {
+    const other = String(k).startsWith("u:") && D.db.data.users[k.slice(2)];
+    if (!other) continue;
+    for (const l of lists.forFriend(other, me)) out.push({ ...l, owner: (other.name || "A friend").split(" ")[0], items: l.items.filter((id) => D.findEvent(id)) });
+  }
+  return out.slice(0, 20);
+}
+// Live Sidekick calls, for the Squads tab's "Live call · N in" (lib/sidekick/rooms.js liveCalls)
+function liveCalls() {
+  try {
+    return require("../sidekick/rooms").liveCalls() || [];
+  } catch {
+    return [];
+  }
+}
+
 // ---------- What each tab reads ----------
 function view(user) {
   if (!user) return {};
   migrate(user);
   const now = D.now();
-  const sq = squads.view(D.db, user, { people: D.person, findEvent: D.findEvent, isOver: D.isOver, now });
+  const sq = squads.view(D.db, user, { people: D.person, findEvent: D.findEvent, isOver: D.isOver, now, calls: liveCalls() });
   const hostedList = hosting(user);
   const st = stats.build(user, { findEvent: D.findEvent, squads: sq.map((s) => ({ ...s, members: s.members })), hostedIds: hostedList.map((h) => h.id), now });
   return {
@@ -167,6 +197,10 @@ function view(user) {
     hosting: hostedList,
     stats: st,
     tastePage: tastepage.build(user, { findEvent: D.findEvent, squads: sq, now }),
+    lists: lists.view(user, { findEvent: D.findEvent }),
+    friendLists: friendLists(user),
+    joins: join.mine(user, D.db.data.events), // eventId -> asking | approved | declined, for "Ask to join"
+    notifications: notifyView(user, now),
   };
 }
 
@@ -208,7 +242,10 @@ async function deleteAccount(user) {
     if (e.flags) e.flags = e.flags.filter((f) => f.userId !== id);
   }
   for (const list of Object.values(db.data.eventChat || {})) for (let i = list.length - 1; i >= 0; i--) if (list[i].userId === id) list.splice(i, 1);
+  join.forgetUser(db.data.events, id);
   await db.forget(id);
+  // Then the Supabase Auth user (when Supabase is set up); never fails the deletion
+  return authuser.deleteAuthUser(user, { fetchImpl: D.fetch || global.fetch });
 }
 
 // ---------- Actions ----------
@@ -360,9 +397,56 @@ function register(A, deps) {
     const u = needUser(ctx);
     if (u.demo || D.isDemo(u)) throw new Error("The demo account can't be deleted. Exit the demo instead.");
     if (confirm !== "DELETE") throw new Error("Type DELETE to confirm.");
-    await deleteAccount(u);
-    return { deleted: true };
+    const auth = await deleteAccount(u);
+    return { deleted: true, auth };
+  };
+
+  // --- Taste > Lists ---
+  const listDeps = { findEvent: D.findEvent };
+  A.listCreate = (ctx, { name, privacy, eventId }) => {
+    const l = lists.create(needUser(ctx), { name, privacy, eventId }, { ...listDeps, now: D.now() });
+    return { listId: l.id, label: eventId != null && l.items.length ? `Added to ${l.name}` : `${l.name} is ready` };
+  };
+  A.listRename = (ctx, args) => ({ label: `Renamed to ${lists.rename(needUser(ctx), args).name}` });
+  A.listPrivacy = (ctx, args) => {
+    const l = lists.setPrivacy(needUser(ctx), args);
+    return { label: l.privacy === "friends" ? `Friends can see ${l.name}` : `${l.name} is private` };
+  };
+  A.listDelete = (ctx, args) => ({ label: `Deleted ${lists.remove(needUser(ctx), args).name}` });
+  A.listItem = (ctx, args) => {
+    const r = lists.item(needUser(ctx), args, listDeps);
+    return { on: r.on, label: r.on ? `Added to ${r.list.name}` : `Removed from ${r.list.name}` };
+  };
+
+  // --- Asking to join (events you host) ---
+  const joinDeps = () => ({ findEvent: D.findEvent, hostedIds, users: D.db.data.users, now: D.now, accept: (guest, e) => accept({ user: guest, party: D.db.data.parties[guest.id] || { members: [], votes: {} } }, { eventId: e.id }) });
+  const accept = A.accept;
+  // "I'm going" on an event that needs the host's OK only works once they've said yes
+  A.accept = (ctx, args) => {
+    const e = D.findEvent(args && args.eventId);
+    if (e && e.approval && ctx.user && !hostedIds(ctx.user).includes(e.id)) {
+      const r = (e.joinRequests || []).find((x) => x.userId === ctx.user.id);
+      if (!r || r.status !== "approved") throw new Error("This one needs the host's OK. Ask to join instead.");
+    }
+    return accept(ctx, args);
+  };
+  A.hostApproval = (ctx, { eventId, on }) => {
+    const e = join.setApproval(needUser(ctx), { eventId, on }, joinDeps());
+    if (D.edited) D.edited(); // the events feed carries e.approval
+    return { label: e.approval ? "Guests now ask to join" : "Anyone can say they're going" };
+  };
+  A.askJoin = (ctx, { eventId }) => {
+    join.ask(needUser(ctx), { eventId }, joinDeps());
+    return { label: "Asked. You'll hear when the host answers." };
+  };
+  A.cancelJoin = (ctx, { eventId }) => {
+    join.cancel(needUser(ctx), { eventId }, joinDeps());
+    return { label: "Request taken back" };
+  };
+  A.joinDecide = (ctx, { eventId, userId, approve }) => {
+    const r = join.decide(needUser(ctx), { eventId, userId: String(userId || ""), approve: Boolean(approve) }, joinDeps());
+    return { label: approve ? `${r.name} is in` : `Declined ${r.name}` };
   };
 }
 
-module.exports = { register, view, migrate, went, rated, opened, hostedIds, retunePairs, topIds, exportData, settings, squads };
+module.exports = { register, view, migrate, went, rated, opened, hostedIds, retunePairs, topIds, exportData, settings, squads, notify, lists, join, authuser };

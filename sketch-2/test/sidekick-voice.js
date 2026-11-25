@@ -173,7 +173,12 @@ const INIT = () => {
       assert.deepStrictEqual(opts.starts[0], { connectionType: "webrtc", token: true, signed: false }, "WebRTC first, with a conversation token");
       assert(eleven.some((u) => u.includes("/conversation/token")) && eleven.some((u) => u.includes("get-signed-url")), "both ways in were fetched");
       assert(A.requests.includes(`/api/sk/rooms/${rid}/voice-agent`) && A.requests.includes(`/api/sk/rooms/${rid}/voice-agent/live`));
-      assert.strictEqual(await A.page.textContent("#agent"), "Natural voice on · Use the built-in voice", "the switch says how to get back to the built-in voice");
+      // The switch lives in the orb sheet now; the bar shows a "Natural voice" status chip
+      assert.strictEqual((await A.page.textContent("#chipVoice")).trim(), "Natural voice", "a status chip says the natural voice is on");
+      await A.page.click("#orbBtn");
+      assert.strictEqual(await A.page.getAttribute("#orbSheet #agent", "aria-checked"), "true", "the switch is on");
+      assert.match(await A.page.textContent("#orbSheet #agent"), /Turn off for the built-in voice/, "the switch says how to get back to the built-in voice");
+      await A.page.keyboard.press("Escape");
       assert.deepStrictEqual(A.errors, []);
     });
 
@@ -266,7 +271,10 @@ const INIT = () => {
       const toasts = await D.page.evaluate(() => window.__toasts.slice());
       assert(toasts.length <= 1, `at most one note, got ${JSON.stringify(toasts)}`);
       assert(await D.page.evaluate(() => window.__el.sessions[0].ended), "the session was ended");
-      assert.match(await D.page.textContent("#agent"), /Use Sidekick's natural voice/, "the switch offers the natural voice again");
+      await D.page.click("#orbBtn");
+      assert.strictEqual(await D.page.getAttribute("#orbSheet #agent", "aria-checked"), "false", "the switch offers the natural voice again");
+      assert.match(await D.page.textContent("#orbSheet #agent"), /built-in voice is reading/);
+      await D.page.keyboard.press("Escape");
       assert((await usage.status()).elevenlabs_minutes.used.month < reserved, "unused minutes came back");
       assert.deepStrictEqual(D.errors, []);
       await D.ctx.close();
@@ -304,7 +312,10 @@ const INIT = () => {
       await wait(500);
       assert.strictEqual(await session(C.page), 0, "no session past the cap");
       assert.deepStrictEqual(await C.page.evaluate(() => window.__toasts.slice()), [], "no toast at the cap");
+      await C.page.click("#orbBtn");
+      await C.page.waitForSelector("#orbSheet [role=dialog]");
       assert.strictEqual(await C.page.$("#agent"), null, "the natural-voice switch is hidden for the rest of the call");
+      await C.page.keyboard.press("Escape");
       assert.strictEqual(T.rooms.get(crid).agentMode, false);
       // And a fresh start screen at the cap doesn't even try
       assert.strictEqual((await (await realFetch(`${base}/api/sk/nights`)).json()).voiceAgent, false);

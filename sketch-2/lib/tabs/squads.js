@@ -46,7 +46,16 @@ function fairFor(e, crew) {
 }
 
 const blendCache = new Map(); // squad id -> { key, best }
-function view(db, user, { people, findEvent, isOver, now = Date.now() }) {
+// A live Sidekick call belongs to a squad when it was started from it (call.squad), or it carries the squad's name
+// and someone on it is an account in the squad (or it's yours). calls: lib/sidekick/rooms.js liveCalls().
+function liveFor(s, user, others, calls) {
+  const ids = new Set([user.id, s.owner, ...others.filter((k) => String(k).startsWith("u:")).map((k) => k.slice(2))].filter(Boolean));
+  const myName = String(user.name || "").trim().toLowerCase();
+  const c = (calls || []).find((x) => x.squad === s.id || (!x.squad && x.crew === s.name && ((x.users || []).some((id) => ids.has(id)) || (myName && x.people.some((n) => String(n).trim().toLowerCase() === myName)))));
+  return c ? { id: c.id, on: c.on.length, names: c.on.slice(0, 4), startedAt: c.startedAt } : null;
+}
+
+function view(db, user, { people, findEvent, isOver, now = Date.now(), calls = [] }) {
   const myW = taste.weights(user);
   return all(db, user).map((s) => {
     const others = othersIn(s, user);
@@ -112,6 +121,7 @@ function view(db, user, { people, findEvent, isOver, now = Date.now() }) {
       chat: chat.slice(-4),
       fresh,
       createdAt: s.createdAt || null,
+      live: liveFor(s, user, others, calls), // { id, on, names, startedAt } while a call is going
     };
   });
 }
@@ -150,4 +160,4 @@ function forgetUser(db, userId) {
   }
 }
 
-module.exports = { all, find, view, create, forgetUser, fairFor };
+module.exports = { all, find, view, create, forgetUser, fairFor, liveFor };

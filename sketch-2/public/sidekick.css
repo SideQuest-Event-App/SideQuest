@@ -420,3 +420,84 @@ body.pf-mode main{max-width:none;padding:0;gap:0;min-height:100dvh}
   #pfSheet .pf-sheet{max-width:560px;border-radius:22px;border-bottom:1px solid var(--bs)}
 }
 .pf b{font-weight:600}
+
+/* ---------- The slim call: mic, the Sidekick orb and leave; everything else in the orb sheet ---------- */
+.ctrls{align-items:center}
+.ctrl-sp{width:52px;height:52px;flex:none}
+.orb-ctrl{width:64px;height:64px;background:var(--surf);box-shadow:inset 0 0 0 1.5px var(--pri-e)}
+.orb-ctrl .orb{width:38px;height:38px}
+.orb-ctrl[aria-expanded=true]{box-shadow:inset 0 0 0 2px var(--acc)}
+.vhint{display:flex;align-items:center;gap:8px;align-self:center;padding:6px 12px;border-radius:999px;background:var(--pri-t);color:#e4d6fb;font-size:13px;line-height:18px;animation:hint-in .3s var(--ease)}
+@keyframes hint-in{from{opacity:0;transform:translateY(4px)}}
+/* status chips (not buttons) */
+.schips{gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.schip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.schip i{width:7px;height:7px;border-radius:9px;background:currentColor}
+.schip.soc{background:var(--soc-t);color:var(--soc-x)}
+.schip.pri{background:var(--pri-t);color:var(--acc)}
+.schip.wait i{opacity:.5}
+/* the orb sheet */
+.orb-sheet{max-height:86dvh;overflow-y:auto}
+.sheet-panel .icon-btn{flex:none}
+.orb-sheet .seg{flex:none}
+.ogroup{display:flex;flex-direction:column;border-radius:16px;background:var(--base);border:1px solid var(--bs);overflow:hidden}
+.osw{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 14px;width:100%;text-align:left;border-top:1px solid rgba(255,255,255,.06)}
+.osw:first-child{border-top:0}
+.osw-t{flex:1;display:flex;flex-direction:column;gap:2px}
+.osw-t b{font-size:14px;line-height:20px;font-weight:600}
+.osw-t .small{color:var(--t2)}
+.osw-k{position:relative;width:44px;height:26px;border-radius:99px;background:#3d3557;flex:none;transition:background .16s}
+.osw-k::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:99px;background:var(--t2);transition:transform .16s var(--ease),background .16s}
+[aria-checked=true] > .osw-k{background:var(--pri-e)}
+[aria-checked=true] > .osw-k::after{transform:translateX(18px);background:var(--t1)}
+.osw:disabled{opacity:.6;cursor:default}
+.ogroup.acts{background:none;border:0;display:grid;grid-template-columns:1fr;gap:8px;border-radius:0}
+.oact{display:flex;align-items:center;gap:10px;min-height:48px;padding:0 14px;border-radius:14px;background:var(--raise);font-weight:600;font-size:14px}
+.oact svg{width:18px;height:18px;flex:none}
+.oi{font:600 13px var(--m);width:18px;text-align:center}
+@media (min-width:420px){.ogroup.acts{grid-template-columns:1fr 1fr}.oact#ask{grid-column:1/-1}}
+
+/* "I've got everything": the confirmation card before the steps and picks */
+.board.confirm{border-color:var(--pri-e)}
+.cf-b{display:flex;flex-direction:column;gap:12px;padding:2px 14px 14px}
+.cf-line{font-size:19px;line-height:26px}
+.cf-recap{font-size:15px;line-height:22px;color:var(--t1);font-weight:500}
+.cf-sep{color:var(--t3)}
+.cf-help{color:var(--t2)}
+.cf-facts .chip{font-size:14px;background:var(--pri-t);color:#e4d6fb;box-shadow:inset 0 0 0 1.5px var(--pri-e)}
+.cf-acts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.cf-acts .btn{width:100%;padding:0 10px;font-size:14px;white-space:nowrap}
+.cf-acts .btn:only-child{grid-column:1/-1}
+.cand-note{color:var(--soc-x)}
+/* each stage (questions, confirmation, steps, picks) comes in with a short fade and lift */
+.stage-in{animation:stage-in .28s var(--ease)}
+@keyframes stage-in{from{opacity:0;transform:translateY(8px)}}
+@keyframes stage-fade{from{opacity:0}}
+@media (prefers-reduced-motion:reduce){.stage-in,.land{animation:stage-fade .2s linear!important}}
+
+/* the app's tabs on the call screen: a bar under the call's controls on phones, a side list on computers */
+body.call-nav{--nav-h:calc(64px + env(safe-area-inset-bottom))}
+body.call-nav main{padding-bottom:calc(var(--dock-h,0px) + var(--nav-h) + max(12px,env(safe-area-inset-bottom)))}
+body.call-nav .dock{bottom:var(--nav-h);border-bottom:1px solid var(--bs)}
+body.call-nav .toast{bottom:calc(var(--dock-h,0px) + var(--nav-h) + 16px)}
+.pf-nav.callnav{--tab-h:64px;padding-top:6px}
+.callnav .pf-tab-orb{width:24px;height:24px;margin-top:0;box-shadow:0 0 0 2px var(--acc)}
+@media (min-width:900px){
+  body.call-nav{--nav-h:0px}
+  .pf-nav.callnav{position:fixed;top:0;left:0;bottom:0;right:auto;width:220px;height:100dvh;display:flex;flex-direction:column;gap:4px;padding:24px 12px;border-top:0;border-right:1px solid rgba(255,255,255,.08);grid-template-columns:none}
+  .callnav .pf-brand{display:block;font-size:18px;line-height:24px;font-weight:600;color:var(--t1);margin:0 0 16px 12px}
+  .callnav .pf-tab{flex-direction:row;justify-content:flex-start;gap:10px;padding:0 12px;min-height:44px;align-items:center;border-radius:12px;font-size:14px;line-height:20px}
+  .callnav .pf-tab:hover{background:rgba(255,255,255,.04);color:var(--t1)}
+  .callnav .pf-tab.on{background:var(--pri-t)}
+  .callnav .pf-tab svg{width:20px;height:20px}
+  .callnav .pf-tab-orb{width:20px;height:20px;box-shadow:none}
+  body.call-nav .toast{bottom:calc(var(--dock-h,0px) + 16px)}
+}
+
+/* the Plan tab: "Plan it" from Saved, the last plan, "Decide by" and "Don't learn from this plan" */
+.pf-pick{display:flex;flex-direction:column;gap:2px;width:100%;padding:12px 14px;border-radius:16px;background:var(--surf);border:1px solid rgba(92,207,230,.45);text-align:left}
+.pf-pick .small:first-child{color:var(--soc-x);font-weight:600}
+.pf-pick b{font-size:15px;line-height:20px}
+.pf-last{color:var(--t2)}
+.pf-switch{display:flex;align-items:center;gap:12px;min-height:56px;padding:10px 14px;border-radius:16px;background:var(--surf);border:1px solid var(--bs);width:100%;text-align:left}
+.pf-decide .chip[aria-checked=true]{background:var(--hot-t);color:var(--hot-x);box-shadow:inset 0 0 0 1.5px #b04a85}

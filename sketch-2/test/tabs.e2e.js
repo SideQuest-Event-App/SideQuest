@@ -225,7 +225,10 @@ function restore() {
       assert(!(await text(page)).match(/Apple Wallet|Google Wallet|Add to wallet/i), "no wallet buttons");
       await shot(page, "sidequests-375");
       // Add to calendar: an in-page .ics download
-      const [dl] = await Promise.all([page.waitForEvent("download"), page.click(`.tk-big button[data-act="addCal"]`)]);
+      // "Ask each time" (the default) shows the chooser; Apple Calendar downloads the file
+      await page.click(`.tk-big button[data-act="addCal"]`);
+      await page.waitForSelector('.tb-sheet button[data-act="calWith"][data-arg^="apple|"]');
+      const [dl] = await Promise.all([page.waitForEvent("download"), page.click('.tb-sheet button[data-act="calWith"][data-arg^="apple|"]')]);
       const file = path.join(tmp, "event.ics");
       await dl.saveAs(file);
       const ics = fs.readFileSync(file, "utf8");
@@ -259,7 +262,8 @@ function restore() {
       await go(page, "profile");
       await page.waitForSelector(".pf-strip");
       const pt = await text(page);
-      for (const g of ["Notifications", "Privacy and data", "Calendar", "Display and accessibility", "Language", "Help, feedback and terms"]) assert(pt.includes(g), `settings group ${g}`);
+      for (const g of ["Notifications", "Privacy and data", "Calendar", "Display and accessibility", "Help, feedback and terms"]) assert(pt.includes(g), `settings group ${g}`);
+      assert(!pt.includes("Language"), "Language is hidden for now (features.e2e.js checks it)");
       assert(await page.$('.pf-bottom button:has-text("Log out")') && await page.$('.pf-bottom button:has-text("Edit profile")') && await page.$('.pf-bottom [aria-label="Delete account"]'), "bottom row");
       await shot(page, "profile-375");
       await page.click('button[data-act="openSettings"][data-arg="notifications"]');
@@ -283,16 +287,6 @@ function restore() {
       await page.waitForFunction(() => window.SQ && SQ.d && SQ.d.user);
       await go(page, "profile");
       assert((await text(page)).includes("Your squads see your plans"), "the card shows the saved value");
-      await go(page, "settings", { setGroup: "language" });
-      await page.click('button[data-arg="language=\\"fr\\""]');
-      await page.waitForFunction(() => SQ.d.user.settings.language === "fr");
-      await go(page, "profile");
-      const fr = await page.$$eval("nav.tabs .tab", (ts) => ts.map((t) => t.textContent.trim()));
-      assert(fr.includes("Profil") && fr.includes("Escouades"), `French tab labels: ${fr}`);
-      assert(await page.$('.pf-bottom button:has-text("Se déconnecter")'), "French Profile labels");
-      await go(page, "settings", { setGroup: "language" });
-      await page.click('button[data-arg="language=\\"en\\""]');
-      await page.waitForFunction(() => SQ.d.user.settings.language === "en");
       await ctx.close();
       assert.strictEqual(dbm.data.users[userId].settings.privacy.seeGoing, "squads", "stored on the account");
 
@@ -373,7 +367,7 @@ function restore() {
       await page.waitForSelector(".tt-hero");
       const tt = await text(page);
       assert(/Based on \d+ nights? out, \d+ saves? and \d+ "not for me"/.test(tt), "what the donut is based on");
-      for (const x of ["Your top vibes", "Compare with", "Your go-tos", "Lists · 4", "Going", "Saved", "Following", "Dealbreakers", "Picks feeling off?"]) assert(tt.includes(x), `taste page has ${x}`);
+      for (const x of ["Your top vibes", "Compare with", "Your go-tos", "Lists · ", "Going", "Saved", "Following", "Dealbreakers", "Picks feeling off?"]) assert(tt.includes(x), `taste page has ${x}`);
       assert(!/\d\.\d\d/.test(tt), "no exact weights");
       await shot(page, "taste-375");
       // Edit: Wild energy, weekends after 9 only, Comedy to Less

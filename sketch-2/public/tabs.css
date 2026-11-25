@@ -385,3 +385,51 @@
 .te-vibe .tb-plain { min-width: 44px; }
 .tt-cols > *, .te-cols > *, .pf-top > *, .sq-desk > *, .st-bento > *, .pf-cards > *, .pf-settings > * { min-width: 0; }
 .tb-card.row > .tb-btn { flex: none; }
+
+/* ---------- Live call on a squad (violet: Sidekick) ---------- */
+.sq-live { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; border-radius: 16px; background: #221a3a; border: 1px solid var(--action-primary-edge); }
+.sq-card .sq-live { margin: 8px 0 2px; }
+.sq-card.live { border-color: var(--action-primary-edge); }
+.sq-live-orb { width: 32px; height: 32px; border-radius: 99px; flex: none; background: var(--gradient); box-shadow: 0 0 0 0 rgba(194, 165, 246, 0.5); animation: sq-pulse 2.4s var(--ease-out) infinite; }
+@keyframes sq-pulse { 0% { box-shadow: 0 0 0 0 rgba(194, 165, 246, 0.45); } 70% { box-shadow: 0 0 0 10px rgba(194, 165, 246, 0); } 100% { box-shadow: 0 0 0 0 rgba(194, 165, 246, 0); } }
+.sq-join { min-width: 84px; }
+.sq-join .ic { width: 16px; height: 16px; }
+
+/* ---------- Sheets (calendar chooser, add to a list, new list, start fresh) ---------- */
+.tb-sheet { z-index: 31; }
+.tb-scrim { z-index: 30; cursor: default; }
+.tb-sheet .icon-btn.ghost { margin-right: -8px; }
+.cal-opt, .lp-row { background: var(--bg-raised); }
+.lp-list { max-height: 40vh; overflow-y: auto; }
+.lp-row .checkbox { margin: 0 4px 0 2px; }
+.lp-new { border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+.tb-chip .ic.xs { width: 14px; height: 14px; }
+.tb-listbtn.on { color: var(--text-accent); }
+.icon-btn.outline.tb-listbtn { width: 44px; height: 44px; flex: none; border-radius: 999px; }
+.tt-new { gap: 4px; }
+.tt-new .ic { width: 16px; height: 16px; }
+.ls-item { background: var(--bg-surface); }
+
+/* Start fresh: what resets, what's kept */
+.fr-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fr-col { border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.fr-col.reset { background: #2a1c24; border: 1px solid #7a3a44; }
+.fr-col.keep { background: var(--status-success-tint); border: 1px solid #2f6b45; }
+.fr-h { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; color: var(--text-primary); }
+.fr-h .ic { width: 16px; height: 16px; }
+.fr-col ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.fr-col li { font-size: 13px; line-height: 18px; color: var(--text-primary); }
+.fr-undo { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 18px; color: var(--text-primary); background: var(--bg-raised); border-radius: 14px; padding: 10px 12px; }
+.fr-undo .ic { width: 18px; height: 18px; flex: none; color: var(--text-accent); }
+.fr-acts .tb-btn { flex: 1 1 0; width: auto; }
+@media (max-width: 420px) { .fr-cols { grid-template-columns: 1fr; } }
+
+/* Manage: asking to join; Settings: held by quiet hours */
+.mg-ask { display: flex; align-items: center; gap: 8px; min-height: 52px; flex-wrap: wrap; }
+.mg-ask .tb-btn.sm { min-width: 84px; }
+.qh-held { display: flex; gap: 6px; align-items: flex-start; }
+.qh-held .ic { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+
+[data-motion="reduce"] :is(.sq-live-orb, .tb-sheet) { animation: none; }
+@media (prefers-reduced-motion: reduce) { :is(.sq-live-orb, .tb-sheet) { animation: none; } }
+.tb-sheet.still { animation: none; }

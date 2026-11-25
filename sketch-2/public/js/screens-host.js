@@ -291,7 +291,7 @@
 
   /* ---------- Draft test (Figma: 36 Draft test) ---------- */
   const draftOf = (id) => ((H() && H().drafts) || []).find((d) => d.id === id);
-  const draftMeta = (d) => [d.venue && d.venue.name ? d.venue.name : (req(d.fromRequest) || {}).area, d.date ? dayTime(`${d.date}T${d.time || "20:00"}:00-04:00`) : "", d.price !== "" && d.price != null ? (Number(d.price) ? `$${d.price}` : "Free") : "", d.age || ""].filter(Boolean).join(" · ");
+  const draftMeta = (d) => [d.venue && d.venue.name ? d.venue.name : (req(d.fromRequest) || {}).area, d.date ? dayTime(SQ.torontoISO(d.date, d.time || "20:00")) : "", d.price !== "" && d.price != null ? (Number(d.price) ? `$${d.price}` : "Free") : "", d.age || ""].filter(Boolean).join(" · ");
   const fmt12 = (t) => {
     const [h, m] = t.split(":").map(Number);
     return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
@@ -348,7 +348,7 @@
     const n = SQ.now();
     for (let i = 1; i <= 7; i++) {
       const d = new Date(n.getTime() + i * 86400000);
-      if (d.toLocaleDateString("en-US", { weekday: "short", timeZone: TZ }) === "Mon") return `${SQ.dayKey(d)}T09:00:00-04:00`;
+      if (d.toLocaleDateString("en-US", { weekday: "short", timeZone: TZ }) === "Mon") return SQ.torontoISO(SQ.dayKey(d), "09:00"); // EDT or EST, whichever that Monday has
     }
   };
   SQ.nextMonday9 = nextMonday9;

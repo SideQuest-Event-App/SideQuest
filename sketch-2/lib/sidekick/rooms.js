@@ -55,10 +55,11 @@ function asForm(room) {
   if (planner) planner.mode = "form";
 }
 
-function createRoom({ crew, planner, nights, persona, members, form, path: how }) {
+function createRoom({ crew, planner, nights, persona, members, form, path: how, squad }) {
   const room = {
     id: id(),
     crew: String(crew || "The crew").slice(0, 40),
+    squad: typeof squad === "string" && squad ? squad.slice(0, 40) : null, // the Squads tab squad id, when started from one
     nights: cleanNights(nights),
     expected: cleanMembers(members),
     form: false,
@@ -1442,6 +1443,15 @@ function sendSignal(room, to, msg) {
   room.signalQueue.set(to, q);
 }
 
+// For the Squads tab (lib/tabs/squads.js): calls going on now, with who's on them (names, and the accounts of
+// signed-in people so a squad can find its own call). Never answers.
+function liveCalls() {
+  return [...rooms.values()].filter((r) => r.status === "live").map((r) => {
+    const on = r.people.filter((p) => r.streams.has(p.id));
+    return { id: r.id, crew: r.crew, squad: r.squad || null, people: r.people.map((p) => p.name), users: r.people.map((p) => p.user).filter(Boolean), on: on.map((p) => p.name), startedAt: r.createdAt };
+  }).filter((c) => c.on.length);
+}
+
 // For link previews: only the crew name and the nights, never names or answers
 function preview(roomId) {
   const room = rooms.get(String(roomId || ""));
@@ -1458,7 +1468,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     if (parts[2] === "agent") return agentTool(req, res, parts[3], { readBody, sendJSON });
     if (req.method === "POST" && parts[2] === "rooms" && !parts[3]) {
       const body = await readBody(req);
-      return sendJSON(res, 200, createRoom({ crew: body.crew, planner: body.name, nights: body.nights, persona: body.persona, members: body.members, form: Boolean(body.form), path: body.path }));
+      return sendJSON(res, 200, createRoom({ crew: body.crew, planner: body.name, nights: body.nights, persona: body.persona, members: body.members, form: Boolean(body.form), path: body.path, squad: body.squad }));
     }
     const room = rooms.get(parts[3]);
     if (!room) return sendJSON(res, 404, { error: "This call has ended or the link is wrong.", gone: true, boot: BOOT });
@@ -1877,4 +1887,4 @@ function init({ events }) {
   eventsSource = events;
 }
 
-module.exports = { init, handle, preview, BOOT, _test: { rooms, createRoom, expectedView, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates } };
+module.exports = { init, handle, preview, liveCalls, BOOT, _test: { rooms, createRoom, expectedView, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates } };

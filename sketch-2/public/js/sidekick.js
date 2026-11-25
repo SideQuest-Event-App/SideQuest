@@ -25,6 +25,7 @@
   const ICON = {
     mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    micOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 11.5 5.4M19 11c0 .7-.1 1.4-.3 2M12 18v3M4 4l16 16"/></svg>',
     send: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
     lock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
     invite: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/></svg>',
@@ -48,6 +49,11 @@
     t.classList.add("show");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  }
+  // "Closes Thu 9 PM": a form's deadline, in this phone's time
+  function closesLabel(ms) {
+    const d = new Date(ms);
+    return `${d.toLocaleDateString("en-CA", { weekday: "short" })} ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(":00", "")}`;
   }
   async function api(path, body) {
     const res = await fetch(path, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {});
@@ -200,7 +206,7 @@
       if (!origin) return; // no location: Union is now selected, with a note; the next tap starts
       e.target.disabled = true;
       try {
-        const out = STUDY ? await studyApi("call", { n: 1, name, crew, nights: chosen }) : await api("/api/sk/rooms", { name, crew, nights: chosen, persona: params.get("persona") || undefined });
+        const out = STUDY ? await studyApi("call", { n: 1, name, crew, nights: chosen }) : await api("/api/sk/rooms", { name, crew, nights: chosen, persona: params.get("persona") || undefined, user: userId() || undefined });
         if (out.join) { location.href = `/sk/${out.room}?study=${encodeURIComponent(STUDY)}&v=1`; return; } // someone in the crew already started it
         store.set("sk:name", name);
         store.set("sk:crew", crew);
@@ -245,10 +251,11 @@
     get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { sessionStorage.setItem(k, v); } catch {} },
   };
-  const flow = { step: "intro", data: null, path: null, squad: null, friends: [], search: "", nights: [], how: "call", room: null, voiceAgent: false, crew: "" };
+  const flow = { step: "intro", data: null, path: null, squad: null, friends: [], search: "", nights: [], how: "call", room: null, voiceAgent: false, crew: "", pick: null, calls: [], deadline: null, noLearn: false };
   const userId = () => { try { return localStorage.getItem("sq2.user") || null; } catch { return null; } };
   const wide = () => window.matchMedia("(min-width: 900px)").matches;
   const pfOn = (on) => {
+    if (on) callNav(false);
     document.body.classList.toggle("pf-mode", on);
     document.documentElement.style.setProperty("--dock-h", on ? (wide() ? "0px" : "76px") : "0px");
   };
@@ -259,6 +266,21 @@
     return `<nav class="pf-nav" aria-label="SideQuest"><span class="pf-brand" aria-hidden="true">sidequest</span>${tabs.map(([k, label, icon]) => k === "plan"
       ? `<a class="pf-tab on plan" href="/sk" aria-current="page"><span class="orb pf-tab-orb"></span><span>${label}</span></a>`
       : `<a class="pf-tab" href="/" data-screen="${k}">${icon}<span>${label}</span></a>`).join("")}</nav>`;
+  }
+  // The same tabs on the call screen, so people can get back to the app (a bar on phones, a side list on
+  // computers). Outside #app, so the call's redraws never touch it. Not in the voice study.
+  function callNav(on) {
+    let n = document.getElementById("callNav");
+    on = Boolean(on) && !STUDY;
+    document.body.classList.toggle("call-nav", on);
+    if (!on) { if (n) n.remove(); return; }
+    if (n) return;
+    const w = document.createElement("div");
+    w.innerHTML = pfNav();
+    n = w.firstElementChild;
+    n.id = "callNav";
+    n.classList.add("callnav");
+    document.body.appendChild(n);
   }
   document.addEventListener("click", (e) => {
     const a = e.target.closest(".pf-tab[data-screen]");
@@ -310,9 +332,21 @@
       <div class="pf-hero"><span class="sk-orb"></span><span class="sk-line" style="width:55%"></span><span class="sk-line" style="width:80%"></span><span class="sk-line" style="width:65%"></span></div>
       <span class="sk-btn"></span></section></div></div>`;
     try {
-      const [data, nights] = await Promise.all([api(`/api/sk/plan/setup?${q}`), api("/api/sk/nights").catch(() => ({}))]);
+      const pickId = params.get("pick");
+      const [data, nights, pick, calls] = await Promise.all([
+        api(`/api/sk/plan/setup?${q}`),
+        api("/api/sk/nights").catch(() => ({})),
+        pickId ? api(`/api/sk/pick?id=${encodeURIComponent(pickId)}`).catch(() => null) : null,
+        userId() ? api(`/api/sk/calls?user=${encodeURIComponent(userId())}`).catch(() => ({})) : null,
+      ]);
       flow.data = data;
       flow.voiceAgent = Boolean(nights.voiceAgent);
+      flow.calls = (calls && calls.calls) || [];
+      // "Plan it" from Saved (/sk?pick=<id>): that event's night is picked, and the event is a candidate pick
+      if (pick && !pick.past) {
+        flow.pick = pick;
+        if (data.nights.some((n) => n.date === pick.date)) flow.nights = [pick.date];
+      }
     } catch (err) {
       app.querySelector(".pf-card").outerHTML = `<section class="pf-card"><h1 id="pfTitle">Couldn't load your plan</h1><p class="muted">Check your connection and try again.</p><button class="btn out" onclick="location.reload()">Try again</button></section>`;
       return;
@@ -338,8 +372,10 @@
         <div class="pf-words">
           <h1 class="pf-hello" id="pfTitle">${esc(hello)}</h1>
           ${line ? `<p class="pf-line" id="pfLine">${esc(line)}</p>` : ""}
-          <p class="pf-q">Ready to start a plan?</p>
-          <div class="pf-acts"><button class="btn pri" id="pfGo">Let's plan</button><button class="btn out" id="pfNot">Not now</button></div>
+          ${flow.pick ? `<div class="pf-pick" id="pfPick"><span class="small">From your Saved</span><b>${esc(flow.pick.title)}</b><span class="small">${esc([flow.pick.night, flow.pick.where].filter(Boolean).join(" · "))}</span></div>` : ""}
+          <p class="pf-q">${flow.pick ? "Plan a night around it?" : "Ready to start a plan?"}</p>
+          <div class="pf-acts"><button class="btn pri" id="pfGo">${flow.pick ? "Plan around this event" : "Let's plan"}</button><button class="btn out" id="pfNot">Not now</button></div>
+          ${flow.calls.length ? `<p class="small pf-last" id="pfLast">Your last plan: ${esc(flow.calls[0].locked ? flow.calls[0].locked.title : `${flow.calls[0].crew}, no pick locked`)}</p>` : ""}
         </div>
       </div></div>`, "intro");
     ss.set("sk:introSeen", "1");
@@ -402,10 +438,12 @@
   }
 
   // The link path makes the room now, so the link is real; the next steps change its nights
-  async function ensureRoom(form) {
+  async function ensureRoom(form, send = false) {
     const d = flow.data;
     const members = pfPeople().slice(1).map((p) => p.name);
-    const body = { nights: flow.nights.length ? flow.nights : undefined, members, crew: crewName() };
+    const body = { nights: flow.nights.length ? flow.nights : undefined, members, crew: crewName(), noLearn: flow.noLearn, pick: flow.pick ? flow.pick.id : undefined, deadline: form && flow.deadline ? flow.deadline : undefined };
+    // Friends picked in the app hear about it in SideQuest once the plan or form is sent (held in their quiet hours)
+    if (send) body.invite = pfPeople().slice(1).map((p) => p.key);
     // Reuse the room made for the link (or for a form sent before Back), unless it's a form and this is a call
     const reuse = flow.room && (flow.room.form === Boolean(form) || (form && !flow.room.form && !flow.room.started));
     if (reuse) {
@@ -414,7 +452,7 @@
       return flow.room;
     }
     const name = d.me.name || (document.getElementById("pfName") || {}).value || store.get("sk:name") || "You";
-    const out = await api("/api/sk/rooms", { name, crew: body.crew, nights: body.nights, persona: d.persona, members, form: Boolean(form), path: flow.path });
+    const out = await api("/api/sk/rooms", { ...body, name, persona: d.persona, form: Boolean(form), path: flow.path, user: userId() || undefined });
     flow.room = { room: out.room, person: out.person, form: Boolean(form) };
     return flow.room;
   }
@@ -559,19 +597,42 @@
     flow.step = "how";
     const d = flow.data;
     const opt = (key, icon, title, sub) => `<div class="pf-opt ${flow.how === key ? "on" : ""}"><button class="pf-opt-b" role="radio" aria-checked="${flow.how === key}" data-pfhow="${key}">${icon}<span class="pf-opt-t"><b>${title}</b><span class="small">${sub}</span></span><span class="pf-radio" aria-hidden="true"></span></button></div>`;
-    const chips = `<div class="pf-sum">${flow.path === "link" ? '<span class="tag soc">Link</span>' : `<span class="tag pri">${esc(whoLabel())}</span>`}${flow.nights.map((x) => `<span class="tag pf-tn">${esc(shortNight(x))}</span>`).join("")}</div>`;
+    const chips = `<div class="pf-sum">${flow.path === "link" ? '<span class="tag soc">Link</span>' : `<span class="tag pri">${esc(whoLabel())}</span>`}${flow.nights.map((x) => `<span class="tag pf-tn">${esc(shortNight(x))}</span>`).join("")}${flow.pick ? `<span class="tag soc pf-around">Around: ${esc(flow.pick.title.length > 28 ? `${flow.pick.title.slice(0, 27)}…` : flow.pick.title)}</span>` : ""}</div>`;
     const askName = !d.me.name ? `<label class="f">Your name<input class="in" id="pfName" autocomplete="given-name" maxlength="24" value="${esc(store.get("sk:name") || "")}"></label>` : "";
     pfShell("how", `${stepHead(3, "How", "when")}<h1 id="pfTitle">How do you want to decide?</h1>${chips}
       <div class="pf-opts" role="radiogroup" aria-label="How to decide">
         ${opt("call", '<span class="orb pf-optorb"></span>', "Hop on a call with Sidekick", "About 5 minutes. Sidekick listens, keeps track and suggests two picks.")}
         ${opt("form", `<span class="pf-thumb t">${PF.form}</span>`, "Send everyone a quick form", "The same questions by tap. Sidekick picks once everyone answers.")}
       </div>
+      ${flow.how === "form" ? decideByHTML() : ""}
       <p class="small">Private questions (like budget) are asked one to one. The group only sees one limit, never whose.</p>
+      <button class="pf-switch" id="pfLearn" role="switch" aria-checked="${flow.noLearn}"><span class="pf-opt-t"><b>Don't learn from this plan</b><span class="small">Picks, votes and the final plan won't change your taste.</span></span><span class="osw-k" aria-hidden="true"></span></button>
       ${askName}${originPicker()}
       <div class="pf-foot"><button class="btn pri" id="pfStart">${flow.how === "form" ? "Send the form" : "Start the call"}</button></div>`);
     initOrigin();
   }
 
+  // "Decide by" on the form path: the form closes then, and Sidekick picks with the answers it has
+  function decideByOptions() {
+    const out = [];
+    const at9 = (d) => { const x = new Date(d); x.setHours(21, 0, 0, 0); return x; };
+    const now = new Date();
+    const first = flow.nights[0] ? new Date(flow.nights[0] + "T18:00:00") : new Date(now.getTime() + 3 * 86400000);
+    const add = (d, label) => { if (d > now && d < first && !out.some((o) => o.at === d.getTime())) out.push({ at: d.getTime(), label }); };
+    add(at9(now), "Tonight 9 PM");
+    add(at9(now.getTime() + 86400000), "Tomorrow 9 PM");
+    const eve = at9(first.getTime() - 86400000);
+    add(eve, `${eve.toLocaleDateString("en-CA", { weekday: "short" })} 9 PM`);
+    if (!out.length) out.push({ at: Math.max(now.getTime() + 3600000, first.getTime() - 3600000), label: "An hour before" });
+    return out;
+  }
+  function decideByHTML() {
+    const opts = decideByOptions();
+    if (!opts.some((o) => o.at === flow.deadline)) flow.deadline = opts[opts.length - 1].at;
+    return `<div class="stack pf-decide"><p style="font-weight:600" id="pfDecideL">Decide by</p>
+      <div class="pf-chips" role="radiogroup" aria-labelledby="pfDecideL">${opts.map((o) => `<button class="chip" role="radio" data-pfdeadline="${o.at}" aria-checked="${o.at === flow.deadline}" aria-pressed="${o.at === flow.deadline}">${esc(o.label)}</button>`).join("")}</div>
+      <p class="small">The form closes then and Sidekick picks with the answers it has.</p></div>`;
+  }
   async function pfLaunch(btn) {
     const d = flow.data;
     const nameIn = document.getElementById("pfName");
@@ -585,7 +646,7 @@
     if (!origin) return; // no location: Union is now selected, with a note; the next tap starts
     pending(btn, form ? "Sending" : "Starting");
     try {
-      const r = await ensureRoom(form);
+      const r = await ensureRoom(form, true);
       r.started = true;
       roomId = r.room;
       me = { person: r.person, mode: form ? "form" : "voice" };
@@ -614,7 +675,7 @@
     const first = view.nights[0] || "";
     const card = document.querySelector(".pf-card.formsent");
     const html = `<div class="pf-head"><button class="icon-btn pf-back" data-pfback="how" aria-label="Back">${PF.back}</button><b class="pf-title2">Form sent</b><button class="icon-btn" id="invitePill" aria-label="Share the form link">${PF.share}</button></div>
-      <div class="pf-sent"><span class="pf-okc">${PF.bigcheck}</span><h1 id="pfTitle" aria-live="polite">${done} of ${rows.length} answered</h1><p class="muted">Sidekick picks when everyone's in.</p>${first ? `<span class="tag hot">For ${esc(first)}</span>` : ""}</div>
+      <div class="pf-sent"><span class="pf-okc">${PF.bigcheck}</span><h1 id="pfTitle" aria-live="polite">${done} of ${rows.length} answered</h1><p class="muted">${view.closed ? "The form has closed. Sidekick is picking with the answers it has." : "Sidekick picks when everyone's in."}</p><span class="row" style="gap:6px;flex-wrap:wrap;justify-content:center">${first ? `<span class="tag hot">For ${esc(first)}</span>` : ""}${view.deadline ? `<span class="tag hot" id="closesTag">${view.closed ? "Closed" : `Closes ${esc(closesLabel(view.deadline))}`}</span>` : ""}</span></div>
       <ul class="pf-ans" aria-label="Who's answered">${rows.map((x, i) => `<li><span class="av ${x.me ? "c0" : x.link && !x.answered ? "unk" : PF_COLOURS[i % PF_COLOURS.length]}" aria-hidden="true">${esc(x.me ? (view.me.name || "Y").charAt(0).toUpperCase() : x.name.charAt(0).toUpperCase())}</span><span class="grow">${esc(x.name)}${x.link ? ' <span class="small">(via link)</span>' : ""}</span><span class="tag ${x.answered ? "ok" : "pf-tn"}">${x.answered ? "Answered" : "Not yet"}</span></li>`).join("")}</ul>
       <div class="pf-acts2">${waiting.length ? `<button class="btn sm pf-v" id="pfNudge">Nudge ${esc(waiting.length === 1 ? waiting[0].name : `${waiting.length} people`)}</button>` : ""}<button class="btn out sm" id="pfPickNow" ${done >= 2 ? "" : "disabled"}>Pick now with ${done}</button></div>
       <div class="pf-box-card"><span class="small">Send the form link to the group</span>${shareHTML()}</div>`;
@@ -696,10 +757,21 @@
     const how = t.closest("[data-pfhow]");
     if (how) {
       flow.how = how.dataset.pfhow;
-      app.querySelectorAll("[data-pfhow]").forEach((b) => { const on = b.dataset.pfhow === flow.how; b.setAttribute("aria-checked", on); b.closest(".pf-opt").classList.toggle("on", on); });
-      document.getElementById("pfStart").textContent = flow.how === "form" ? "Send the form" : "Start the call";
+      const y = window.scrollY;
+      pfFocus = false;
+      pfHow();
+      window.scrollTo(0, y);
+      const again = app.querySelector(`[data-pfhow="${flow.how}"]`);
+      if (again) again.focus({ preventScroll: true });
       return;
     }
+    const dl = t.closest("[data-pfdeadline]");
+    if (dl) {
+      flow.deadline = Number(dl.dataset.pfdeadline);
+      app.querySelectorAll("[data-pfdeadline]").forEach((b) => { const on = b === dl; b.setAttribute("aria-checked", on); b.setAttribute("aria-pressed", on); });
+      return;
+    }
+    if (t.closest("#pfLearn")) { flow.noLearn = !flow.noLearn; t.closest("#pfLearn").setAttribute("aria-checked", flow.noLearn); return; }
     if (t.closest("#pfStart")) return void pfLaunch(t.closest("#pfStart"));
     if (t.closest("#pfPickNow")) { const b = t.closest("#pfPickNow"); pending(b, "Finding picks"); return void send("ask", {}); }
     if (t.closest("#pfNudge")) {
@@ -758,9 +830,13 @@
       app.innerHTML = `<h1>This call has finished</h1><p class="muted">Ask whoever planned it for the plan.</p>`;
       return;
     }
+    if (info.closed) {
+      app.innerHTML = `<div class="row sb"><span class="tag pri">Quick form · ${esc(info.crew)}</span><span class="tag hot">Closed</span></div><h1>This form has closed</h1><p class="muted">Sidekick picked with the answers it had. Ask whoever planned it for the plan.</p>`;
+      return;
+    }
     const who = info.people.length ? `${info.people.slice(0, 3).join(", ")}${info.people.length > 3 ? " and others" : ""} ${info.people.length === 1 ? "is" : "are"} on` : "";
     app.innerHTML = `
-      <div class="row sb"><span class="tag pri">Planning call · ${esc(info.crew)}</span><span class="orb"></span></div>
+      <div class="row sb"><span class="tag pri">${info.form ? "Quick form" : "Planning call"} · ${esc(info.crew)}</span>${info.deadline ? `<span class="tag hot" id="closesTag">Closes ${esc(closesLabel(info.deadline))}</span>` : '<span class="orb"></span>'}</div>
       <h1>${esc(info.people[0] || "Your crew")} is planning a night</h1>
       <p class="muted">${esc(who)}. Sidekick is on the call to keep track. Captions are live and the transcript is deleted when the call ends.</p>
       <label class="f">Your name<input class="in" id="name" autocomplete="given-name" maxlength="24" value="${esc(store.get("sk:name") || "")}"></label>
@@ -821,7 +897,7 @@
       }
       b.disabled = true;
       try {
-        const out = await api(`/api/sk/rooms/${roomId}/join`, { name, mode: b.dataset.mode, answers });
+        const out = await api(`/api/sk/rooms/${roomId}/join`, { name, mode: b.dataset.mode, answers, user: userId() || undefined });
         store.set("sk:name", name);
         me = { person: out.person, mode: b.dataset.mode, boot: info.boot };
         store.set(`sk:${roomId}`, me);
@@ -942,16 +1018,25 @@
       return;
     }
     if (phase === "formsent") pfOn(false);
-    if (view.mode !== lastMode) { lastMode = view.mode; if (phase === next) renderDock(); }
+    if (view.mode !== lastMode) {
+      // Said or tapped: a short note confirms Sidekick's new role
+      if (lastMode && ["lead", "sidelines"].includes(lastMode) && ["lead", "sidelines"].includes(view.mode)) toast(view.mode === "lead" ? "Sidekick leads now." : "Sidekick is sitting back. Say \"Sidekick, take over\" to bring it back.");
+      lastMode = view.mode;
+      if (phase === next) renderDock();
+    }
     if (next !== phase) {
       phase = next;
       landed = phase === "picks" && Boolean(lastThinking); // the steps give way to the cards
       app.innerHTML = `<div id="top"></div><div id="say"></div><div id="body" class="stack"></div><div id="ticks" class="stack"></div><p class="sr" id="thinkLive" aria-live="polite"></p><div class="dock" id="dock"></div>`;
+      callNav(true);
       watchDock();
       renderDock();
     }
     renderTop();
     renderSay();
+    const ob = document.querySelector("#orbBtn .orb");
+    if (ob) ob.className = `orb ${orbState()}`;
+    if (orbOpen) renderOrb();
     if (phase === "call") renderCall();
     if (phase === "picks") renderPicks();
     if (phase === "locked" || phase === "ended") renderDone();
@@ -982,12 +1067,12 @@
       return `<span class="av ${colour(p.id)} ${p.talking ? "talk" : ""} ${p.mode === "form" || !p.online ? "away" : ""}" title="${esc(label)}" role="img" aria-label="${esc(label)}">${esc(p.initial)}${dot}</span>`;
     }).join("");
     const modeTag = view.me.mode === "voice" ? '<span class="tag hot">Live</span>' : `<span class="tag soc">${view.me.mode === "text" ? "Text · mic off" : "Answered by form"}</span>`;
-    const pill = view.me.planner && (view.people.length >= 2 || voting()) && (phase === "call" || phase === "picks")
-      ? `<button class="pill-hit" id="invitePill" aria-haspopup="dialog" aria-label="Invite people"><span class="pill">${ICON.invite}Invite</span></button>` : "";
+    // Status, not buttons: in-app audio and Sidekick's natural voice (both switched in the orb sheet)
+    const pill = `${Audio.on ? '<span class="schip soc" id="chipAudio"><i aria-hidden="true"></i>In-app audio</span>' : Audio.starting ? '<span class="schip soc wait" id="chipAudio"><i aria-hidden="true"></i>Connecting audio</span>' : ""}${agent ? '<span class="schip pri" id="chipVoice"><i aria-hidden="true"></i>Natural voice</span>' : ""}`;
     // The people picked in the Plan tab who haven't joined yet
     const waiting = (view.expected || []).filter((x) => !x.joined && !x.link).map((x) => x.name);
     const invited = waiting.length ? `<p class="small" id="invitedLine">${view.people.length} checked in · ${esc(waiting.length > 3 ? `${waiting.slice(0, 3).join(", ")} and ${waiting.length - 3} more` : waiting.join(", "))} invited</p>` : "";
-    document.getElementById("top").innerHTML = `<div class="row sb"><div class="row avs">${people}</div><div class="row" style="gap:4px">${pill}${modeTag}</div></div>${invited}`;
+    document.getElementById("top").innerHTML = `<div class="row sb"><div class="row avs">${people}</div><div class="row schips">${pill}${modeTag}</div></div>${invited}`;
   }
 
   function boardHead(extra = "") {
@@ -1070,8 +1155,8 @@
     sheetOpen = false;
     const s = document.getElementById("sheet");
     if (s) s.remove();
-    const pill = document.getElementById("invitePill");
-    if (pill) pill.focus();
+    const back = document.getElementById("invitePill") || document.getElementById("orbBtn");
+    if (back) back.focus();
   }
   function renderSheet() {
     let s = document.getElementById("sheet");
@@ -1087,6 +1172,18 @@
       <div class="row sb"><h2 id="sheetTitle">Invite to the call</h2><button class="icon-btn" data-close aria-label="Close">${ICON.x}</button></div>
       <p class="small">Anyone with the link can join from a browser. No app or account needed.</p>${shareHTML()}</div>`;
   }
+  document.addEventListener("keydown", (e) => {
+    if (!orbOpen || sheetOpen) return;
+    if (e.key === "Escape") { e.preventDefault(); closeOrb(); return; }
+    if (e.key === "Tab") {
+      const items = [...document.querySelectorAll("#orbSheet .sheet-panel button:not([disabled])")].filter((b) => b.offsetParent && b.tabIndex !== -1);
+      if (!items.length) return;
+      const [first, last] = [items[0], items[items.length - 1]];
+      if (!document.getElementById("orbSheet").contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
   document.addEventListener("keydown", (e) => {
     if (!sheetOpen) return;
     if (e.key === "Escape") { e.preventDefault(); closeSheet(); return; }
@@ -1127,9 +1224,17 @@
 
   function renderCall() {
     const body = document.getElementById("body");
+    if (view.confirm) {
+      body.innerHTML = confirmHTML(view.confirm);
+      stageIn(body, "confirm");
+      runConfirmBar();
+      renderTicks();
+      return;
+    }
     const t = thinking();
     if (t) {
       body.innerHTML = thinkingHTML(t);
+      stageIn(body, "thinking");
       lastThinking = t;
       announceThinking(t);
       renderTicks();
@@ -1181,8 +1286,47 @@
     // The full board stays one tap away; sitting back, the board is the form and always open
     const open = form || boardOpen;
     const full = form ? rows : `<button class="plan-toggle" id="planToggle" aria-expanded="${open}" aria-controls="planRows">${open ? "Hide the full plan" : "See the full plan"}</button><div id="planRows" ${open ? "" : "hidden"}>${rows}</div>`;
-    body.innerHTML = `${invite}<div class="board ${form ? "as-form" : ""}">${boardHead()}${heardHTML()}${ask}${full}</div>${formNote}${priv}`;
+    const around = view.candidate && view.me.planner ? `<p class="small cand-note">Planning around the event you saved. It goes in as a pick if it fits.</p>` : "";
+    body.innerHTML = `${invite}<div class="board ${form ? "as-form" : ""}">${boardHead()}${heardHTML()}${ask}${full}</div>${around}${formNote}${priv}`;
+    stageIn(body, "card");
     renderTicks();
+  }
+
+  // ---------- "I've got everything": Sidekick's line and the plan so far, before the steps and picks ----------
+  // Public words only (the server builds the facts): no names, the budget only as the group's label.
+  function confirmHTML(c) {
+    // The dot stays with the fact before it, so a line never starts with one
+    const recap = c.facts.map((x, i) => `${i ? (x.join ? esc(x.join) : '<span class="cf-sep">\u00a0· </span>') : ""}<span class="cf-f">${esc(x.text)}</span>`).join("");
+    const facts = c.facts.map((x) => `<button class="chip cf-fact" data-reopen="${esc(x.slot)}"><span>${esc(x.text)}</span><span class="sr">: change this</span></button>`).join("");
+    return `<section class="board confirm" aria-labelledby="cfTitle">${boardHead('<span class="tag pri">Got it</span>')}
+      <div class="cf-b"><h2 class="cf-line" id="cfTitle">${esc(c.line)}</h2>
+        ${c.editing ? `<p class="small cf-help">Tap what you'd like to change. Its question comes back.</p><div class="chips cf-facts" role="group" aria-label="The plan so far">${facts}</div>` : `<p class="cf-recap" id="cfRecap">${recap}</p>`}
+        ${c.editing || !c.until ? "" : `<div class="cd"><div class="cd-bar"><i id="cfBar"></i></div><span class="small">Finding your picks in a moment</span></div>`}
+        <div class="cf-acts"><button class="btn sm pri" id="cfOk">Looks good</button>${c.editing ? "" : '<button class="btn sm out" id="cfChange">Change something</button>'}</div></div></section>`;
+  }
+  let cfBar = { until: 0 };
+  function runConfirmBar() {
+    const bar = document.getElementById("cfBar");
+    if (!bar || !view.confirm.until) return;
+    if (cfBar.until === view.confirm.until && cfBar.el === bar) return;
+    cfBar = { until: view.confirm.until, el: bar };
+    const left = Math.max(0, view.confirm.until - Date.now());
+    bar.style.transition = "none";
+    bar.style.width = `${Math.min(100, (left / 4000) * 100)}%`;
+    void bar.offsetWidth;
+    bar.style.transition = `width ${left}ms linear`;
+    bar.style.width = "0%";
+  }
+  // The questions, the confirmation, the steps and the picks each come in with a short fade and lift
+  // (opacity only with reduced motion). The order is kept for the tests: window.__skStages.
+  let lastStage = null;
+  window.__skStages = window.__skStages || [];
+  function stageIn(el, name) {
+    if (name === lastStage) return;
+    lastStage = name;
+    window.__skStages.push(name);
+    const first = el.firstElementChild && (el.querySelector(".board") || el.firstElementChild);
+    if (first) first.classList.add("stage-in");
   }
 
   // "What I heard": a fact that just landed from speech or typing shows briefly, with an undo
@@ -1222,6 +1366,7 @@
     if (!t || !view) return;
     if (phase !== "call") { t.innerHTML = ""; return; }
     if (chatMode()) { t.innerHTML = chatHTML(); const th = t.querySelector(".thread"); if (th) th.scrollTop = th.scrollHeight; return; }
+    if (!capsShown) { t.innerHTML = ""; return; }
     t.innerHTML = view.captions.slice(-2).map((c) => `<div class="tick"><b>${esc(c.name)}${c.kind === "typed" ? " · typed" : ""}</b><span>${esc(c.text)}</span></div>`).join("") + (interim ? `<div class="tick me"><b>You</b><span>${esc(interim)}</span></div>` : "");
   }
 
@@ -1246,7 +1391,7 @@
   function wildHTML(w) {
     if (!w) return "";
     const link = w.url ? `<a class="pk-link" href="${esc(w.url)}" target="_blank" rel="noopener">See tickets<span class="sr"> for ${esc(w.title)} (opens in a new tab)</span></a>` : "";
-    return `<div class="wild-card"><div class="wild-in"><span class="row sb"><span class="tag pri kt wild">${ICON.ticket}Wildcard</span></span>
+    return `<div class="wild-card"><div class="wild-in"><span class="row sb"><span class="tag pri kt wild">${ICON.ticket}${w.candidate ? "You saved this" : "Wildcard"}</span></span>
       <h2>${esc(w.title)}</h2><span class="pk-when">${esc(w.when)}</span>
       ${[w.price, w.where].filter(Boolean).map((m) => `<span class="pk-meta">${esc(m)}</span>`).join("")}
       <span class="small" style="color:var(--acc)">${esc(w.why)}</span></div>${link ? `<div class="pk-foot">${link}</div>` : ""}</div>`;
@@ -1266,7 +1411,7 @@
         : [[p.price, p.where].filter(Boolean).join(" · "), p.rating ? `Rated ${p.rating} on Google${p.ratingCount ? ` · ${p.ratingCount} reviews` : ""}` : null];
       const link = p.url ? `<a class="pk-link" href="${esc(p.url)}" target="_blank" rel="noopener">${ev ? "See tickets" : "Directions"}<span class="sr"> for ${esc(p.title)} (opens in a new tab)</span></a>` : "";
       return `<div class="pick-card ${ev ? "ev" : "pl"}"><button class="pick" data-vote="${p.id}" aria-pressed="${view.myVote === p.id}">
-        <span class="row sb">${tag}${avStack(voters)}</span>
+        <span class="row sb"><span class="row" style="gap:6px;flex-wrap:wrap">${tag}${p.candidate ? '<span class="tag soc">You saved this</span>' : ""}</span>${avStack(voters)}</span>
         <h2>${esc(p.title)}</h2>
         <span class="pk-when">${esc(p.when)}</span>
         ${meta.filter(Boolean).map((m) => `<span class="pk-meta">${esc(m)}</span>`).join("")}
@@ -1285,6 +1430,7 @@
     if (landed) setTimeout(() => { landed = false; }, 400);
     lastThinking = null;
     announceThinking(null);
+    stageIn({ firstElementChild: null }, "picks");
     document.getElementById("body").innerHTML = `<div class="board${land}">${boardHead('<span class="tag ok">All set</span>')}<p class="small" style="padding:0 14px 12px;color:var(--t2)">${esc(summary)}</p></div>
       <div class="q${land}" style="border-radius:22px;border:1px solid var(--pri-e)"><span class="small">${mixed ? "A show to go to, or a spot to drop in. Tap one to vote." : "Two picks fit everyone · tap one to vote"}</span>${picks}</div>
       ${wildHTML(view.wildcard)}
@@ -1377,40 +1523,140 @@
     el.innerHTML = `<div class="say ${fresh ? "new" : ""} ${last.system ? "sys" : ""}"><span class="orb sm ${orbState()}"></span><div class="say-t"><span class="say-l">${sitting ? "Sidekick is sitting back" : "SIDEKICK"}</span><p>${esc(last.text)}</p></div></div>`;
   }
 
+  // The bottom bar: mic, the Sidekick orb and leave. Nothing else by default; everything else is in the orb sheet.
   function renderDock() {
     const dock = document.getElementById("dock");
     if (!dock || !view) return;
     if (phase === "locked" || phase === "ended") {
       dock.innerHTML = view.me.planner && phase === "locked" ? `<button class="btn out" id="endCall">End the call</button>` : "";
       if (!dock.innerHTML) dock.hidden = true;
+      if (orbOpen) closeOrb(false);
       return;
     }
     dock.hidden = false;
     const voice = view.me.mode === "voice";
-    // The voice switch: natural voice (ElevenLabs agent) or the built-in voice. Study calls keep the built-in one in both arms.
-    const agentBtn = view.voiceAgent && !STUDY && !agentCapped
-      ? `<button class="btn out sm wide-btn" id="agent" aria-pressed="${Boolean(agent)}">${agent ? "Natural voice on · Use the built-in voice" : agentStarting ? "Connecting Sidekick's natural voice…" : "Built-in voice · Use Sidekick's natural voice"}</button>`
-      : "";
+    const capsNote = capsOff ? `<p class="small center">Captions pause on this phone during in-app audio. Type to Sidekick.</p>` : "";
+    const showCompose = !voice || typing || capsOff;
+    const hint = hintText();
+    const micLive = agent ? !agentMuted : micOn;
+    dock.innerHTML = `${capsNote}${hint ? `<p class="vhint" id="vhint" role="status"><span class="orb sm" aria-hidden="true"></span><span>${esc(hint)}</span></p>` : ""}
+      <form class="compose" id="compose" ${showCompose ? "" : "hidden"}><label class="sr" for="line">Message the call</label><input class="in" id="line" autocomplete="off" placeholder="${voice ? "Type instead…" : "Type to the call…"}" maxlength="300"><button class="send" aria-label="Send">${ICON.send}</button></form>
+      <div class="ctrls">
+        ${voice ? `<button class="ctrl" id="mic" aria-pressed="${micLive}" aria-label="${micLive ? "Mute" : "Unmute"}">${micLive ? ICON.mic : ICON.micOff}</button>` : '<span class="ctrl-sp" aria-hidden="true"></span>'}
+        <button class="ctrl orb-ctrl" id="orbBtn" aria-haspopup="dialog" aria-expanded="${orbOpen}" aria-controls="orbSheet" aria-label="Sidekick options"><span class="orb ${orbState()}"></span></button>
+        <button class="ctrl end" id="leave" aria-label="${view.me.planner ? "End the call" : "Leave the call"}">${ICON.x}</button>
+      </div>`;
+    if (orbOpen) renderOrb();
+  }
+
+  // A one-time hint that Sidekick takes voice commands (once per phone)
+  let hintShownAt = 0;
+  function hintText() {
+    if (!view || phase !== "call" || view.me.mode !== "voice" || !["lead", "sidelines"].includes(view.mode)) return "";
+    if (!hintShownAt) {
+      if (store.get("sk:voiceHint")) return "";
+      hintShownAt = Date.now();
+      store.set("sk:voiceHint", true);
+      setTimeout(() => { if (phase === "call") renderDock(); }, HINT_MS + 50);
+    }
+    if (Date.now() - hintShownAt > HINT_MS) return "";
+    return view.mode === "sidelines" ? "Try saying “Sidekick, take over”" : "Try saying “Sidekick, sit back”";
+  }
+  const HINT_MS = 8000;
+
+  // ---------- The orb sheet: everything that used to sit in the bar ----------
+  // Sidekick leads or sits back, talk in the app (and mute), captions, natural or built-in voice, read aloud,
+  // type instead, invite friends, ask for picks now, and "Don't learn from this plan". A dialog with focus
+  // kept inside, Escape to close, and focus back on the orb.
+  let orbOpen = false;
+  let capsShown = store.get("sk:captions") !== false;
+  function openOrb() {
+    orbOpen = true;
+    renderOrb();
+    const btn = document.getElementById("orbBtn");
+    if (btn) btn.setAttribute("aria-expanded", "true");
+    const first = document.querySelector("#orbSheet .sheet-panel [role=radio][aria-checked=true], #orbSheet .sheet-panel button:not([disabled])");
+    (first || document.querySelector("#orbSheet .sheet-panel")).focus();
+  }
+  function closeOrb(restore = true) {
+    orbOpen = false;
+    const s = document.getElementById("orbSheet");
+    if (s) s.remove();
+    const btn = document.getElementById("orbBtn");
+    if (btn) { btn.setAttribute("aria-expanded", "false"); if (restore) btn.focus(); }
+  }
+  const osw = (id, label, sub, on, extra = "") => `<button class="osw" id="${id}" role="switch" aria-checked="${Boolean(on)}" ${extra}><span class="osw-t"><b>${esc(label)}</b>${sub ? `<span class="small">${esc(sub)}</span>` : ""}</span><span class="osw-k" aria-hidden="true"></span></button>`;
+  const oact = (id, label, icon, extra = "") => `<button class="oact" id="${id}" ${extra}>${icon}<span>${esc(label)}</span></button>`;
+  function orbHTML() {
+    const voice = view.me.mode === "voice";
     const vote = view.mode === "voting";
     const seg = view.mode && phase === "call"
       ? `<div class="seg ${vote ? "off" : ""}" role="radiogroup" aria-label="How Sidekick helps" ${vote ? 'aria-disabled="true" inert' : ""}>
           <button role="radio" data-setmode="lead" aria-checked="${view.mode === "lead"}" tabindex="${view.mode === "lead" || vote ? 0 : -1}">Sidekick leads</button>
           <button role="radio" data-setmode="sidelines" aria-checked="${view.mode === "sidelines"}" tabindex="${view.mode === "sidelines" ? 0 : -1}">Sidekick sits back</button></div>`
       : "";
-    const audioBtn = voice && Audio.supported
-      ? `<button class="btn out sm wide-btn" id="audioBtn" aria-pressed="${Audio.on}">${Audio.on ? "In-app audio on · Leave audio" : Audio.starting ? "Connecting audio…" : "Talk in the app"}</button>`
+    const audio = voice && Audio.supported
+      ? osw("audioBtn", "Talk in the app", Audio.on ? "Connected. Friends who aren't with you can hear you." : Audio.starting ? "Connecting audio…" : "For friends who aren't in the same room", Audio.on, Audio.starting ? "disabled" : "") + (Audio.on ? osw("muteBtn", "Mute me", micOn ? "Your crew can hear you" : "Your crew can't hear you", !micOn) : "")
       : "";
-    const capsNote = capsOff ? `<p class="small center">Captions pause on this phone during in-app audio. Type to Sidekick.</p>` : "";
-    const showCompose = !voice || typing || capsOff;
-    dock.innerHTML = `${seg}${agentBtn}${audioBtn}${capsNote}
-      <form class="compose" id="compose" ${showCompose ? "" : "hidden"}><label class="sr" for="line">Message the call</label><input class="in" id="line" autocomplete="off" placeholder="${voice ? "Type instead…" : "Type to the call…"}" maxlength="300"><button class="send" aria-label="Send">${ICON.send}</button></form>
-      <div class="ctrls">
-        ${voice && !agent ? `<button class="ctrl" id="mic" aria-pressed="${micOn}" aria-label="${micOn ? "Mute" : "Unmute"}">${ICON.mic}</button>` : ""}
-        <button class="ctrl" id="ask" aria-label="Ask Sidekick for picks"><span class="orb"></span></button>
-        ${(view.me.planner && !agent) || Audio.on ? `<button class="ctrl" id="aloud" aria-pressed="${aloud}" aria-label="Read Sidekick aloud">${ICON.speaker}</button>` : ""}
-        ${voice ? `<button class="ctrl" id="kb" aria-label="Type instead"><span style="font:600 13px var(--m)">Aa</span></button>` : ""}
-        <button class="ctrl end" id="leave" aria-label="${view.me.planner ? "End the call" : "Leave the call"}">${ICON.x}</button>
-      </div>`;
+    const natural = view.voiceAgent && !STUDY && !agentCapped
+      ? osw("agent", "Natural voice", agent ? "On. Turn off for the built-in voice." : agentStarting ? "Connecting Sidekick's natural voice…" : "Off. The built-in voice is reading.", Boolean(agent), agentStarting ? "disabled" : "")
+      : "";
+    const readAloud = (view.me.planner && !agent) || Audio.on ? osw("aloud", "Read Sidekick aloud", "On this phone", aloud) : "";
+    return `${seg}
+      <div class="ogroup">${audio}${osw("capsBtn", "Captions", "Live words from the call", capsShown)}${natural}${readAloud}
+        ${osw("learnBtn", "Don't learn from this plan", "This call won't change your taste", view.me.noLearn)}</div>
+      <div class="ogroup acts">
+        ${voice ? oact("kb", typing ? "Hide the text box" : "Type instead", '<span class="oi" aria-hidden="true">Aa</span>') : ""}
+        ${oact("inviteBtn", "Invite friends", ICON.invite, 'aria-haspopup="dialog"')}
+        ${phase === "call" ? oact("ask", "Ask Sidekick for picks now", '<span class="orb sm" aria-hidden="true"></span>') : ""}
+      </div>
+      <p class="small">Or just say it: “Sidekick, sit back”, “Sidekick, take over”, “Sidekick, invite someone”, “Sidekick, mute me”.</p>`;
+  }
+  function renderOrb() {
+    if (!view) return;
+    let s = document.getElementById("orbSheet");
+    if (!s) {
+      s = document.createElement("div");
+      s.id = "orbSheet";
+      s.className = "sheet-wrap";
+      s.innerHTML = `<div class="sheet-scrim" data-orbclose></div><div class="sheet-panel orb-sheet" role="dialog" aria-modal="true" aria-labelledby="orbTitle" tabindex="-1">
+        <div class="row sb"><span class="row"><span class="orb"></span><h2 id="orbTitle">Sidekick</h2></span><button class="icon-btn" data-orbclose aria-label="Close">${ICON.x}</button></div><div id="orbBody" class="stack"></div></div>`;
+      document.body.appendChild(s);
+    }
+    const body = document.getElementById("orbBody");
+    const html = orbHTML();
+    if (body.dataset.html === html) return; // nothing changed: don't redraw under someone's finger
+    const a = document.activeElement;
+    const key = a && body.contains(a) ? (a.id ? `#${a.id}` : a.dataset.setmode ? `[data-setmode="${a.dataset.setmode}"]` : null) : null;
+    body.innerHTML = html;
+    body.dataset.html = html;
+    if (key) { const again = body.querySelector(key); if (again) again.focus(); }
+  }
+
+  // Voice commands that this phone handles itself (spoken or typed): "Sidekick, invite someone" and "Sidekick,
+  // mute me". "Sidekick, sit back / take over" go to the server like any line (TAKE_OVER / STEP_BACK in rooms.js).
+  const CMD_INVITE = /\bside ?kick\b[\s,.!]*(?:can you |could you |please )?(?:invite|add)\s+(?:someone|somebody|people|a friend|friends|more people|my friends?)\b/i;
+  const CMD_MUTE = /\bside ?kick\b[\s,.!]*(?:can you |could you |please )?mute me\b/i;
+  function localCommand(text) {
+    if (CMD_INVITE.test(text)) {
+      if (orbOpen) closeOrb(false);
+      openSheet();
+      toast("Here's the invite link to share.");
+      return true;
+    }
+    if (CMD_MUTE.test(text)) {
+      if (agent) setAgentMuted(true);
+      else if (micOn) stopMic();
+      toast(view && view.me.mode === "voice" ? "Muted. Tap the mic to talk again." : "You're typing, so there's no mic to mute.");
+      return true;
+    }
+    return false;
+  }
+  let agentMuted = false;
+  function setAgentMuted(m) {
+    agentMuted = m;
+    try { if (agent && agent.setMicMuted) agent.setMicMuted(m); } catch {}
+    renderDock();
   }
 
   // Taps (in the call, and in the invite sheet, which lives outside #app)
@@ -1418,6 +1664,22 @@
     const t = e.target;
     if (t.closest("#sheet [data-close]")) return void closeSheet();
     if (t.closest("#invitePill")) return void openSheet();
+    if (t.closest("#orbBtn")) return void (orbOpen ? closeOrb() : openOrb());
+    if (t.closest("[data-orbclose]")) return void closeOrb();
+    if (t.closest("#inviteBtn")) { closeOrb(false); return void openSheet(); }
+    if (t.closest("#capsBtn")) { capsShown = !capsShown; store.set("sk:captions", capsShown); renderTicks(); renderOrb(); toast(capsShown ? "Captions on." : "Captions off on this phone."); return; }
+    if (t.closest("#muteBtn")) return void (micOn ? stopMic() : startMic());
+    if (t.closest("#learnBtn")) {
+      const off = !view.me.noLearn;
+      view.me.noLearn = off;
+      renderOrb();
+      send("learn", { off });
+      return void toast(off ? "This plan won't change your taste." : "This plan counts toward your taste again.");
+    }
+    if (t.closest("#cfOk")) { t.closest("#cfOk").disabled = true; return void send("confirm", { how: "ok" }); }
+    if (t.closest("#cfChange")) return void send("confirm", { how: "change" });
+    const ro = t.closest("[data-reopen]");
+    if (ro) { ro.disabled = true; send("confirm", { how: "reopen", slot: ro.dataset.reopen }); return void toast("Okay, change it on the card."); }
     if (t.closest("#budgetToggle")) { budgetOpen = !budgetOpen; renderCall(); return; }
     if (t.closest("#planToggle")) { boardOpen = !boardOpen; store.set("sk:boardOpen", boardOpen); renderCall(); const b = document.getElementById("planToggle"); if (b) b.focus(); return; }
     const un = t.closest("[data-unhear]");
@@ -1453,7 +1715,7 @@
       return;
     }
     if (t.closest("#share")) return void navigator.share({ title: `${(view && view.crew) || (flow.data ? crewName() : "The crew")}: help plan our next night`, text: "Help plan our next night! Sidekick's on the call:", url: inviteLink() }).catch(() => {});
-    if (t.closest("#ask")) return void send("ask", {});
+    if (t.closest("#ask")) { if (orbOpen) closeOrb(); return void send("ask", {}); }
     if (t.closest("#practice")) { t.closest("#practice").disabled = true; return void studyApi("practice", { room: roomId, p: me.person }).catch((err) => { toast(err.message); renderCall(); }); }
     if (t.closest("#agent")) {
       if (agentStarting) return;
@@ -1468,9 +1730,9 @@
       if (view.mode === "voting" || sm.dataset.setmode === view.mode) return;
       return void send("mode", { value: sm.dataset.setmode });
     }
-    if (t.closest("#mic")) return void (micOn ? stopMic() : startMic());
-    if (t.closest("#kb")) { typing = !typing; renderDock(); if (typing) document.getElementById("line").focus(); return; }
-    if (t.closest("#aloud")) { aloud = !aloud; store.set("sk:aloud", aloud); renderDock(); if (!aloud) speechSynthesis.cancel(); return; }
+    if (t.closest("#mic")) return void (agent ? setAgentMuted(!agentMuted) : micOn ? stopMic() : startMic());
+    if (t.closest("#kb")) { typing = !typing; closeOrb(!typing); renderDock(); if (typing) document.getElementById("line").focus(); return; }
+    if (t.closest("#aloud")) { aloud = !aloud; store.set("sk:aloud", aloud); renderDock(); if (!aloud && "speechSynthesis" in window) speechSynthesis.cancel(); return; }
     if (t.closest("#leave") || t.closest("#endCall")) {
       if (agent) stopAgent();
       if (view.me.planner) {
@@ -1494,10 +1756,10 @@
     }
   }
   app.addEventListener("click", onTap);
-  document.addEventListener("click", (e) => { if (e.target.closest("#sheet")) onTap(e); });
+  document.addEventListener("click", (e) => { if (e.target.closest("#sheet") || e.target.closest("#orbSheet")) onTap(e); });
   // Arrow keys move between the two segments of the mode switch
-  app.addEventListener("keydown", (e) => {
-    const r = e.target.closest(".seg [role=radio]");
+  document.addEventListener("keydown", (e) => {
+    const r = e.target.closest && e.target.closest(".seg [role=radio]");
     if (!r || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
     e.preventDefault();
     const other = [...r.parentElement.children].find((x) => x !== r);
@@ -1511,6 +1773,7 @@
     const text = input.value.trim();
     if (!text) return;
     input.value = "";
+    if (localCommand(text)) return;
     send("line", { text, kind: "typed" });
   });
 
@@ -1556,6 +1819,7 @@
     const hadMic = micOn;
     try {
       const sdk = loadEL();
+      sdk.catch(() => {}); // a failed load is handled below (when it's awaited); not an unhandled rejection meanwhile
       const s = await api(`/api/sk/rooms/${roomId}/voice-agent`, { p: me.person });
       reserved = true;
       const { Conversation } = await sdk;
@@ -1589,6 +1853,7 @@
       }
       if (!session) throw lastErr;
       agent = session;
+      agentMuted = false;
       agentStart = Date.now();
       releasePrimedMic();
       await api(`/api/sk/rooms/${roomId}/voice-agent/live`, { p: me.person });
@@ -1696,7 +1961,7 @@
       let partial = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const x = e.results[i];
-        if (x.isFinal) send("line", { text: x[0].transcript, kind: "spoken" });
+        if (x.isFinal) { if (!localCommand(x[0].transcript)) send("line", { text: x[0].transcript, kind: "spoken" }); }
         else partial += x[0].transcript;
       }
       interim = partial;

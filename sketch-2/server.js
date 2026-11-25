@@ -36,6 +36,7 @@ const freshness = require("./lib/freshness"); // the daily import's 36-hour stal
 const weather = require("./lib/search/weather"); // Open-Meteo, cached hourly, skipped when unreachable
 const rank = require("./lib/search/rank");
 const tabs = require("./lib/tabs"); // Squads, the Sidequests wallet, Profile, Stats and Taste (designs TB2, TB3 D1)
+const { torontoDate } = require("./lib/tabs/time"); // Toronto wall-clock time to an instant, across daylight saving
 
 const PORT = process.env.PORT || 3001; // Sketch 1 uses 3000, so both can run at once
 
@@ -90,9 +91,10 @@ function eventsFeed() {
   const age = freshness.importAge(db.data && db.data.eventsImportedAt, now().getTime());
   return { source: src.from || null, sourceName: sourceName(src.from), upcoming: db.data ? db.data.events.filter((e) => !isOver(e)).length : 0, importedAt: age.importedAt, ageHours: age.hours, stale: age.stale, limitHours: age.limitHours, warning: freshness.staleWarning(age, sourceName(src.from)) };
 }
-// "2026-10-20" + "19:30" -> the start (Toronto summer time, like host publishing) and its label, "Tue Oct 20, 7:30 PM"
+// "2026-10-20" + "19:30" -> the start in Toronto time (EDT or EST, whichever that day has) and its label, "Tue Oct 20, 7:30 PM".
+// It used to add a fixed -04:00, which saved winter starts an hour early (lib/tabs/time.js; test/features.e2e.js).
 function startOf(date, time) {
-  const start = new Date(`${date}T${time}:00-04:00`);
+  const start = torontoDate(date, time);
   const [hh, mm] = time.split(":").map(Number);
   const label = `${start.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/Toronto" }).replace(",", "")}, ${hh % 12 || 12}${mm ? `:${String(mm).padStart(2, "0")}` : ""} ${hh < 12 ? "AM" : "PM"}`;
   return { start, label };
@@ -113,8 +115,9 @@ const hostEvents = (host) => db.data.events.filter((e) => e.organizer && e.organ
 const money = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2)); // 23.8 -> "23.80"
 const budgetOf = (v) => (v !== "" && v != null && Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : null);
 
+// Through lib/tabs/notify.js, so the account's quiet hours hold them back (in the inbox, no badge) until they end
 function notify(user, title, body, extra = {}) {
-  user.notifications.push({ id: newId(), time: now().toISOString(), title, body, read: false, ...extra });
+  tabs.notify.notify(user, { id: newId(), title, body, ...extra }, { now: now().getTime() });
 }
 // Everyone who posted or upvoted a request hears first
 function notifyRequesters(r, title, body, extra) {
@@ -282,7 +285,7 @@ function eventsPayload() {
     for (const g of d.logs.going) if (!g.sample) goingCounts[g.eventId] = (goingCounts[g.eventId] || 0) + 1;
     // Passed events are left out, except ones someone has in their Quest Log or a host published (for ratings and recaps)
     const kept = new Set(Object.values(d.users).flatMap((u) => Object.keys(u.log || {})).map(Number));
-    const json = JSON.stringify({ version, events: d.events.filter((e) => !isOver(e) || e.ended || e.publishedBy || kept.has(e.id)).map((e) => ({ ...e, going: (e.going || 0) + (goingCounts[e.id] || 0), over: isOver(e), ended: !!e.ended })) });
+    const json = JSON.stringify({ version, events: d.events.filter((e) => !isOver(e) || e.ended || e.publishedBy || kept.has(e.id)).map((e) => ({ ...e, joinRequests: undefined, going: (e.going || 0) + (goingCounts[e.id] || 0), over: isOver(e), ended: !!e.ended })) });
     eventsCache = { version, json, gzip: zlib.gzipSync(json) };
   }
   return eventsCache;
@@ -399,6 +402,7 @@ async function addAuthUser(a, role) {
   const res = await fetch(`${process.env.SUPABASE_URL}/auth/v1/admin/users`, { method: "POST", headers,
     body: JSON.stringify({ email: a.email, email_confirm: true, user_metadata: { sidequest_id: a.id, role, name: a.name, username: a.handle || "", phone: a.phone || "" } }) });
   if (!res.ok && res.status !== 422) throw new Error(`Supabase Auth ${res.status}: ${await res.text()}`);
+  if (res.ok) a.authId = (await res.json().catch(() => ({}))).id || a.authId; // so Delete account can remove it (lib/tabs/authuser.js)
 }
 A.requestCode = async (ctx, { email }) => {
   const e = clean(email, 80).toLowerCase();
@@ -1253,8 +1257,8 @@ A.importEvent = (ctx, { draft, screenshot }) => {
   const time = /^\d{2}:\d{2}$/.test(d.time || "") ? d.time : "20:00";
   const { start, label } = startOf(d.date, time);
   if (isNaN(start)) throw new Error("That date doesn't look right.");
-  const end = /^\d{2}:\d{2}$/.test(d.endTime || "") ? startOf(d.date, d.endTime).start : null;
-  if (end && end < start) end.setDate(end.getDate() + 1); // ends after midnight
+  let end = /^\d{2}:\d{2}$/.test(d.endTime || "") ? startOf(d.date, d.endTime).start : null;
+  if (end && end < start) end = startOf(new Date(Date.parse(`${d.date}T12:00Z`) + 86400000).toISOString().slice(0, 10), d.endTime).start; // ends after midnight
   if ((end || new Date(start.getTime() + 2 * 3600 * 1000)) < now()) throw new Error("That event has already happened.");
   const area = AREAS.includes(d.area) ? d.area : "Downtown";
   const price = budgetOf(d.price);
@@ -1345,7 +1349,7 @@ A.flagInfo = (ctx, { eventId, field, note }) => {
 };
 
 // Squads, the wallet, Profile settings, Stats and Taste (lib/tabs)
-tabs.register(A, { db, needUser, findEvent, isOver, isDemo, person, friendKeys, clean, now: () => now().getTime(), poolFor: (u) => applyLimits({ budget: u.budget, origins: u.origin ? [u.origin] : [], maxMinutes: u.maxMinutes }).pool });
+tabs.register(A, { db, needUser, findEvent, isOver, isDemo, person, friendKeys, clean, edited, now: () => now().getTime(), poolFor: (u) => applyLimits({ budget: u.budget, origins: u.origin ? [u.origin] : [], maxMinutes: u.maxMinutes }).pool });
 
 A.reset = async () => {
   await db.reset();

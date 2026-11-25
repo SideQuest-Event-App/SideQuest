@@ -73,11 +73,15 @@ async function waitFor(fn, ms, what) {
       await f.goto(link);
       await f.fill("#name", names[i]);
       await f.click("[data-mode=voice]");
-      await f.waitForSelector("#dock #audioBtn");
+      await f.waitForSelector("#dock #orbBtn");
     }
-    await planner.waitForSelector("#dock #audioBtn");
-    // Everyone turns on in-app audio
-    for (const p of pages) await p.click("#audioBtn");
+    await planner.waitForSelector("#dock #orbBtn");
+    // Everyone turns on in-app audio (the "Talk in the app" switch is in the Sidekick orb's sheet)
+    const audioSwitch = async (p) => {
+      if (!(await p.$("#orbSheet"))) await p.click("#orbBtn");
+      await p.click("#orbSheet #audioBtn");
+    };
+    for (const p of pages) await audioSwitch(p);
     const ids = await Promise.all(pages.map((p) => p.evaluate(() => JSON.parse(localStorage.getItem(`sk:${location.pathname.split("/")[2]}`)).person)));
     const states = await waitFor(async () => {
       const all = await Promise.all(pages.map((p) => p.evaluate(() => window.__skAudioState && window.__skAudioState())));
@@ -94,7 +98,7 @@ async function waitFor(fn, ms, what) {
     if (bytes !== N - 1) throw new Error(`expected ${N - 1} remote audio streams on the planner's phone, got ${bytes}`);
     console.log(`PASS  the planner's phone plays ${bytes} remote audio streams`);
     // Turning audio off drops that person for everyone
-    await friends[0].click("#audioBtn");
+    await audioSwitch(friends[0]);
     await waitFor(async () => {
       const s = await planner.evaluate(() => window.__skAudioState());
       return !s.peers[ids[1]];

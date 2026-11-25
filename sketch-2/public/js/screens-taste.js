@@ -274,12 +274,74 @@
     const k = tp.lists.followKinds;
     const fk = [k.artist ? plural(k.artist, "artist") : "", k.venue ? plural(k.venue, "venue") : "", k.organiser ? plural(k.organiser, "organiser") : ""].filter(Boolean).join(", ");
     const row = (tone, ic, title, sub, a) => `<button class="tt-list" ${SQ.attr(a)}><span class="tb-rnd ${tone}">${SQ.ix(ic)}</span><span class="grow" style="min-width:0"><span class="tb-t14">${esc(title)}</span><span class="tb-s ellipsis">${esc(sub)}</span></span>${icon("chevR")}</button>`;
-    return `<div class="row"><span class="tb-t16">Lists · 4</span></div><div>
+    const mine = me().lists || [];
+    const shared = me().friendLists || [];
+    return `<div class="row"><span class="tb-t16">Lists · ${4 + mine.length}</span><button class="tb-btn v sm tt-new" data-act="listNew" aria-label="New list">${icon("plus")}<span>New</span></button></div><div>
+      ${mine.map((l) => row(l.privacy === "friends" ? "it" : "iv", "listAdd", l.name, `${l.privacy === "friends" ? "Friends" : "Private"} · ${SQ.listCount(l)}`, { "data-act": "openList", "data-arg": l.id })).join("")}
       ${row("iv", "ticket", "Going", `${SEE[s.privacy.seeGoing]} · ${plural(tp.lists.going, "event")}`, { "data-act": "sqTabGo", "data-arg": "events" })}
       ${row("it", "bookmark", "Saved", `Private · ${plural(tp.lists.saved, "event or place", "events and places")}`, { "data-act": "sqTabGo", "data-arg": "saved" })}
       ${row("ia", "heart", "Following", `${SEE[s.privacy.seeGoing] === "Only you" ? "Only you" : "Friends"} · ${fk || "nobody yet"}`, { "data-act": "tasteEditAt", "data-arg": "follows" })}
-      ${row("in", "x", "Dealbreakers", `Private · ${tp.lists.dealbreakers} · only used to filter`, { "data-act": "tasteEditAt", "data-arg": "deal" })}</div>`;
+      ${row("in", "x", "Dealbreakers", `Private · ${tp.lists.dealbreakers} · only used to filter`, { "data-act": "tasteEditAt", "data-arg": "deal" })}</div>
+      ${shared.length ? `${lab("Shared by friends")}<div>${shared.map((l) => row("it", "crew", l.name, `${l.owner} · ${plural(l.items.length, "thing")}`, { "data-act": "openFriendList", "data-arg": l.id })).join("")}</div>` : ""}`;
   }
+  A.openList = (id) => { U().listId = id; U().listDel = null; U().listName = null; return "taste-list"; };
+  A.openFriendList = (id) => { U().listId = id; U().listDel = null; return "taste-list"; };
+
+  // ---------- One list: rename, who sees it, what's on it, delete ----------
+  S["taste-list"] = { role: "attendee", label: "List", render: () => {
+    const own = (me().lists || []).find((l) => l.id === U().listId);
+    const theirs = !own && (me().friendLists || []).find((l) => l.id === U().listId);
+    const l = own || theirs;
+    if (!l) return screen(`<div class="tb-pad"><div class="tb-empty"><p class="tb-t">That list isn't here anymore</p>${tbtn("Back to your taste", { "data-go": "taste" }, "o")}</div></div>`, { title: "List", cls: "tb-screen" });
+    const items = l.items.map(ev).filter(Boolean);
+    const row = (e) => {
+      const place = e.type === "place";
+      return `<div class="tb-row static ls-item"><span class="tb-ico ${place ? "teal" : "violet"}">${icon(place ? "pin" : "ticket")}</span>
+        <button class="grow tb-plain" data-act="openQuest" data-arg="${e.id}" style="min-width:0"><span class="tb-t14 ellipsis">${esc(e.title)}</span><span class="tb-s ellipsis">${esc([place ? "Place" : "Event", SQ.tbDayLabel(e.startsAt), e.venue && e.venue.name !== "N/A" ? e.venue.name : e.neighbourhood].filter(Boolean).join(" · "))}</span></button>
+        ${own ? tbtn("Remove", { "data-act": "listRemoveItem", "data-arg": `${l.id}|${e.id}`, "aria-label": `Remove ${e.title} from ${l.name}`, "data-pending": "Removing" }, "o sm") : ""}</div>`;
+    };
+    const list = items.length ? `<div class="stack" style="gap:8px">${items.map(row).join("")}</div>`
+      : `<div class="tb-empty"><p class="tb-t">Nothing on it yet</p><p class="tb-s">Open any event or place and tap the list button to add it here.</p>${tbtn("Find something", { "data-go": "discover" }, "v", "search")}</div>`;
+    if (!own) return screen(`<div class="tb-pad stack" style="gap:14px"><div class="stack" style="gap:4px"><h1 class="tb-h2">${esc(l.name)}</h1><span class="tb-s13">${esc(l.owner)} shared this with friends</span></div>${list}</div>`, { title: "List", cls: "tb-screen" });
+    const name = U().listName == null ? l.name : U().listName;
+    const del = U().listDel === l.id
+      ? `<div class="tb-card danger-edge stack" style="gap:8px" role="alert"><b class="tb-t14">Delete ${esc(l.name)}?</b><span class="tb-s13">The list goes for good. ${items.length ? `The ${plural(items.length, "event or place", "events and places")} on it stay on SideQuest, and in Saved if you saved them.` : ""}</span>
+          <div class="row" style="gap:8px">${tbtn(`Delete ${l.name}`, { "data-act": "listDelete", "data-arg": l.id, "data-pending": "Deleting" }, "danger")}${tbtn("Keep it", { "data-act": "listDelCancel" }, "o")}</div></div>`
+      : tbtn("Delete list", { "data-act": "listDelAsk", "data-arg": l.id }, "danger-line", "x");
+    return screen(`<div class="tb-pad stack" style="gap:16px">
+        <form class="stack" data-act="listRename" data-arg="${esc(l.id)}" style="gap:8px"><label class="tb-field"><span>Name</span><input data-bind="listName" value="${esc(name)}" maxlength="40" autocomplete="off"></label>
+          ${name.trim() !== l.name ? tbtn("Save name", { type: "submit", "data-pending": "Saving" }, "v") : ""}</form>
+        <div class="stack" style="gap:8px"><span class="tb-flab">Who can see it</span><div class="chips" role="group" aria-label="Who can see it">${[["private", "Private", "lock"], ["friends", "Friends", "crew"]].map(([v, t, ic]) => `<button class="tb-chip${l.privacy === v ? " on" : ""}" data-act="listPrivacy" data-arg="${esc(l.id)}|${v}" aria-pressed="${l.privacy === v}">${ix(ic, "xs")}${t}</button>`).join("")}</div>
+          <span class="tb-s">${l.privacy === "friends" ? "Your SideQuest friends can see this list on their Taste page." : "Only you see this list."}</span></div>
+        <div class="stack" style="gap:8px"><div class="row">${lab(`On this list · ${SQ.listCount(l)}`)}</div>${list}</div>
+        ${del}
+      </div>`, { title: "List", cls: "tb-screen" });
+  } };
+  A.listRename = async (id) => {
+    const name = (U().listName || "").trim();
+    if (!name) return SQ.toast("Give the list a name.");
+    const r = await SQ.act("listRename", { list: id, name });
+    U().listName = null;
+    SQ.toast(r.label);
+  };
+  A.listPrivacy = async (arg) => {
+    const [list, privacy] = String(arg).split("|");
+    const r = await SQ.act("listPrivacy", { list, privacy });
+    SQ.toast(r.label);
+  };
+  A.listRemoveItem = async (arg) => {
+    const [list, id] = String(arg).split("|");
+    const r = await SQ.act("listItem", { list, eventId: Number(id), on: false });
+    SQ.toast(r.label);
+  };
+  A.listDelAsk = (id) => { U().listDel = id; };
+  A.listDelCancel = () => { U().listDel = null; };
+  A.listDelete = async (id) => {
+    const r = await SQ.act("listDelete", { list: id });
+    U().listDel = null;
+    SQ.toast(r.label);
+    return "taste";
+  };
   const freshBanner = (tp) => (tp.fresh ? `<div class="tb-card amber-edge row"><span class="tb-s13 grow">You started fresh. Undo until ${esc(new Date(tp.fresh.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: TZ }))} tomorrow.</span>${tbtn("Undo", { "data-act": "tasteFreshUndo", "data-pending": "Undoing" }, "o sm", "undo")}</div>` : "");
   S.taste = { role: "attendee", label: "Taste", render: () => {
     const tp = TP();
@@ -337,10 +399,7 @@
     const follows = `<div class="stack" style="gap:8px" id="te-follows">${lab("Following")}<div class="chips">${tp.follows.map((f) => `<button class="tb-chip on" data-act="tasteFollowToggle" data-arg="${esc(f.kind)}|${esc(f.name)}|0" aria-label="Unfollow ${esc(f.name)}">${esc(f.name)}${icon("x", "xs")}</button>`).join("") || '<span class="tb-s">Follow artists, venues and organisers to see more of them.</span>'}</div>
       <div class="chips">${[["artist", "Artist"], ["venue", "Venue"], ["organiser", "Organiser"]].map(([k, l]) => chipBtn(l, fk === k, { "data-act": "followKind", "data-arg": k })).join("")}</div>
       <form class="sq-compose" data-act="tasteFollowAdd"><input data-bind="followText" value="${esc(U().followText || "")}" placeholder="+ Follow ${fk === "artist" ? "an artist" : fk === "venue" ? "a venue" : "a host"}" aria-label="Name to follow"><button class="icon-btn" type="submit" aria-label="Follow">${icon("plus")}</button></form></div>`;
-    const fresh = U().freshConfirm
-      ? `<div class="tb-card danger-edge stack" style="gap:8px"><b class="tb-t14">Clear learned taste?</b><span class="tb-s13">Your learned vibes and every signal go. Follows, saves, tickets, history and private settings stay. Picks will feel more general for a while. You can undo this for 24 hours.</span>
-        <div class="row" style="gap:8px">${tbtn("Clear learned taste", { "data-act": "tasteFresh", "data-pending": "Clearing" }, "danger")}${tbtn("Cancel", { "data-act": "freshCancel" }, "o")}</div></div>`
-      : tbtn("Start fresh", { "data-act": "freshAsk" }, "danger-line");
+    const fresh = `<div class="stack" style="gap:6px">${tbtn("Start fresh", { "data-act": "freshAsk", "aria-haspopup": "dialog" }, "danger-line")}<span class="tb-s">Clears what SideQuest learned. Follows, saves and tickets stay. Undo for 24 hours.</span></div>`;
     const right = `<button class="tb-btn o sm" data-back>Done</button>`;
     const cols = desk() ? `<div class="te-cols"><div class="stack" style="gap:18px">${vibes}</div><div class="stack" style="gap:18px">${sliders}${when}${travel}</div><div class="stack" style="gap:18px">${priv}${deal}${follows}${fresh}</div></div>`
       : `<div class="stack" style="gap:22px">${vibes}${sliders}${when}${travel}${priv}${deal}${follows}${fresh}</div>`;
@@ -406,11 +465,25 @@
     if (t === "follow") return tasteAct("tasteForget", { follow: rest.join("|") });
     return tasteAct("tasteForget", { t: Number(t), id: rest[0] === "" ? null : Number(rest[0]) });
   };
-  A.freshAsk = () => { U().freshConfirm = true; };
-  A.freshCancel = () => { U().freshConfirm = false; };
+  // The Start fresh confirm: what resets, what's kept, the 24-hour undo; no typing, one clear button
+  SQ.sheets = SQ.sheets || {};
+  SQ.sheets.fresh = () => {
+    const until = new Date(SQ.now().getTime() + 86400000).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: TZ });
+    const li = (t) => `<li>${esc(t)}</li>`;
+    const tp = TP();
+    return SQ.tbSheet("Start fresh?", `<p class="tb-s13">SideQuest forgets what it learned about your taste. Picks feel more general for a while, then learn again from what you save, go to and rate.</p>
+      <div class="fr-cols">
+        <div class="fr-col reset"><span class="fr-h">${ix("undo")}Resets</span><ul>${[`Learned vibes (${tp.vibes.length ? tp.vibes.slice(0, 3).map((v) => v.vibe).join(", ") : "none yet"})`, `The ${plural(tp.actions, "signal")} behind them: saves, taps, ratings, retune picks`, "Energy, Surprise me, and the days and times you set", "Your taste undo history"].map(li).join("")}</ul></div>
+        <div class="fr-col keep"><span class="fr-h">${icon("check")}Kept</span><ul>${[`Follows (${tp.follows.length})`, `Saves (${tp.counts.saves})`, "Tickets and the nights in your history", "Lists, budget, travel limit, access needs and dealbreakers", "Squads and settings"].map(li).join("")}</ul></div>
+      </div>
+      <div class="fr-undo">${ix("undo")}<span>Changed your mind? Undo from the banner on Taste until ${esc(until)}.</span></div>
+      <div class="row fr-acts" style="gap:8px">${tbtn("Keep my taste", { "data-act": "freshCancel", "data-autofocus": "" }, "o")}${tbtn("Start fresh", { "data-act": "tasteFresh", "data-pending": "Clearing" }, "danger fr-go")}</div>`, { label: "Start fresh?", cls: "fr-sheet" });
+  };
+  A.freshAsk = () => { SQ.openSheet("fresh"); };
+  A.freshCancel = () => { SQ.closeSheet(); };
   A.tasteFresh = async () => {
     const r = await SQ.act("tasteFresh");
-    U().freshConfirm = false;
+    SQ.closeSheet();
     SQ.toast(r.label);
   };
   A.tasteFreshUndo = async () => {

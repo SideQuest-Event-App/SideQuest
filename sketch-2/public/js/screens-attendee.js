@@ -669,6 +669,7 @@
       body = `
         <span class="t-caption c-tertiary">${r.mode === "keywords" ? `${l.fit} keyword matches (no AI)` : `${l.fit} matches with ${esc(SQ.aiLabel(r.mode))}`}</span>
         ${r.error ? `<div class="notice">${icon("sparkle")}<span>The AI didn't answer, so these are keyword matches.</span></div>` : ""}
+        ${(s.places || []).length ? `<section class="search-places" aria-label="Places for ${esc(s.ran)}"><h2 class="lx-h"><span class="kt pl">${icon("pin", "xs")}Places</span>${esc(`For “${(s.placesWant || [s.ran]).join(", ")}”`)}</h2>${s.places.map((p) => lxPlaceCard(p, { row: true })).join("")}</section>` : ""}
         ${shown.length ? `<div class="stack" style="gap:16px">${shown.map(hit).join('<hr class="divider">')}</div>` : ""}
         ${s.loadingMore ? thinking("Finding more sidequests…") : !done ? '<div class="reveal-more" data-reveal="searchMore" aria-hidden="true"></div>' : ""}
         ${done ? `<div class="search-end">
@@ -717,12 +718,12 @@
     ].filter(Boolean);
     const ticket = SQ.ticketFor(e.id);
     const others = Math.max(0, (e.going || going.length) - 2);
-    const cta = isPast(e) && !logged ? `<span class="t-body-m c-secondary grow">This sidequest has ended.</span>`
+    const cta = (SQ.joinCta && SQ.joinCta(e, logged)) || (isPast(e) && !logged ? `<span class="t-body-m c-secondary grow">This sidequest has ended.</span>`
       : logged && !isPast(e) ? (ticket ? btn("View your ticket", { "data-act": "openWalletTicket", "data-arg": ticket.id }, "primary", "ticket")
         : btn("Import event ticket", { "data-act": "addTicket", "data-arg": e.id }, "danger", "ticket"))
       : logged ? btn("In your Sidequests", { "data-go": "questlog" }, "secondary", "check")
       : ticketsSold(e) ? btn(`Get tickets on ${sourceOf(e)}`, { "data-act": "getTickets", "data-arg": e.id }, "primary", "external")
-      : btn("I'm going", { "data-act": "getTickets", "data-arg": e.id, "data-pending": "Joining", "data-done": "You're in" }, "primary", "check");
+      : btn("I'm going", { "data-act": "getTickets", "data-arg": e.id, "data-pending": "Joining", "data-done": "You're in" }, "primary", "check")); // joinCta: "Ask to join" (screens-tabs.js)
     const footer = `<div class="footer-bar row qd-buy">
         ${isPast(e) || logged ? "" : `<span class="qd-price"><span class="t-title-l">${esc(priceLabel(e))}</span><span class="t-caption c-tertiary">${e.price === 0 ? "no ticket needed" : e.price == null ? "see listing" : "per ticket"}</span></span>`}
         ${cta}
@@ -734,6 +735,7 @@
           ${iconBtn("back", { "data-back": "", "aria-label": "Back" }, "raised")}
           <span class="grow"></span>
           ${iconBtn("share", { "data-act": "share", "data-arg": e.id, "aria-label": "Share" }, "raised")}
+          ${SQ.listBtn ? SQ.listBtn(e, "raised") : ""}
           ${iconBtn(saved ? "bookmarkFill" : "bookmark", { "data-act": "save", "data-arg": e.id, "aria-label": saved ? "Saved" : "Save", "aria-pressed": String(saved) }, "raised")}
         </div>
       </div>

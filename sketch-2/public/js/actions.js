@@ -600,6 +600,7 @@
   A.openNotif = (id) => {
     const n = me().notifications.find((x) => x.id === id);
     if (!n) return;
+    if (n.link) { location.href = n.link; return; } // e.g. a Plan invite: opens the call or form (/sk/<room>)
     if (n.rate && n.eventId) return A.openRate(n.eventId);
     if (n.eventId) return A.openQuest(n.eventId);
     if (n.requestId) {

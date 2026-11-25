@@ -208,4 +208,4 @@ async function handle(req, res, url, { readBody, sendJSON }) {
   }
 }
 
-module.exports = { init, handle, _test: { setup, saveFree, nights, squadsOf, DEMO_SQUADS } };
+module.exports = { init, handle, _db: () => (ctx && ctx.db) || null, _test: { setup, saveFree, nights, squadsOf, DEMO_SQUADS } };

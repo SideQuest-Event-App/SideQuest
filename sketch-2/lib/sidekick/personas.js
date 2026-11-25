@@ -112,6 +112,9 @@ const LINES = {
     picks: ["Okay, two contenders, and {kinds}: {story1}; or {story2}. Vote with your thumbs!", "Two good ones, and {kinds}: first, {story1}; second, {story2}. Vote away!"],
     answer: ["{heard}. Tell me {missing} and I'll pull two picks.", "Almost there{to}. Tell me {missing} and I'll pull two picks.", "Give me one more answer{to} and I've got you."],
     locked: ["Locked in: {pick}, {night}. That's a good one!", "Done, {night} is sorted and nobody has to chase anyone."],
+    // "I've got everything", said as the confirmation card goes up, before the picks. {recap} is the plan in
+    // public words only ("Saturday after 8, live music, around Union, under $30 for the group")
+    confirm: ["Okay, I think I've got it! {recap}, shout if anything's off.", "Okay, I think I've got it: {recap}. Picks coming up!"],
     wrap: ["That's a plan, see you {night}! Two quick taps on your screen before you go, keeps me honest.", "Love this crew, have the best {night}! Rate me on your screen on the way out, be brutal."],
     // The ElevenLabs agent's first words, said the moment it connects
     agent_hello: ["{crew}'s here, hey {names}! First up, {question}", "Hey {names}, Sidekick's on for {crew}. So, {question}"],
@@ -148,6 +151,7 @@ const LINES = {
     picks: ["Two that suit everyone, and {kinds}: {story1}; or {story2}. Take your time.", "Two good options, and {kinds}: {story1}; or {story2}. Which feels right?"],
     answer: ["{heard}. Once I know {missing}, I'll suggest two options.", "I don't have quite enough yet{to}. Once I know {missing}, I'll suggest two options.", "Nearly there{to}. One more answer and I'll share what fits."],
     locked: ["Wonderful. {pick} on {night} is locked in.", "That's settled: {pick}, {night}."],
+    confirm: ["Thank you, I have everything I need: {recap}. Let me know if anything should change.", "Thank you, I have everything I need. {recap}; I'll find two options now."],
     wrap: ["Thank you, {names}, and enjoy {night}! Two short questions are on your screen before you go.", "It's been a pleasure, everyone; have a lovely {night}. If you have a moment, two quick questions are on your screen."],
     agent_hello: ["Good evening, {crew}: {names}, I'm Sidekick. To start, {question}", "Hello {names}, I'm Sidekick, and I'll keep track so you can just talk. To begin, {question}"],
     agent_solo: ["Hello {name}, I'm Sidekick. Share the link with your crew, and while they join, {question}", "Hi {name}, I'm here whenever your crew joins. To get us started, {question}"],
@@ -201,7 +205,7 @@ function fallbackLine(id, move, c, recent = []) {
   const fresh = pool.filter((t) => !used.has(opener(t)) && !recent.includes(t));
   return pickOne(fresh.length ? fresh : pool);
 }
-const DEFAULTS = { kinds: "both fit the plan", question: "what works for everyone?", crew: "crew", nights: "Friday or Saturday", night: "That night", missing: "a couple more things", loosen: "loosening one thing", n: "a few", options: "a few different options", names: "everyone" };
+const DEFAULTS = { recap: "the plan's on your screen", kinds: "both fit the plan", question: "what works for everyone?", crew: "crew", nights: "Friday or Saturday", night: "That night", missing: "a couple more things", loosen: "loosening one thing", n: "a few", options: "a few different options", names: "everyone" };
 
 // The typed chat thread: shorter versions where the spoken line pads for the ear. Anything not here
 // goes through talk.chatText (spoken padding at the start and "take your time" dropped).
@@ -212,6 +216,7 @@ const CHAT = {
     ask_budget: ["Add your max on the private card, only I see it."],
     checkin: ["Want me to run the planning, or hang back while you fill it in?"],
     wrap: ["See you {night}! Two quick taps on the survey before you go."],
+    confirm: ["Okay, I think I've got it! {recap}."],
   },
   concierge: {
     picks: ["Two options are on your screen: {pick1} or {pick2}. Vote when you're ready."],
@@ -219,6 +224,7 @@ const CHAT = {
     ask_budget: ["Please add your budget on the private card; only I'll see it."],
     checkin: ["Shall I lead the planning, or stay in the background while you fill it in?"],
     wrap: ["Enjoy {night}. Two short questions are on your screen."],
+    confirm: ["Thank you, I have everything I need: {recap}."],
   },
 };
 function chatLine(id, move, c) {

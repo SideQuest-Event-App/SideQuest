@@ -73,6 +73,7 @@ node test/sidekick-audio.e2e.js         # three Chromium "phones" connect in-app
 node test/sidekick-study.js             # the voice A/B study, end to end, with one browser tester (needs Playwright)
 node test/sidekick-voice.js             # the ElevenLabs agent leading (fake SDK in Chromium), fallbacks, built-in voice timing, agent settings
 node test/sidekick-thinking.js          # "Finding your two picks": live steps, progress lines, the 12 s fallback (fake slow AI; needs Playwright)
+node test/call-ui.e2e.js                # the slim call (mic, orb, leave), the orb sheet, "I've got everything", Plan it, deadlines, invites (needs Playwright)
 ```
 
 ### How to test with friends
