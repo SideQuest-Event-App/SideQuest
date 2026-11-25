@@ -28,6 +28,7 @@ const siteName = require("./public/js/sites.js"); // shared with the add-event f
 const sidekick = require("./lib/sidekick/rooms"); // Sidekick planning calls (lib/sidekick, public/sidekick.html)
 const skOg = require("./lib/sidekick/og"); // link previews for call invites
 const skStudy = require("./lib/sidekick/study"); // the voice A/B study (public/study.html, reference/sidekick-ab-study-plan.md)
+const skPlan = require("./lib/sidekick/planflow"); // the Plan tab's steps: squads and friends, who's free each night, availability
 const launch = require("./lib/launch"); // the launch map: "You · <neighbourhood>" and nearby places
 const taste = require("./lib/search/taste"); // per-person vibe weights learned from saves, accepts, ratings, "not for me"
 const discover = require("./lib/search/discover"); // feed order (variety, seen penalty), Wildcard, crew blend, data age
@@ -1918,6 +1919,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       return res.end(req.method === "HEAD" ? undefined : fs.readFileSync(path.join(__dirname, "public", url.pathname.includes("results") ? "study-results.html" : "study.html")));
     }
+    if (url.pathname.startsWith("/api/sk/plan/")) return skPlan.handle(req, res, url, { readBody, sendJSON });
     if (url.pathname.startsWith("/api/sk/")) return sidekick.handle(req, res, url, { readBody, sendJSON });
     if ((req.method === "GET" || req.method === "HEAD") && /^\/sk(\/[\w-]+)?\/?$/.test(url.pathname)) {
       // Link-preview tags (iMessage, WhatsApp, Slack...) are written into the page for each room
@@ -2003,7 +2005,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 // Load the database (from Supabase or data/db.json) before taking requests
-db.load().then(() => sidekick.init({ events: () => db.data.events })).then(() => server.listen(PORT, () => {
+db.load().then(() => sidekick.init({ events: () => db.data.events })).then(() => skPlan.init({ db, friendList, person })).then(() => server.listen(PORT, () => {
   console.log(`Sketch 2 running at http://localhost:${PORT}`);
   console.log(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY ? "Database: Supabase" : "Database: data/db.json (no Supabase keys in .env)");
   const m = ai.mode();

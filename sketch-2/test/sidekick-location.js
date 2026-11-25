@@ -231,7 +231,7 @@ const leaks = (label, text) => DIGITS.filter((d) => String(text).includes(d)).ma
       return { ctx, page };
     };
     const start = async (page, name) => {
-      await page.goto(`${base}/sk`);
+      await page.goto(`${base}/sk?quick=1`); // the one-page start screen (the Plan tab's steps are in plan-flow.e2e.js)
       await page.waitForSelector("#go");
       await page.fill("#name", name);
       await page.fill("#crew", "Loc UI");

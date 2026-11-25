@@ -59,7 +59,7 @@ async function waitFor(fn, ms, what) {
     }
     // The planner starts a call
     const [planner, ...friends] = pages;
-    await planner.goto(`${base}/sk`);
+    await planner.goto(`${base}/sk?quick=1`); // the one-page start screen (the Plan tab's steps are in plan-flow.e2e.js)
     await planner.fill("#name", "Asia");
     await planner.fill("#crew", "Audio test");
     if (!(await planner.$('.chips[data-name="nights"] .chip[aria-pressed=true]'))) await planner.click('.chips[data-name="nights"] .chip');

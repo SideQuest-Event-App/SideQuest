@@ -88,6 +88,8 @@ function systemPrompt(id) {
 // {placeholders} are filled from the call. Each move has versions so Sidekick doesn't repeat itself.
 const LINES = {
   friend: {
+    // The Plan tab's greeting (public/js/sidekick.js), shown or spoken before the steps; {name} is the first name
+    intro: ["Hey {name}. Your calendar's looking suspiciously free. Wanna fix that?"],
     checkin: ["Hey {names}, {crew}'s on SideQuest! Want me to run the planning, or hang back while you fill it in?", "{crew}'s here on SideQuest, hey {names}! Should I take the lead tonight, or chill while you fill in the plan?"],
     mode_lead: ["Love it, I've got you. Tell me what kind of night you're after, and what day works best for everyone?", "Say less, I've got this. Big question first: what kind of night, and what day works best for everyone?"],
     mode_default: ["Nobody said, so I'll lead, just tell me to step back anytime. What kind of night are you all after, {nights}?", "I'll run with it for now, say if you want me to chill. So what kind of night are we after, {nights}?"],
@@ -123,6 +125,7 @@ const LINES = {
     fallback: ["Taking forever, so here's what I've got so far: {story1}; or {story2}. Which one?", "This is slow, so here's what I've got so far: {story1}; or {story2}. Vote away."],
   },
   concierge: {
+    intro: ["Welcome back, {name}. Tell me who's coming, and I'll take care of the rest."],
     checkin: ["Good evening, {crew}, welcome to SideQuest. Shall I guide the planning, or would you prefer to fill in the plan yourselves?", "Welcome to SideQuest, {crew}: lovely to have {names} here. Would you like me to lead the planning, or stay in the background?"],
     mode_lead: ["Wonderful, I'll guide us through it. What kind of evening are you after, and what day works best for everyone?", "Of course. To begin, tell me what kind of evening you'd enjoy, and what day works best for everyone?"],
     mode_default: ["I'll take the lead for now; just say if you'd like me to step back. What kind of evening are you all after, {nights}?"],

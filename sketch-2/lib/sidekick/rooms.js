@@ -41,11 +41,27 @@ const upcoming = () => eventsSource().filter((e) => e.startsAt && new Date(e.sta
 
 // ---------- Rooms and people ----------
 
-function createRoom({ crew, planner, nights, persona }) {
+// members: the people the planner picked in the Plan tab's steps (a squad, or SideQuest friends), by first
+// name, so the call shows who's still to join. form: "Send everyone a quick form" (the Just answer, no call
+// mode): Sidekick sits back from the start and nobody is asked to talk.
+const cleanNights = (nights) => (Array.isArray(nights) ? nights : []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 4);
+const cleanMembers = (list) => [...new Set((Array.isArray(list) ? list : []).map((m) => String(m || "").trim().slice(0, 24)).filter(Boolean))].slice(0, 12);
+function asForm(room) {
+  room.form = true;
+  if (room.mode !== "sidelines") { room.mode = "sidelines"; room.modeHow = "form"; room.modeSetAt = now(); }
+  if (!room.picks) room.card = { slot: "form", at: now() };
+  room.stalledAsked = true; // nobody is on a call to hear "looks like things slowed down"
+  const planner = room.people.find((p) => p.role === "planner");
+  if (planner) planner.mode = "form";
+}
+
+function createRoom({ crew, planner, nights, persona, members, form, path: how }) {
   const room = {
     id: id(),
     crew: String(crew || "The crew").slice(0, 40),
-    nights: (Array.isArray(nights) ? nights : []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 4),
+    nights: cleanNights(nights),
+    expected: cleanMembers(members),
+    form: false,
     persona: persona ? personas.resolve(persona) : personas.PERSONA_IDS[crypto.randomInt(personas.PERSONA_IDS.length)],
     createdAt: now(),
     touched: now(),
@@ -87,7 +103,8 @@ function createRoom({ crew, planner, nights, persona }) {
   if (!room.nights.length) room.nights = suggestNights().slice(0, 2).map((n) => n.date);
   rooms.set(room.id, room);
   const person = addPerson(room, { name: planner, mode: "voice", role: "planner" });
-  track("plan_started", { sessionId: room.id, path: "call", persona: room.persona, nights: room.nights.length });
+  if (form) asForm(room);
+  track("plan_started", { sessionId: room.id, path: form ? "form" : ["squad", "friends", "link"].includes(how) ? `call_${how}` : "call", persona: room.persona, nights: room.nights.length, members: room.expected.length });
   return { room: room.id, person: person.id };
 }
 
@@ -928,7 +945,10 @@ async function decideNow(room, { forcePicks = false } = {}) {
   }
   room.wantGuide = null;
 
-  if (r.ready) return makePicks(room, r.list);
+  // A form waits for everyone the planner invited (or for "Pick now")
+  const waitingOn = room.form && (room.expected || []).length > 0 && expectedView(room).some((x) => !x.answered && !x.link);
+  if (r.ready && !waitingOn) return makePicks(room, r.list);
+  if (r.ready && waitingOn) return;
   if (r.reason === "too-few" && (f.night.known || room.nights.length === 1) && f.budget.known) {
     const best = P.bestRelax(events, room, f);
     const key = best ? best.kind : "none";
@@ -1347,6 +1367,8 @@ function viewFor(room, pid) {
     crew: room.crew,
     status: room.status,
     nights: room.nights.map((d) => P.nightLabel(d)),
+    form: Boolean(room.form),
+    expected: expectedView(room),
     me: me && { id: me.id, name: me.name, mode: me.mode, planner: me.role === "planner", answers: ownAnswers(room.answers[me.id]), sharedLocation: Boolean((room.answers[me.id] || {}).location) },
     people: P.crew(room).map((p) => ({ id: p.id, name: p.name, initial: initial(p.name), mode: p.mode, talking: now() - p.lastSpokeAt < 3000, spokeAt: p.lastSpokeAt || 0, planner: p.role === "planner", online: room.streams.has(p.id), audio: Boolean(p.audio), muted: Boolean(p.muted) })),
     audioRoom: room.people.some((p) => p.audio),
@@ -1375,6 +1397,21 @@ function viewFor(room, pid) {
     // Read-aloud settings. `slot` lets the planner's phone give each persona its own voice; it's never shown (blind test)
     voice: room.persona === "friend" ? { slot: "friend", rate: 1.02, pitch: 1.04 } : { slot: "concierge", rate: 0.95, pitch: 1 },
   };
+}
+
+// Who the planner invited from the app, and whether they've joined (call) or answered (form). People who
+// came in by the link and weren't on the list are added at the end ("via link").
+const firstKey = (n) => String(n || "").trim().split(/\s+/)[0].toLowerCase();
+function expectedView(room) {
+  const others = room.people.filter((p) => p.role !== "planner");
+  const used = new Set();
+  const out = (room.expected || []).map((name) => {
+    const p = others.find((x) => !used.has(x.id) && firstKey(x.name) === firstKey(name));
+    if (p) used.add(p.id);
+    return { name, joined: Boolean(p), answered: Boolean(p && Object.keys(room.answers[p.id] || {}).length), link: false };
+  });
+  for (const p of others) if (!used.has(p.id)) out.push({ name: p.name, joined: true, answered: Object.keys(room.answers[p.id] || {}).length > 0, link: true });
+  return out;
 }
 
 function broadcast(room) {
@@ -1421,7 +1458,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     if (parts[2] === "agent") return agentTool(req, res, parts[3], { readBody, sendJSON });
     if (req.method === "POST" && parts[2] === "rooms" && !parts[3]) {
       const body = await readBody(req);
-      return sendJSON(res, 200, createRoom({ crew: body.crew, planner: body.name, nights: body.nights, persona: body.persona }));
+      return sendJSON(res, 200, createRoom({ crew: body.crew, planner: body.name, nights: body.nights, persona: body.persona, members: body.members, form: Boolean(body.form), path: body.path }));
     }
     const room = rooms.get(parts[3]);
     if (!room) return sendJSON(res, 404, { error: "This call has ended or the link is wrong.", gone: true, boot: BOOT });
@@ -1447,7 +1484,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       });
       return;
     }
-    if (req.method === "GET" && action === "info") return sendJSON(res, 200, { boot: BOOT, crew: room.crew, status: room.status, nights: room.nights.map((d) => P.nightLabel(d)), people: P.crew(room).map((p) => p.name), member: room.people.some((p) => p.id === url.searchParams.get("p")) });
+    if (req.method === "GET" && action === "info") return sendJSON(res, 200, { boot: BOOT, crew: room.crew, status: room.status, form: Boolean(room.form), nights: room.nights.map((d) => P.nightLabel(d)), people: P.crew(room).map((p) => p.name), member: room.people.some((p) => p.id === url.searchParams.get("p")) });
     if (req.method !== "POST") return sendJSON(res, 404, { error: "Not found" });
     const body = await readBody(req);
     if (action === "join") {
@@ -1468,6 +1505,20 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     }
     const person = room.people.find((p) => p.id === body.p);
     if (!person) return sendJSON(res, 403, { error: "Join the call first." });
+    // The Plan tab's steps, before anyone decides: the planner can change the nights, who's invited, the crew's
+    // name, and switch to the form (a room made early for "I'll send them a link myself")
+    if (action === "setup") {
+      if (person.role !== "planner") return sendJSON(res, 403, { error: "Only the planner can change the plan's setup." });
+      if (room.picks || room.status !== "live") return sendJSON(res, 400, { error: "The picks are already out." });
+      const ns = cleanNights(body.nights);
+      if (ns.length) room.nights = ns;
+      if (Array.isArray(body.members)) room.expected = cleanMembers(body.members);
+      if (body.crew) room.crew = String(body.crew).slice(0, 40);
+      if (body.form) asForm(room);
+      broadcast(room);
+      schedule(room, 300);
+      return sendJSON(res, 200, { ok: true });
+    }
     if (action === "answer" && body.slot === "mode") {
       const ok = voteMode(room, person, body.value, "tap");
       broadcast(room);
@@ -1826,4 +1877,4 @@ function init({ events }) {
   eventsSource = events;
 }
 
-module.exports = { init, handle, preview, BOOT, _test: { rooms, createRoom, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates } };
+module.exports = { init, handle, preview, BOOT, _test: { rooms, createRoom, expectedView, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates } };

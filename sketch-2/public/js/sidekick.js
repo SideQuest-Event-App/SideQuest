@@ -1,5 +1,6 @@
 // Sidekick planning call (front end). One page for three steps:
-//   /sk          the planner starts a call (picks candidate nights)
+//   /sk          the Plan tab: an intro, then who / when / how, then the call or "Form sent" (section 0);
+//                the one-page start screen (picks candidate nights) for the voice study and /sk?quick=1
 //   /sk/:room    a friend joins: name, private card, then voice, text or form
 //   (in the call) the plan board with the current question card, captions, picks, vote, lock, survey
 // Voice uses the browser's own speech recognition (Chrome, Edge, Safari); everyone can type instead.
@@ -219,6 +220,532 @@
     };
   }
 
+  // ---------- 0. The Plan tab: Sidekick first, one step at a time (design TB2-Plan) ----------
+  // Intro (the orb and a greeting in the persona's voice) -> 1 Who's coming? (a squad, SideQuest friends, or a
+  // link) -> 2 When? (who's free each night for three weeks) -> 3 How? (a call, or a quick form) -> the call, or
+  // "Form sent". A progress bar and Back on every step; Back keeps what was picked. Signed out (or the demo
+  // account), the people are the sample friends and squads. /sk?squad=<id> starts with that squad picked.
+  // The one-page start screen is still there for the voice study (/sk?study=) and at /sk?quick=1.
+  const PF = {
+    back: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
+    squad: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0M16 4.5a3.5 3.5 0 0 1 0 7M21 20a6 6 0 0 0-4-5.6"/></svg>',
+    person: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
+    link: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
+    check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
+    bigcheck: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
+    form: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
+    cal: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>',
+    share: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 13v7h14v-7"/></svg>',
+    search: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg>',
+    home: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v9h-5v-6h-6v6H4z"/></svg>',
+    ticket: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M4 8a2 2 0 0 0 2-2h12a2 2 0 0 0 2 2v8a2 2 0 0 0-2 2H6a2 2 0 0 0-2-2z"/></svg>',
+  };
+  const PF_COLOURS = ["c2", "c1", "c3", "c4", "c5", "c0"];
+  const ss = {
+    get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { sessionStorage.setItem(k, v); } catch {} },
+  };
+  const flow = { step: "intro", data: null, path: null, squad: null, friends: [], search: "", nights: [], how: "call", room: null, voiceAgent: false, crew: "" };
+  const userId = () => { try { return localStorage.getItem("sq2.user") || null; } catch { return null; } };
+  const wide = () => window.matchMedia("(min-width: 900px)").matches;
+  const pfOn = (on) => {
+    document.body.classList.toggle("pf-mode", on);
+    document.documentElement.style.setProperty("--dock-h", on ? (wide() ? "0px" : "76px") : "0px");
+  };
+
+  // The app's tabs (a bar on phones, a side list on computers). Each opens that tab in the app.
+  function pfNav() {
+    const tabs = [["discover", "Discover", PF.home], ["parties", "Squads", PF.squad.replace(/20/g, "24")], ["plan", "Plan", null], ["questlog", "Sidequests", PF.ticket], ["profile", "Profile", PF.person.replace(/20/g, "24")]];
+    return `<nav class="pf-nav" aria-label="SideQuest"><span class="pf-brand" aria-hidden="true">sidequest</span>${tabs.map(([k, label, icon]) => k === "plan"
+      ? `<a class="pf-tab on plan" href="/sk" aria-current="page"><span class="orb pf-tab-orb"></span><span>${label}</span></a>`
+      : `<a class="pf-tab" href="/" data-screen="${k}">${icon}<span>${label}</span></a>`).join("")}</nav>`;
+  }
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest(".pf-tab[data-screen]");
+    if (a) ss.set("sq2.screen", a.dataset.screen);
+  }, true);
+
+  function pfShell(step, inner, cls = "") {
+    pfOn(true);
+    app.innerHTML = `<div class="pf" data-step="${step}">${pfNav()}<div class="pf-main"><section class="pf-card ${cls}" aria-labelledby="pfTitle">${inner}</section></div></div>`;
+    const h = document.getElementById("pfTitle");
+    if (h && pfFocus) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }
+    pfFocus = true;
+    window.scrollTo(0, 0);
+  }
+  let pfFocus = false;
+  const stepHead = (n, label, backTo) => `<div class="pf-head"><button class="icon-btn pf-back" data-pfback="${backTo}" aria-label="Back">${PF.back}</button><span class="pf-stepl">Step ${n} of 3 · ${label}</span><span class="pf-sp"></span></div>
+    <div class="pf-prog" role="progressbar" aria-label="Step ${n} of 3" aria-valuemin="1" aria-valuemax="3" aria-valuenow="${n}">${[1, 2, 3].map((i) => `<i class="${i <= n ? "on" : ""}"></i>`).join("")}</div>`;
+  const pending = (btn, label) => { btn.disabled = true; btn.setAttribute("aria-busy", "true"); btn.dataset.label = btn.innerHTML; btn.classList.add("is-pending"); btn.innerHTML = `${esc(label)}<span class="pend-dots" aria-hidden="true"><i></i><i></i><i></i></span>`; };
+  const unpend = (btn) => { btn.disabled = false; btn.removeAttribute("aria-busy"); btn.classList.remove("is-pending"); if (btn.dataset.label) btn.innerHTML = btn.dataset.label; };
+
+  // Who's in: the people picked in step 1 (by key), with You first
+  function pfPeople() {
+    const d = flow.data;
+    let keys = [];
+    if (flow.path === "squad") keys = ((d.squads.find((s) => s.id === flow.squad) || {}).members || []);
+    else if (flow.path === "friends") keys = flow.friends;
+    const me = { key: "me", name: "You", full: d.me.name || "You", initial: d.me.initial, avail: d.mine, colour: "c0" };
+    return [me, ...keys.map((k, i) => d.people[k] && { ...d.people[k], colour: PF_COLOURS[i % PF_COLOURS.length] }).filter(Boolean)];
+  }
+  const squadName = () => ((flow.data.squads.find((s) => s.id === flow.squad) || {}).name || "");
+  const whoLabel = () => (flow.path === "squad" ? squadName() : flow.path === "friends" ? (flow.friends.length === 1 ? flow.data.people[flow.friends[0]].name : `${flow.friends.length} friends`) : "Link");
+  const crewName = () => flow.crew || (flow.path === "squad" ? squadName() : flow.data && flow.data.me.name ? `${flow.data.me.name}'s crew` : "The crew");
+  const pfNightOf = (date) => flow.data.nights.find((n) => n.date === date);
+  const shortNight = (date) => { const n = pfNightOf(date); return n ? `${n.dow} ${n.day}` : date; };
+
+  async function flowStart() {
+    const sq = params.get("squad");
+    const free = store.get("sk:free");
+    let persona = params.get("persona") || ss.get("sk:persona");
+    const q = new URLSearchParams();
+    if (userId()) q.set("user", userId());
+    if (sq) q.set("squad", sq);
+    if (persona) q.set("persona", persona);
+    if (store.get("sk:name")) q.set("name", store.get("sk:name"));
+    if (Array.isArray(free)) q.set("free", free.join(","));
+    // The loading system: nothing for 300 ms, then a skeleton in the intro's shape
+    pfOn(true);
+    app.innerHTML = `<div class="pf" data-step="loading">${pfNav()}<div class="pf-main"><section class="pf-card pf-wait" aria-busy="true"><span class="sr" role="status">Loading your plan…</span>
+      <div class="pf-hero"><span class="sk-orb"></span><span class="sk-line" style="width:55%"></span><span class="sk-line" style="width:80%"></span><span class="sk-line" style="width:65%"></span></div>
+      <span class="sk-btn"></span></section></div></div>`;
+    try {
+      const [data, nights] = await Promise.all([api(`/api/sk/plan/setup?${q}`), api("/api/sk/nights").catch(() => ({}))]);
+      flow.data = data;
+      flow.voiceAgent = Boolean(nights.voiceAgent);
+    } catch (err) {
+      app.querySelector(".pf-card").outerHTML = `<section class="pf-card"><h1 id="pfTitle">Couldn't load your plan</h1><p class="muted">Check your connection and try again.</p><button class="btn out" onclick="location.reload()">Try again</button></section>`;
+      return;
+    }
+    ss.set("sk:persona", flow.data.persona);
+    if (flow.data.squad) { flow.path = "squad"; flow.squad = flow.data.squad; }
+    if (flow.voiceAgent && agentPref) loadEL().catch(() => {});
+    pfIntro();
+  }
+
+  // ----- Intro: the orb, a greeting with your first name, one question. Not now is always there. -----
+  function pfIntro() {
+    flow.step = "intro";
+    const d = flow.data;
+    const seen = ss.get("sk:introSeen") === "1"; // like Spotify's DJ: the line plays once per visit
+    const parts = d.intro.match(/^(.*?[.!?])\s+(.*)$/) || [null, d.intro, ""];
+    const hello = parts[1];
+    const line = seen ? "" : parts[2];
+    pfShell("intro", `<div class="pf-intro">
+      <div class="pf-top"><span class="tag pri">Sidekick</span><button class="pf-voice" id="pfVoice" aria-label="Voice: ${esc(d.voiceLabel)}. Change the voice">Voice: ${esc(d.voiceLabel)} · <u>change</u></button></div>
+      <div class="pf-hero">
+        <button class="pf-orb-btn" id="pfOrb" aria-label="Hear Sidekick say it"><span class="orb pf-orb ${seen ? "" : "intro"}" id="pfOrbI"></span></button>
+        <div class="pf-words">
+          <h1 class="pf-hello" id="pfTitle">${esc(hello)}</h1>
+          ${line ? `<p class="pf-line" id="pfLine">${esc(line)}</p>` : ""}
+          <p class="pf-q">Ready to start a plan?</p>
+          <div class="pf-acts"><button class="btn pri" id="pfGo">Let's plan</button><button class="btn out" id="pfNot">Not now</button></div>
+        </div>
+      </div></div>`, "intro");
+    ss.set("sk:introSeen", "1");
+    if (!seen) pfSpeak(d.intro, false);
+  }
+  // Spoken when the voice is on and the browser allows it (after a tap); otherwise it's the text and the orb
+  function pfSpeak(text, asked) {
+    const orb = document.getElementById("pfOrbI");
+    if (!("speechSynthesis" in window) || (!asked && (!aloud || !(navigator.userActivation && navigator.userActivation.hasBeenActive)))) return;
+    try {
+      const u = Voice.say(text, flow.data.persona === "friend" ? { slot: "friend", rate: 1.02, pitch: 1.04 } : { slot: "concierge", rate: 0.95, pitch: 1 });
+      if (orb) orb.classList.add("live");
+      const tail = u.chunks[u.chunks.length - 1];
+      tail.onend = () => orb && orb.classList.remove("live");
+      setTimeout(() => orb && orb.classList.remove("live"), 1500 + text.split(/\s+/).length * 500);
+    } catch {}
+  }
+
+  // ----- Step 1: who's coming? A squad, friends on SideQuest, or a link you send yourself -----
+  function pfWho() {
+    flow.step = "who";
+    const d = flow.data;
+    if (!flow.path) flow.path = d.squads.length ? "squad" : null;
+    if (flow.path === "squad" && !flow.squad && d.squads.length) flow.squad = d.squads[0].id;
+    const opt = (key, icon, title, sub, extra = "") => {
+      const on = flow.path === key;
+      return `<div class="pf-opt ${on ? "on" : ""}"><button class="pf-opt-b" role="radio" aria-checked="${on}" data-pfpath="${key}">${icon}<span class="pf-opt-t"><b>${title}</b><span class="small">${sub}</span></span><span class="pf-radio" aria-hidden="true"></span></button>${on ? extra : ""}</div>`;
+    };
+    const chips = d.squads.length ? `<div class="pf-chips" role="radiogroup" aria-label="Squads">${d.squads.map((s) => `<button class="chip" role="radio" data-pfsquad="${esc(s.id)}" aria-checked="${s.id === flow.squad}" aria-pressed="${s.id === flow.squad}">${esc(s.name)}</button>`).join("")}</div>` : "";
+    const ready = flow.path === "squad" ? Boolean(flow.squad) : Boolean(flow.path);
+    pfShell("who", `${stepHead(1, "Who", "intro")}<h1 id="pfTitle">Who's coming?</h1>
+      <div class="pf-opts" role="radiogroup" aria-label="Who's coming">
+        ${d.squads.length ? opt("squad", `<span class="pf-thumb v">${PF.squad}</span>`, "A squad", "Everyone in it, already set up", chips) : ""}
+        ${opt("friends", `<span class="pf-thumb t">${PF.person}</span>`, "Pick friends on SideQuest", flow.path === "friends" && flow.friends.length ? esc(flow.friends.map((k) => d.people[k] && d.people[k].name).filter(Boolean).join(", ")) : "Choose people one by one")}
+        ${opt("link", `<span class="pf-thumb n">${PF.link}</span>`, "I'll send them a link myself", "For anyone, in or out of the app")}
+      </div>
+      <div class="pf-foot"><button class="btn pri" id="pfNext" ${ready ? "" : "disabled"}>Next: when?</button></div>`);
+  }
+
+  function pfFriends() {
+    flow.step = "friends";
+    const d = flow.data;
+    const s = flow.search.trim().toLowerCase();
+    const list = d.friends.filter((k) => !s || d.people[k].full.toLowerCase().includes(s) || d.people[k].name.toLowerCase().includes(s));
+    const picked = flow.friends.filter((k) => d.people[k]);
+    const rows = list.map((k, i) => {
+      const p = d.people[k];
+      const on = picked.includes(k);
+      return `<button class="pf-frow" role="checkbox" aria-checked="${on}" data-pffriend="${esc(k)}"><span class="av ${PF_COLOURS[d.friends.indexOf(k) % PF_COLOURS.length]}" aria-hidden="true">${esc(p.initial)}</span><span class="grow">${esc(p.full)}</span><span class="pf-box" aria-hidden="true">${on ? PF.check : ""}</span></button>`;
+    }).join("");
+    const empty = !d.friends.length
+      ? `<div class="pf-empty"><p style="font-weight:600">No SideQuest friends yet</p><p class="small">Add friends in Squads, or send a link to anyone instead.</p><button class="btn out sm" data-pfpath="link">Send a link instead</button></div>`
+      : !list.length ? `<p class="small">Nobody called "${esc(flow.search)}" in your SideQuest friends.</p>` : "";
+    pfShell("friends", `${stepHead(1, "Who", "who")}<h1 id="pfTitle">Pick friends</h1>
+      ${d.friends.length ? `<label class="pf-search"><span class="sr">Search your SideQuest friends</span>${PF.search}<input id="pfSearch" type="search" placeholder="Search your SideQuest friends" value="${esc(flow.search)}" autocomplete="off"></label>` : ""}
+      <div class="pf-chips" id="pfPicked" aria-label="Picked">${picked.map((k) => `<button class="chip" aria-pressed="true" data-pfunpick="${esc(k)}" aria-label="Remove ${esc(d.people[k].name)}">${esc(d.people[k].name)} ${ICON.x}</button>`).join("")}</div>
+      <div class="pf-flist" id="pfFlist">${rows}</div>${empty}
+      ${d.friends.length ? '<p class="small">Only friends in SideQuest are listed, so everyone here can share free nights.</p>' : ""}
+      <div class="pf-foot"><button class="btn pri" id="pfNext" ${picked.length ? "" : "disabled"}>Next: when?${picked.length ? ` · ${picked.length} friend${picked.length === 1 ? "" : "s"}` : ""}</button></div>`);
+  }
+
+  // The link path makes the room now, so the link is real; the next steps change its nights
+  async function ensureRoom(form) {
+    const d = flow.data;
+    const members = pfPeople().slice(1).map((p) => p.name);
+    const body = { nights: flow.nights.length ? flow.nights : undefined, members, crew: crewName() };
+    // Reuse the room made for the link (or for a form sent before Back), unless it's a form and this is a call
+    const reuse = flow.room && (flow.room.form === Boolean(form) || (form && !flow.room.form && !flow.room.started));
+    if (reuse) {
+      await api(`/api/sk/rooms/${flow.room.room}/setup`, { p: flow.room.person, ...body, form: Boolean(form) });
+      flow.room.form = flow.room.form || Boolean(form);
+      return flow.room;
+    }
+    const name = d.me.name || (document.getElementById("pfName") || {}).value || store.get("sk:name") || "You";
+    const out = await api("/api/sk/rooms", { name, crew: body.crew, nights: body.nights, persona: d.persona, members, form: Boolean(form), path: flow.path });
+    flow.room = { room: out.room, person: out.person, form: Boolean(form) };
+    return flow.room;
+  }
+  async function pfLink() {
+    flow.step = "link";
+    pfShell("link", `${stepHead(1, "Who", "who")}<h1 id="pfTitle">Send your own link</h1>
+      <p class="muted">Paste it in your group chat. Anyone who opens it can join, no account needed.</p>
+      <div class="pf-box-card" id="pfShare"><span class="small">Your plan link</span><div class="pf-wait"><span class="sk-line" style="width:70%;height:48px"></span><span class="sk-line" style="height:44px"></span></div></div>
+      <div class="pf-note"><span class="orb"></span><p class="small">People who join this way show as <b>unknown</b> on the calendar until they answer.</p></div>
+      <div class="pf-foot"><button class="btn pri" id="pfNext">Next: when?</button></div>`);
+    try {
+      const r = await ensureRoom(false);
+      roomId = r.room;
+      const box = document.getElementById("pfShare");
+      if (box && flow.step === "link") box.innerHTML = `<span class="small">Your plan link</span>${shareHTML()}`;
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  // ----- Step 2: when? Who's free each night for the next three weeks -----
+  function nightInfo(n, people) {
+    const st = people.map((p) => ({ p, s: (p.avail && p.avail.nights && p.avail.nights[n.date]) || "unset" }));
+    const free = st.filter((x) => x.s === "free");
+    const unset = st.filter((x) => x.s === "unset");
+    const all = people.length >= 2 && free.length === people.length;
+    return { st, free, unset, all };
+  }
+  const STATE_WORD = { free: "free", busy: "busy", unset: "not set" };
+  function nightLabelFull(n, info) {
+    const who = info.st.map((x) => `${x.p.key === "me" ? "you" : x.p.name}: ${STATE_WORD[x.s]}`).join(", ");
+    return `${n.label}. ${info.free.length} of ${info.st.length} free${info.all ? ", everyone free" : ""}. ${who}. Link guests: unknown. ${n.events} event${n.events === 1 ? "" : "s"} that night.`;
+  }
+  function defaultNights(people) {
+    const list = flow.data.nights.map((n) => ({ n, i: nightInfo(n, people) }));
+    // The first week with a night everyone's free: its busiest one (more to choose from)
+    const all = list.filter((x) => x.i.all && x.n.events > 0);
+    const week = all.length ? all.filter((x) => list.indexOf(x) - list.indexOf(all[0]) < 7 - ((["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(all[0].n.dow) + 7) % 7)) : [];
+    const best = week.sort((a, b) => b.n.events - a.n.events)[0] || list.slice().sort((a, b) => b.i.free.length - a.i.free.length || b.n.events - a.n.events)[0];
+    return best ? [best.n.date] : [];
+  }
+  function pfWhen() {
+    flow.step = "when";
+    const d = flow.data;
+    const people = pfPeople();
+    if (!flow.nights.length) flow.nights = defaultNights(people);
+    const backTo = flow.path === "friends" ? "friends" : flow.path === "link" ? "link" : "who";
+    const dot = (p) => `<span class="av xs ${p.colour}" aria-hidden="true">${esc(p.initial)}</span>`;
+    const unk = '<span class="av xs unk" aria-hidden="true">?</span>';
+    const sel = flow.nights;
+    const next = sel.length ? `Next: how to decide · ${shortNight(sel[0])}${sel.length > 1 ? ` +${sel.length - 1}` : ""}` : "Pick a night";
+    const legend = `<div class="pf-legend" aria-hidden="true">${people.map((p) => `<span class="row" style="gap:4px"><i class="pf-dot ${p.colour}"></i>${esc(p.key === "me" ? "You" : p.name)}${p.avail && !p.avail.set ? " (not set)" : ""}</span>`).join("")}<span class="row" style="gap:4px"><i class="pf-dot unkd"></i>Link guests ?</span></div>`;
+    const summary = `<div class="pf-sum">${flow.path === "link" ? '<span class="tag soc">Link</span>' : `<span class="tag pri">${esc(whoLabel())}</span>`}<span class="small">+ anyone via link, <b>?</b> unknown</span></div>`;
+    const markBtn = `<button class="btn out sm pf-mark" id="pfMark">${PF.cal}Mark your free nights</button>`;
+    let body;
+    if (wide()) {
+      // A calendar: Monday to Sunday, the window's weeks, dots for who's free, the everyone-free nights lit
+      const first = d.nights[0];
+      const lead = (["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(first.dow) + 7) % 7;
+      const cells = [...Array(lead).fill(null), ...d.nights];
+      while (cells.length % 7) cells.push(null);
+      const focus = pfNightOf(sel[0]) || d.nights[0];
+      const fi = nightInfo(focus, people);
+      body = `<div class="pf-cal-wrap"><div class="pf-cal" role="group" aria-label="Nights in the next three weeks">${["M", "T", "W", "T", "F", "S", "S"].map((x) => `<span class="pf-cal-h" aria-hidden="true">${x}</span>`).join("")}
+        ${cells.map((n) => {
+          if (!n) return '<span class="pf-cell blank" aria-hidden="true"></span>';
+          const i = nightInfo(n, people);
+          return `<button class="pf-cell pf-night ${i.all ? "all" : ""}" data-date="${n.date}" data-all="${i.all ? 1 : 0}" aria-pressed="${sel.includes(n.date)}" aria-label="${esc(nightLabelFull(n, i))}"><span class="pf-cd">${n.day === 1 || n === d.nights[0] ? `${n.mon} ` : ""}${n.day}</span><span class="pf-dots">${i.free.map((x) => `<i class="pf-dot ${x.p.colour}"></i>`).join("")}${i.unset.map(() => '<i class="pf-dot unset"></i>').join("")}<i class="pf-dot unkd"></i></span><span class="pf-ev">${n.events} event${n.events === 1 ? "" : "s"}</span></button>`;
+        }).join("")}</div>
+        <aside class="pf-side" aria-live="polite"><b>${esc(focus.label)}</b>${fi.all ? '<span class="tag soc" style="align-self:flex-start">Everyone free</span>' : ""}
+          <p class="small" style="color:var(--t2)">${fi.free.length} of ${fi.st.length} free · ${focus.events} events that night.</p>
+          <ul class="pf-who">${fi.st.map((x) => `<li><span class="av xs ${x.p.colour}" aria-hidden="true">${esc(x.p.initial)}</span>${esc(x.p.key === "me" ? "You" : x.p.name)}<span class="pf-st ${x.s}">${STATE_WORD[x.s]}</span></li>`).join("")}<li><span class="av xs unk" aria-hidden="true">?</span>Link guests<span class="pf-st unset">unknown</span></li></ul>
+          ${sel.length > 1 ? `<p class="small">Also picked: ${esc(sel.slice(1).map(shortNight).join(", "))}</p>` : ""}
+          ${markBtn}
+          <button class="btn pri" id="pfNext" ${sel.length ? "" : "disabled"}>${esc(next)}</button></aside></div>`;
+      pfShell("when", `${stepHead(2, "When", backTo)}<div class="pf-whenh"><h1 id="pfTitle">When?</h1>${legend}</div>${summary}${body}<p class="small">Tap one night or more (up to 4). Friends share free or not, never why.</p>`, "wide");
+      return;
+    }
+    // Phones: the nights as a list, a week at a time
+    const weekOf = (n) => Math.floor((d.nights.indexOf(n) + ((["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(d.nights[0].dow) + 7) % 7)) / 7);
+    const groups = [];
+    for (const n of d.nights) { const w = weekOf(n); (groups[w] = groups[w] || []).push(n); }
+    body = groups.map((g, w) => `<div class="pf-week"><p class="pf-weekh">${w === 0 ? "This week" : w === 1 ? "Next week" : `Week of ${g[0].mon} ${g[0].day}`}</p>
+      ${g.map((n) => {
+        const i = nightInfo(n, people);
+        return `<button class="pf-night pf-row ${i.all ? "all" : ""}" data-date="${n.date}" data-all="${i.all ? 1 : 0}" aria-pressed="${sel.includes(n.date)}" aria-label="${esc(nightLabelFull(n, i))}">
+          <span class="pf-date"><span class="small">${n.dow}</span><b>${n.day}</b></span>
+          <span class="pf-nmid"><span class="row" style="gap:6px"><span class="stk">${i.free.map((x) => dot(x.p)).join("")}${i.unset.map((x) => `<span class="av xs ${x.p.colour} unset" aria-hidden="true">${esc(x.p.initial)}</span>`).join("")}${unk}</span><span class="pf-cnt">${i.free.length} of ${i.st.length} free${i.unset.length ? ` · ${i.unset.length} not set` : ""}</span></span><span class="small">${n.events} event${n.events === 1 ? "" : "s"} that night</span></span>
+          ${i.all ? '<span class="tag soc">Everyone free</span>' : ""}</button>`;
+      }).join("")}</div>`).join("");
+    pfShell("when", `${stepHead(2, "When", backTo)}<h1 id="pfTitle">When?</h1>${summary}<div class="pf-tools">${markBtn}</div>${legend}<div class="pf-nights">${body}</div>
+      <p class="small">Tap one night or more (up to 4). Friends share free or not, never why.</p>
+      <div class="pf-foot"><button class="btn pri" id="pfNext" ${sel.length ? "" : "disabled"}>${esc(next)}</button></div>`);
+  }
+
+  // Mark your free nights: a sheet with the window's nights. Busy (already going) nights can't be marked free.
+  function pfMarkSheet() {
+    const d = flow.data;
+    const nights = d.mine.nights;
+    const free = new Set(Object.keys(nights).filter((k) => nights[k] === "free"));
+    const going = new Set(d.signedIn ? (d.goingNights || []) : []);
+    const s = document.createElement("div");
+    s.id = "pfSheet";
+    s.className = "sheet-wrap";
+    s.innerHTML = `<div class="sheet-scrim" data-pfclose></div><div class="sheet-panel pf-sheet" role="dialog" aria-modal="true" aria-labelledby="pfSheetT" tabindex="-1">
+      <div class="row sb"><h2 id="pfSheetT">Mark your free nights</h2><button class="icon-btn" data-pfclose aria-label="Close">${ICON.x}</button></div>
+      <p class="small" style="color:var(--t2)">Tap the nights you're free. Friends only see free or busy, never why.${d.signedIn ? "" : " Sign in to keep them on your account; for now they stay on this phone."}</p>
+      <div class="pf-markgrid" role="group" aria-label="Your free nights">${d.nights.map((n) => `<button class="chip pf-mchip" data-pffree="${n.date}" aria-pressed="${free.has(n.date)}" ${going.has(n.date) ? "disabled" : ""}><span>${n.dow}</span> ${n.mon} ${n.day}</button>`).join("")}</div>
+      <div class="row"><button class="btn out" data-pfclose style="flex:1">Cancel</button><button class="btn pri" id="pfSaveFree" style="flex:1">Save free nights</button></div></div>`;
+    document.body.appendChild(s);
+    s.querySelector(".sheet-panel").focus();
+  }
+  async function pfSaveFree(btn) {
+    const d = flow.data;
+    const free = [...document.querySelectorAll("#pfSheet [data-pffree][aria-pressed=true]")].map((b) => b.dataset.pffree);
+    pending(btn, "Saving");
+    try {
+      if (d.signedIn) {
+        const out = await api("/api/sk/plan/free", { user: userId(), free });
+        d.mine = out.mine;
+      } else {
+        store.set("sk:free", free);
+        d.mine = { set: true, nights: Object.fromEntries(d.nights.map((n) => [n.date, free.includes(n.date) ? "free" : "busy"])) };
+      }
+      pfCloseSheet();
+      toast(d.signedIn ? "Saved. Friends now see your free nights." : "Saved on this phone.");
+      pfWhen();
+    } catch (err) {
+      unpend(btn);
+      toast(err.message);
+    }
+  }
+  function pfCloseSheet() {
+    const s = document.getElementById("pfSheet");
+    if (s) s.remove();
+    const m = document.getElementById("pfMark");
+    if (m) m.focus();
+  }
+
+  // ----- Step 3: how do you want to decide? A call with Sidekick, or a quick form -----
+  function pfHow() {
+    flow.step = "how";
+    const d = flow.data;
+    const opt = (key, icon, title, sub) => `<div class="pf-opt ${flow.how === key ? "on" : ""}"><button class="pf-opt-b" role="radio" aria-checked="${flow.how === key}" data-pfhow="${key}">${icon}<span class="pf-opt-t"><b>${title}</b><span class="small">${sub}</span></span><span class="pf-radio" aria-hidden="true"></span></button></div>`;
+    const chips = `<div class="pf-sum">${flow.path === "link" ? '<span class="tag soc">Link</span>' : `<span class="tag pri">${esc(whoLabel())}</span>`}${flow.nights.map((x) => `<span class="tag pf-tn">${esc(shortNight(x))}</span>`).join("")}</div>`;
+    const askName = !d.me.name ? `<label class="f">Your name<input class="in" id="pfName" autocomplete="given-name" maxlength="24" value="${esc(store.get("sk:name") || "")}"></label>` : "";
+    pfShell("how", `${stepHead(3, "How", "when")}<h1 id="pfTitle">How do you want to decide?</h1>${chips}
+      <div class="pf-opts" role="radiogroup" aria-label="How to decide">
+        ${opt("call", '<span class="orb pf-optorb"></span>', "Hop on a call with Sidekick", "About 5 minutes. Sidekick listens, keeps track and suggests two picks.")}
+        ${opt("form", `<span class="pf-thumb t">${PF.form}</span>`, "Send everyone a quick form", "The same questions by tap. Sidekick picks once everyone answers.")}
+      </div>
+      <p class="small">Private questions (like budget) are asked one to one. The group only sees one limit, never whose.</p>
+      ${askName}${originPicker()}
+      <div class="pf-foot"><button class="btn pri" id="pfStart">${flow.how === "form" ? "Send the form" : "Start the call"}</button></div>`);
+    initOrigin();
+  }
+
+  async function pfLaunch(btn) {
+    const d = flow.data;
+    const nameIn = document.getElementById("pfName");
+    if (nameIn && !nameIn.value.trim()) { nameIn.focus(); return toast("Add your name so your crew knows who's planning."); }
+    if (nameIn) store.set("sk:name", nameIn.value.trim());
+    const form = flow.how === "form";
+    const autoAgent = !form && flow.voiceAgent && agentPref;
+    unlockAudio();
+    if (autoAgent) primeAgentAudio(); // the microphone prompt comes from this tap
+    const origin = await originAnswer(btn);
+    if (!origin) return; // no location: Union is now selected, with a note; the next tap starts
+    pending(btn, form ? "Sending" : "Starting");
+    try {
+      const r = await ensureRoom(form);
+      r.started = true;
+      roomId = r.room;
+      me = { person: r.person, mode: form ? "form" : "voice" };
+      store.set(`sk:${roomId}`, me);
+      store.set("sk:crew", crewName());
+      await api(`/api/sk/rooms/${roomId}/answer`, { p: me.person, slot: "origin", value: origin, source: "start" }).catch(() => {});
+      if (form) await api(`/api/sk/rooms/${roomId}/answer`, { p: me.person, slot: "night", value: flow.nights, source: "start" }).catch(() => {});
+      // Stay on this page (no reload), so the tap that unlocked audio on iPhones still counts
+      history.pushState(null, "", `/sk/${roomId}`);
+      if (!form) pfOn(false);
+      connect();
+      if (autoAgent) startAgent({ auto: true });
+    } catch (err) {
+      unpend(btn);
+      toast(err.message);
+    }
+  }
+
+  // ----- Then, the form path: who's answered, live -----
+  function renderFormSent() {
+    const ex = view.expected || [];
+    const meRow = { name: "You", answered: true, me: true };
+    const rows = [...ex.filter((x) => !x.link), meRow, ...ex.filter((x) => x.link)];
+    const done = rows.filter((x) => x.answered).length;
+    const waiting = rows.filter((x) => !x.answered);
+    const first = view.nights[0] || "";
+    const card = document.querySelector(".pf-card.formsent");
+    const html = `<div class="pf-head"><button class="icon-btn pf-back" data-pfback="how" aria-label="Back">${PF.back}</button><b class="pf-title2">Form sent</b><button class="icon-btn" id="invitePill" aria-label="Share the form link">${PF.share}</button></div>
+      <div class="pf-sent"><span class="pf-okc">${PF.bigcheck}</span><h1 id="pfTitle" aria-live="polite">${done} of ${rows.length} answered</h1><p class="muted">Sidekick picks when everyone's in.</p>${first ? `<span class="tag hot">For ${esc(first)}</span>` : ""}</div>
+      <ul class="pf-ans" aria-label="Who's answered">${rows.map((x, i) => `<li><span class="av ${x.me ? "c0" : x.link && !x.answered ? "unk" : PF_COLOURS[i % PF_COLOURS.length]}" aria-hidden="true">${esc(x.me ? (view.me.name || "Y").charAt(0).toUpperCase() : x.name.charAt(0).toUpperCase())}</span><span class="grow">${esc(x.name)}${x.link ? ' <span class="small">(via link)</span>' : ""}</span><span class="tag ${x.answered ? "ok" : "pf-tn"}">${x.answered ? "Answered" : "Not yet"}</span></li>`).join("")}</ul>
+      <div class="pf-acts2">${waiting.length ? `<button class="btn sm pf-v" id="pfNudge">Nudge ${esc(waiting.length === 1 ? waiting[0].name : `${waiting.length} people`)}</button>` : ""}<button class="btn out sm" id="pfPickNow" ${done >= 2 ? "" : "disabled"}>Pick now with ${done}</button></div>
+      <div class="pf-box-card"><span class="small">Send the form link to the group</span>${shareHTML()}</div>`;
+    if (!card) {
+      pfFocus = false;
+      pfShell("formsent", html, "formsent");
+    } else card.innerHTML = html;
+  }
+
+  // Taps in the steps
+  app.addEventListener("click", async (e) => {
+    const t = e.target;
+    if (t.closest("#pfGo")) { unlockAudio(); return void (flow.path === "squad" && flow.squad && params.get("squad") ? pfWhen() : pfWho()); }
+    if (t.closest("#pfNot")) { if (document.referrer.startsWith(location.origin) && history.length > 1) history.back(); else location.href = "/"; return; }
+    if (t.closest("#pfOrb")) return void pfSpeak(flow.data.intro, true);
+    if (t.closest("#pfVoice")) {
+      const next = flow.data.persona === "friend" ? "concierge" : "friend";
+      ss.set("sk:persona", next);
+      const q = new URLSearchParams({ persona: next, name: flow.data.me.name || "" });
+      if (userId()) q.set("user", userId());
+      const out = await api(`/api/sk/plan/setup?${q}`).catch(() => null);
+      if (out) Object.assign(flow.data, { persona: out.persona, voiceLabel: out.voiceLabel, intro: out.intro });
+      ss.set("sk:introSeen", "");
+      return void pfIntro();
+    }
+    const back = t.closest("[data-pfback]");
+    if (back) {
+      const to = back.dataset.pfback;
+      if (flow.step === undefined || !flow.data) return void (location.href = "/sk");
+      if (phase === "formsent" || (view && view.form && document.querySelector(".formsent"))) {
+        leaveQuietly();
+        view = null;
+        roomId = null;
+        history.pushState(null, "", "/sk");
+      }
+      return void ({ intro: pfIntro, who: pfWho, friends: pfFriends, link: pfLink, when: pfWhen, how: pfHow }[to] || pfIntro)();
+    }
+    const path = t.closest("[data-pfpath]");
+    if (path) {
+      flow.path = path.dataset.pfpath;
+      if (flow.path === "friends") return void pfFriends();
+      if (flow.path === "link") return void pfLink();
+      return void pfWho();
+    }
+    const sq = t.closest("[data-pfsquad]");
+    if (sq) { flow.squad = sq.dataset.pfsquad; flow.path = "squad"; return void pfWho(); }
+    const fr = t.closest("[data-pffriend]");
+    if (fr) {
+      const k = fr.dataset.pffriend;
+      flow.friends = flow.friends.includes(k) ? flow.friends.filter((x) => x !== k) : [...flow.friends, k];
+      pfFocus = false;
+      pfFriends();
+      const again = app.querySelector(`[data-pffriend="${CSS.escape(k)}"]`);
+      if (again) again.focus();
+      return;
+    }
+    const un = t.closest("[data-pfunpick]");
+    if (un) { flow.friends = flow.friends.filter((x) => x !== un.dataset.pfunpick); pfFocus = false; return void pfFriends(); }
+    if (t.closest("#pfNext")) {
+      if (flow.step === "who") return void (flow.path === "friends" ? pfFriends() : flow.path === "link" ? pfLink() : pfWhen());
+      if (flow.step === "friends" || flow.step === "link") return void pfWhen();
+      if (flow.step === "when") return void pfHow();
+    }
+    const night = t.closest(".pf-night");
+    if (night) {
+      const dt = night.dataset.date;
+      if (flow.nights.includes(dt)) flow.nights = flow.nights.filter((x) => x !== dt);
+      else if (flow.nights.length >= 4) return void toast("Pick up to 4 nights.");
+      else flow.nights = [...flow.nights, dt].sort();
+      const y = window.scrollY;
+      pfFocus = false;
+      pfWhen();
+      window.scrollTo(0, y);
+      const again = app.querySelector(`.pf-night[data-date="${dt}"]`);
+      if (again) again.focus({ preventScroll: true });
+      return;
+    }
+    if (t.closest("#pfMark")) return void pfMarkSheet();
+    const how = t.closest("[data-pfhow]");
+    if (how) {
+      flow.how = how.dataset.pfhow;
+      app.querySelectorAll("[data-pfhow]").forEach((b) => { const on = b.dataset.pfhow === flow.how; b.setAttribute("aria-checked", on); b.closest(".pf-opt").classList.toggle("on", on); });
+      document.getElementById("pfStart").textContent = flow.how === "form" ? "Send the form" : "Start the call";
+      return;
+    }
+    if (t.closest("#pfStart")) return void pfLaunch(t.closest("#pfStart"));
+    if (t.closest("#pfPickNow")) { const b = t.closest("#pfPickNow"); pending(b, "Finding picks"); return void send("ask", {}); }
+    if (t.closest("#pfNudge")) {
+      const waiting = (view.expected || []).filter((x) => !x.answered).map((x) => x.name);
+      const msg = `${waiting.length === 1 ? `${waiting[0]}, quick` : "Quick"} one: tap your answers for ${view.crew}'s plan, it takes a minute: ${inviteLink()}`;
+      if (navigator.share) return void navigator.share({ text: msg }).catch(() => {});
+      return void copyText(msg, "Nudge copied. Paste it in the group chat.");
+    }
+  });
+  app.addEventListener("input", (e) => {
+    if (e.target.id !== "pfSearch") return;
+    flow.search = e.target.value;
+    const pos = e.target.selectionStart;
+    pfFocus = false;
+    pfFriends();
+    const s = document.getElementById("pfSearch");
+    s.focus();
+    s.setSelectionRange(pos, pos);
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#pfSheet")) return;
+    if (e.target.closest("[data-pfclose]")) return void pfCloseSheet();
+    const c = e.target.closest("[data-pffree]");
+    if (c) return void c.setAttribute("aria-pressed", c.getAttribute("aria-pressed") !== "true");
+    const sv = e.target.closest("#pfSaveFree");
+    if (sv) pfSaveFree(sv);
+  });
+  document.addEventListener("keydown", (e) => {
+    const sheet = document.getElementById("pfSheet");
+    if (sheet) {
+      if (e.key === "Escape") { e.preventDefault(); pfCloseSheet(); return; }
+      if (e.key === "Tab") {
+        const items = [...sheet.querySelectorAll("button:not([disabled])")];
+        const [a, b] = [items[0], items[items.length - 1]];
+        if (e.shiftKey && document.activeElement === a) { e.preventDefault(); b.focus(); } else if (!e.shiftKey && document.activeElement === b) { e.preventDefault(); a.focus(); }
+      }
+      return;
+    }
+    // The intro on a computer: Enter means Let's plan, Escape means Not now
+    if (flow.step === "intro" && document.getElementById("pfGo") && !e.target.closest("button,input,a")) {
+      if (e.key === "Enter") { e.preventDefault(); document.getElementById("pfGo").click(); }
+      if (e.key === "Escape") { e.preventDefault(); document.getElementById("pfNot").click(); }
+    }
+  });
+  window.matchMedia("(min-width: 900px)").addEventListener("change", () => { if (flow.step === "when" && document.querySelector('.pf[data-step="when"]')) { pfFocus = false; pfWhen(); } else pfOn(document.body.classList.contains("pf-mode")); });
+
   // ---------- 2. Join ----------
   async function joinScreen() {
     let info;
@@ -258,6 +785,7 @@
       </div>`;
     initOrigin();
     const extra = document.getElementById("formExtra");
+    if (info.form) setTimeout(() => { const f = document.getElementById("formMode"); if (f && extra.hidden) f.click(); }); // a form: the questions open straight away
     document.getElementById("formMode").onclick = (e) => {
       if (extra.hidden) {
         extra.hidden = false;
@@ -405,7 +933,15 @@
   });
 
   function render() {
-    const next = view.locked ? "locked" : view.status === "ended" ? "ended" : view.picks ? "picks" : "call";
+    // The planner of a form ("Send everyone a quick form") sees who's answered until the picks are out
+    const next = view.locked ? "locked" : view.status === "ended" ? "ended" : view.picks ? "picks" : view.form && view.me && view.me.planner ? "formsent" : "call";
+    if (next === "formsent") {
+      if (phase !== "formsent") { phase = "formsent"; app.innerHTML = ""; }
+      renderFormSent();
+      if (sheetOpen) renderSheet();
+      return;
+    }
+    if (phase === "formsent") pfOn(false);
     if (view.mode !== lastMode) { lastMode = view.mode; if (phase === next) renderDock(); }
     if (next !== phase) {
       phase = next;
@@ -448,7 +984,10 @@
     const modeTag = view.me.mode === "voice" ? '<span class="tag hot">Live</span>' : `<span class="tag soc">${view.me.mode === "text" ? "Text · mic off" : "Answered by form"}</span>`;
     const pill = view.me.planner && (view.people.length >= 2 || voting()) && (phase === "call" || phase === "picks")
       ? `<button class="pill-hit" id="invitePill" aria-haspopup="dialog" aria-label="Invite people"><span class="pill">${ICON.invite}Invite</span></button>` : "";
-    document.getElementById("top").innerHTML = `<div class="row sb"><div class="row avs">${people}</div><div class="row" style="gap:4px">${pill}${modeTag}</div></div>`;
+    // The people picked in the Plan tab who haven't joined yet
+    const waiting = (view.expected || []).filter((x) => !x.joined && !x.link).map((x) => x.name);
+    const invited = waiting.length ? `<p class="small" id="invitedLine">${view.people.length} checked in · ${esc(waiting.length > 3 ? `${waiting.slice(0, 3).join(", ")} and ${waiting.length - 3} more` : waiting.join(", "))} invited</p>` : "";
+    document.getElementById("top").innerHTML = `<div class="row sb"><div class="row avs">${people}</div><div class="row" style="gap:4px">${pill}${modeTag}</div></div>${invited}`;
   }
 
   function boardHead(extra = "") {
@@ -515,7 +1054,9 @@
   }
   function invitePanel() {
     const practice = STUDY ? `<button class="btn sm out" id="practice" style="width:100%">Add 2 practice friends</button><p class="small">Testing alone? Practice friends join, vote and tap answers like real friends. They're marked as practice and never counted as testers.</p>` : "";
-    return `<div class="priv invite"><p style="font-weight:600">Invite your crew</p><p class="small">Anyone with the link can join from a browser. No app or account needed.</p>${shareHTML()}${practice}</div>`;
+    const names = view && (view.expected || []).filter((x) => !x.joined && !x.link).map((x) => x.name);
+    const to = names && names.length ? `Send it to ${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]}. ` : "";
+    return `<div class="priv invite"><p style="font-weight:600">Invite your crew</p><p class="small">${esc(to)}Anyone with the link can join from a browser. No app or account needed.</p>${shareHTML()}${practice}</div>`;
   }
 
   let sheetOpen = false;
@@ -911,7 +1452,7 @@
       copyText(inviteLink(), "Link copied. Paste it in a Messenger chat.");
       return;
     }
-    if (t.closest("#share")) return void navigator.share({ title: `${view.crew}: help plan our next night`, text: "Help plan our next night! Sidekick's on the call:", url: inviteLink() }).catch(() => {});
+    if (t.closest("#share")) return void navigator.share({ title: `${(view && view.crew) || (flow.data ? crewName() : "The crew")}: help plan our next night`, text: "Help plan our next night! Sidekick's on the call:", url: inviteLink() }).catch(() => {});
     if (t.closest("#ask")) return void send("ask", {});
     if (t.closest("#practice")) { t.closest("#practice").disabled = true; return void studyApi("practice", { room: roomId, p: me.person }).catch((err) => { toast(err.message); renderCall(); }); }
     if (t.closest("#agent")) {
@@ -1437,7 +1978,7 @@
     // is in in-app audio, every phone in it, so remote friends hear Sidekick too
     const plannerReads = view.me.planner && !agent && !agentStarting;
     const remoteReads = Audio.on && !view.me.planner;
-    if (!aloud || !(plannerReads || remoteReads)) return;
+    if (!aloud || !(plannerReads || remoteReads) || (view.form && phase === "formsent")) return;
     const last = view.sidekick.slice(-1)[0];
     if (!last || last.system || last.id === lastRead) return;
     if (lastRead === null && Date.now() - last.at > 15000) { lastRead = last.id; return; } // don't replay old lines after a reload
@@ -1464,7 +2005,7 @@
     bar.innerHTML = `<a href="/study?s=${encodeURIComponent(STUDY)}" style="color:var(--acc);text-decoration:none;min-height:44px;display:flex;align-items:center">&larr; Study checklist</a><span>${STUDY_V === "form" ? "Practice" : `Voice ${esc(STUDY_V)}`}</span>`;
     document.body.insertBefore(bar, app);
   }
-  if (!roomId) startScreen();
-  else if (me && me.person) connect();
+  if (!roomId) (STUDY || params.get("quick") ? startScreen() : flowStart());
+  else if (me && me.person) { if (me.mode === "form") pfOn(true); connect(); }
   else joinScreen();
 })();

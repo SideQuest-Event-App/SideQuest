@@ -140,7 +140,7 @@ const INIT = () => {
   // The planner's start screen, then ONE tap on Start
   let taps = 0;
   async function startCall(page, crew) {
-    await page.goto(`${base}/sk`);
+    await page.goto(`${base}/sk?quick=1`); // the one-page start screen (the Plan tab's steps are in plan-flow.e2e.js)
     await page.fill("#name", "Asia");
     await page.fill("#crew", crew);
     if (!(await page.$('.chips[data-name="nights"] .chip[aria-pressed=true]'))) await page.click('.chips[data-name="nights"] .chip');
