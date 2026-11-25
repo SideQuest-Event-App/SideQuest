@@ -119,6 +119,11 @@
     if (other.open) { const i = document.getElementById("vibeOtherIn"); if (i) i.focus(); }
   });
   document.addEventListener("input", (e) => { if (e.target.id === "vibeOtherIn") other.draft = e.target.value; });
+  // Typing on the call (the keyboard is up): the stage folds away so the card and its text box stay in view
+  const compact = () => { const box = document.querySelector("#body #vibeOtherBox"); document.body.classList.toggle("sk-compact", Boolean((box && !box.hidden) || (document.activeElement && document.activeElement.closest && document.activeElement.closest("#body input")))); };
+  document.addEventListener("click", () => setTimeout(compact));
+  document.addEventListener("focusin", compact);
+  document.addEventListener("focusout", () => setTimeout(compact));
   const picked = (name) => [...app.querySelectorAll(`.chips[data-name="${name}"] .chip[aria-pressed=true]`)].map((c) => c.dataset.value);
 
   // ---------- Starting from: my location by default ----------
@@ -143,6 +148,10 @@
     app.querySelectorAll('.chips[data-name="origin"] .chip').forEach((x) => x.setAttribute("aria-pressed", x.dataset.value === "union"));
     const note = document.getElementById("originNote");
     if (note) { note.textContent = text; note.classList.add("fallback"); }
+    // Step 3 folds the stations under one line: open them, so the note and the choice show
+    const w = document.getElementById("originWrap");
+    if (w) { w.hidden = false; const c = document.getElementById("pfLocChange"); if (c) c.setAttribute("aria-expanded", "true"); }
+    if (typeof locLine === "function") locLine();
   }
   // After the picker is on screen: reading the permission state never shows a prompt
   function initOrigin() {
@@ -250,12 +259,14 @@
     };
   }
 
-  // ---------- 0. The Plan tab: Sidekick first, one step at a time (design TB2-Plan) ----------
-  // Intro (the orb and a greeting in the persona's voice) -> 1 Who's coming? (a squad, SideQuest friends, or a
-  // link) -> 2 When? (who's free each night for three weeks) -> 3 How? (a call, or a quick form) -> the call, or
-  // "Form sent". A progress bar and Back on every step; Back keeps what was picked. Signed out (or the demo
-  // account), the people are the sample friends and squads. /sk?squad=<id> starts with that squad picked.
-  // The one-page start screen is still there for the voice study (/sk?study=) and at /sk?quick=1.
+  // ---------- 0. The Plan tab: the orb grows into the flow, one step at a time (design: approve.html, Plan) ----------
+  // Tap Plan: the orb grows from the tab bar's orb to fill the screen (about 0.6 s), then 1 Who's coming? (a squad,
+  // Sidequesters, or a link) -> 2 Which nights work? (a 3-week calendar: brighter nights mean more of the crew is free)
+  // -> 3 How do you want to decide? (a call, or a quick form) -> the call, or "Form sent". No app tab bar from the first
+  // step until the call ends; a labelled ✕ Exit top right (it asks first once something's been picked) and ‹ back
+  // from step 2. Leaving plays the orb backwards. Signed out (or the demo account), the people are the sample friends
+  // and squads. /sk?squad=<id> starts on step 2 with that squad picked. The voice study and /sk?quick=1 keep the
+  // one-page start screen.
   const PF = {
     back: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
     squad: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0M16 4.5a3.5 3.5 0 0 1 0 7M21 20a6 6 0 0 0-4-5.6"/></svg>',
@@ -263,8 +274,7 @@
     link: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
     check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
     bigcheck: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
-    form: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
-    cal: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>',
+    form: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9"/></svg>',
     share: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 13v7h14v-7"/></svg>',
     search: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg>',
     home: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v9h-5v-6h-6v6H4z"/></svg>',
@@ -275,24 +285,104 @@
     get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { sessionStorage.setItem(k, v); } catch {} },
   };
-  const flow = { step: "intro", data: null, path: null, squad: null, friends: [], search: "", nights: [], how: "call", room: null, voiceAgent: false, crew: "", pick: null, calls: [], deadline: null, noLearn: false };
+  const flow = { step: null, data: null, path: null, squad: null, friends: [], search: "", nights: [], nightsSet: false, how: "call", room: null, voiceAgent: false, crew: "", pick: null, calls: [], deadline: null, noLearn: false, touched: false, reveal: false, tapFree: new Map(), freeTimer: null };
   const userId = () => { try { return localStorage.getItem("sq2.user") || null; } catch { return null; } };
   const wide = () => window.matchMedia("(min-width: 900px)").matches;
+  const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Inside the minimized call's frame (the app opened over a live call): the parent page holds the call
+  const inFrame = (() => { try { return window.parent !== window && Boolean(window.parent.document.getElementById("returnCall")); } catch { return false; } })();
   const pfOn = (on) => {
     if (on) callNav(false);
     document.body.classList.toggle("pf-mode", on);
-    document.documentElement.style.setProperty("--dock-h", on ? (wide() ? "0px" : "76px") : "0px");
+    document.documentElement.style.setProperty("--dock-h", "0px");
   };
 
-  // The app's tabs (a bar on phones, a side list on computers). Each opens that tab in the app.
-  function pfNav() {
+  // Photos: every crew gets one of the app's photos, the same one every time (by its name), in violet duotone
+  const PHOTOS = ["cheers", "beer-garden", "string-lights", "lanterns", "jazz-band", "sax", "performer", "hall", "dragon-boat", "pinwheels"];
+  const crewPhoto = (name) => {
+    let h = 0;
+    for (const c of String(name || "crew").toLowerCase()) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    return `/assets/photos/${PHOTOS[h % PHOTOS.length]}.jpg`;
+  };
+  const photoHTML = (name, cls = "") => `<span class="duo ${cls}" style="background-image:url('${crewPhoto(name)}')" aria-hidden="true"></span>`;
+
+  // ----- The orb transition -----
+  // In: the orb sits where the tab bar's orb was, then grows to fill the screen (0.6 s), and the first step fades in
+  // over it. Out: the step fades, the orb shrinks back into the tab bar, then the app opens. A View Transition where
+  // the browser has one (the orb's transform animates between its two states), else a scaling circle (Web
+  // Animations); transform and opacity only. Reduced motion (and computers, where there's no tab-bar orb): a fade.
+  // window.__skOrb logs each run for the tests.
+  window.__skOrb = window.__skOrb || [];
+  const ORB_MS = 600;
+  function orbEl() {
+    let o = document.getElementById("pfOrbX");
+    if (!o) {
+      o = document.createElement("div");
+      o.id = "pfOrbX";
+      o.className = "pf-orbx";
+      o.setAttribute("aria-hidden", "true");
+      document.body.appendChild(o);
+    }
+    // Big enough to cover the farthest corner from the tab bar's orb (50 px wide, its centre 54 px from the bottom)
+    const cx = innerWidth / 2, cy = innerHeight - 54;
+    o.style.setProperty("--orb-s", String(Math.ceil((2 * Math.hypot(Math.max(cx, innerWidth - cx), Math.max(cy, innerHeight - cy))) / 50 * 1.04)));
+    return o;
+  }
+  const orbMode = () => (reduced() || wide() ? "fade" : document.startViewTransition ? "vt" : "circle");
+  const settle = (p, ms) => Promise.race([Promise.resolve(p).catch(() => {}), new Promise((r) => setTimeout(r, ms))]);
+  async function orbGrow(dir) {
+    const mode = orbMode();
+    const o = orbEl();
+    window.__skOrb.push({ dir, mode, at: Date.now() });
+    o.dataset.mode = mode;
+    o.style.opacity = "1";
+    const big = dir === "in";
+    if (mode === "fade") {
+      o.classList.add("full");
+      await settle(o.animate([{ opacity: big ? 0 : 1 }, { opacity: big ? 1 : 0 }], { duration: 200, easing: "linear", fill: "forwards" }).finished, 400);
+      return mode;
+    }
+    if (!big) { o.classList.add("full"); await settle(o.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, fill: "forwards" }).finished, 300); }
+    if (mode === "vt") {
+      try {
+        const t = document.startViewTransition(() => o.classList.toggle("full", big));
+        await settle(t.finished, ORB_MS + 400);
+      } catch { o.classList.toggle("full", big); }
+    } else {
+      const s = o.style.getPropertyValue("--orb-s");
+      const a = o.animate([{ transform: `scale(${big ? 1 : s})` }, { transform: `scale(${big ? s : 1})` }], { duration: ORB_MS, easing: "cubic-bezier(.65,0,.35,1)", fill: "forwards" });
+      await settle(a.finished, ORB_MS + 300);
+      o.classList.toggle("full", big);
+      a.cancel();
+    }
+    return mode;
+  }
+  // The first step is in: the orb fades away under it
+  function orbDone() {
+    const o = document.getElementById("pfOrbX");
+    if (!o) return;
+    const a = o.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, easing: "linear", fill: "forwards" });
+    settle(a.finished, 500).then(() => o.remove());
+  }
+  // Exit: back where they came from in the app (Discover when there's nowhere to go back to)
+  async function exitPlan() {
+    const card = app.querySelector(".pf");
+    if (card && !reduced()) await settle(card.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 180, fill: "forwards" }).finished, 300);
+    await orbGrow("out");
+    if (document.referrer.startsWith(location.origin) && !/\/sk(\/|$|\?)/.test(new URL(document.referrer).pathname) && history.length > 1) history.back();
+    else { ss.set("sq2.screen", "discover"); location.href = "/"; }
+  }
+  window.addEventListener("pageshow", (e) => { if (e.persisted) { const o = document.getElementById("pfOrbX"); if (o) o.remove(); const c = app.querySelector(".pf"); if (c) c.getAnimations().forEach((a) => a.cancel()); } });
+
+  // The app's tabs: only on the Plan tab's "You're on a call" screen (in the minimized call's frame)
+  function pfNav(live = false) {
     const tabs = [["discover", "Discover", PF.home], ["parties", "Squads", PF.squad.replace(/20/g, "24")], ["plan", "Plan", null], ["questlog", "Sidequests", PF.ticket], ["profile", "Profile", PF.person.replace(/20/g, "24")]];
     return `<nav class="pf-nav" aria-label="SideQuest"><span class="pf-brand" aria-hidden="true">sidequest</span>${tabs.map(([k, label, icon]) => k === "plan"
-      ? `<a class="pf-tab on plan" href="/sk" aria-current="page"><span class="orb pf-tab-orb"></span><span>${label}</span></a>`
+      ? `<a class="pf-tab on plan" href="/sk" aria-current="page"><span class="orb pf-tab-orb"></span><span>${label}</span>${live ? '<i class="pf-livedot" aria-label="On a call"></i>' : ""}</a>`
       : `<a class="pf-tab" href="/" data-screen="${k}">${icon}<span>${label}</span></a>`).join("")}</nav>`;
   }
-  // The same tabs on the call screen, so people can get back to the app (a bar on phones, a side list on
-  // computers). Outside #app, so the call's redraws never touch it. Not in the voice study.
+  // The app's tabs under an ended call's screen are gone (its buttons say where they go). callNav stays for the voice
+  // study's own layout, where it's never shown.
   function callNav(on) {
     let n = document.getElementById("callNav");
     on = Boolean(on) && !STUDY;
@@ -313,14 +403,17 @@
 
   function pfShell(step, inner, cls = "") {
     pfOn(true);
-    app.innerHTML = `<div class="pf" data-step="${step}">${pfNav()}<div class="pf-main"><section class="pf-card ${cls}" aria-labelledby="pfTitle">${inner}</section></div></div>`;
+    const reveal = flow.reveal;
+    flow.reveal = false;
+    app.innerHTML = `<div class="pf${reveal ? " pf-reveal" : ""}" data-step="${step}"><div class="pf-main"><section class="pf-card ${cls}" aria-labelledby="pfTitle">${inner}</section></div></div>`;
     const h = document.getElementById("pfTitle");
     if (h && pfFocus) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }
     pfFocus = true;
     window.scrollTo(0, 0);
   }
   let pfFocus = false;
-  const stepHead = (n, label, backTo) => `<div class="pf-head"><button class="icon-btn pf-back" data-pfback="${backTo}" aria-label="Back">${PF.back}</button><span class="pf-stepl">Step ${n} of 3 · ${label}</span><span class="pf-sp"></span></div>
+  // ‹ back (from step 2, and on step 1's own sub-screens), ✕ Exit always, then the three-part progress bar
+  const stepHead = (n, backTo) => `<div class="pf-head">${backTo ? `<button class="icon-btn pf-back" data-pfback="${backTo}" aria-label="Back">${PF.back}</button>` : '<span class="pf-sp" aria-hidden="true"></span>'}<button class="pf-exit" id="pfExit" aria-haspopup="dialog">✕ Exit</button></div>
     <div class="pf-prog" role="progressbar" aria-label="Step ${n} of 3" aria-valuemin="1" aria-valuemax="3" aria-valuenow="${n}">${[1, 2, 3].map((i) => `<i class="${i <= n ? "on" : ""}"></i>`).join("")}</div>`;
   const pending = (btn, label) => { btn.disabled = true; btn.setAttribute("aria-busy", "true"); btn.dataset.label = btn.innerHTML; btn.classList.add("is-pending"); btn.innerHTML = `${esc(label)}<span class="pend-dots" aria-hidden="true"><i></i><i></i><i></i></span>`; };
   const unpend = (btn) => { btn.disabled = false; btn.removeAttribute("aria-busy"); btn.classList.remove("is-pending"); if (btn.dataset.label) btn.innerHTML = btn.dataset.label; };
@@ -335,13 +428,12 @@
     return [me, ...keys.map((k, i) => d.people[k] && { ...d.people[k], colour: PF_COLOURS[i % PF_COLOURS.length] }).filter(Boolean)];
   }
   const squadName = () => ((flow.data.squads.find((s) => s.id === flow.squad) || {}).name || "");
-  const whoLabel = () => (flow.path === "squad" ? squadName() : flow.path === "friends" ? (flow.friends.length === 1 ? flow.data.people[flow.friends[0]].name : `${flow.friends.length} friends`) : "Link");
   const crewName = () => flow.crew || (flow.path === "squad" ? squadName() : flow.data && flow.data.me.name ? `${flow.data.me.name}'s crew` : "The crew");
   const pfNightOf = (date) => flow.data.nights.find((n) => n.date === date);
   const shortNight = (date) => { const n = pfNightOf(date); return n ? `${n.dow} ${n.day}` : date; };
 
-  // A call that's still live in this tab (minimized, or this page opened again): the Plan tab says so, with Return,
-  // and doesn't offer to start a second call
+  // A call that's still live in this tab (minimized, or this page opened again): the Plan tab goes back to it, and the
+  // minimized call's frame says "You're on a call" (the bar above it has Return)
   const onCall = () => { try { return JSON.parse(ss.get("sk:onCall") || "null"); } catch { return null; } };
   async function liveCall() {
     const oc = onCall();
@@ -355,38 +447,33 @@
   }
   function pfOnCall(oc) {
     flow.step = "oncall";
-    pfShell("oncall", `<div class="pf-intro pf-oncall">
-      <div class="pf-top"><span class="tag pri">Sidekick</span></div>
-      <div class="pf-hero"><span class="orb pf-orb live" aria-hidden="true"></span>
-        <div class="pf-words"><h1 class="pf-hello" id="pfTitle">You're on a call with ${esc(oc.crew)}</h1>
-          <p class="pf-line oc-note">Sidekick is still listening. Head back to finish the plan; you can start a new one once this call ends.</p>
-          <div class="pf-acts"><button class="btn pri" id="pfReturn">Return to the call</button></div></div></div></div>`);
+    pfOn(true);
+    app.innerHTML = `<div class="pf pf-tabs" data-step="oncall">${pfNav(true)}<div class="pf-main"><section class="pf-card pf-oncall" aria-labelledby="pfTitle">
+      <h1 class="pf-big">Plan</h1>
+      <div class="pf-livecard" id="pfLive">${photoHTML(oc.crew)}<span class="pf-livefade" aria-hidden="true"></span>
+        <span class="pf-mono ok">● Live now</span><h2 id="pfTitle">You're on a call with ${esc(oc.crew)}</h2><p class="muted">Sidekick is still listening.</p></div>
+      <p class="small">You can start a new plan once this call ends.</p></section></div></div>`;
   }
-  document.addEventListener("click", (e) => {
-    if (!e.target.closest("#pfReturn")) return;
-    const oc = onCall();
-    // Inside the minimized call's frame: reopen the call underneath; otherwise go to it
-    try { const r = window.parent !== window && window.parent.document.getElementById("returnCall"); if (r) return void r.click(); } catch {}
-    if (oc && oc.rid) location.assign(`/sk/${oc.rid}`);
-  });
 
+  // The orb grows while the plan loads; the first step fades in when both are done
   async function flowStart() {
     const live = await liveCall();
-    if (live) { pfOn(true); return pfOnCall(live); }
+    if (live) {
+      if (inFrame) return pfOnCall(live);
+      return void location.replace(`/sk/${encodeURIComponent(live.rid)}`); // the Plan tab returns to the live call
+    }
     const sq = params.get("squad");
     const free = store.get("sk:free");
-    let persona = params.get("persona") || ss.get("sk:persona");
+    const persona = params.get("persona") || ss.get("sk:persona");
     const q = new URLSearchParams();
     if (userId()) q.set("user", userId());
     if (sq) q.set("squad", sq);
     if (persona) q.set("persona", persona);
     if (store.get("sk:name")) q.set("name", store.get("sk:name"));
     if (Array.isArray(free)) q.set("free", free.join(","));
-    // The loading system: nothing for 300 ms, then a skeleton in the intro's shape
     pfOn(true);
-    app.innerHTML = `<div class="pf" data-step="loading">${pfNav()}<div class="pf-main"><section class="pf-card pf-wait" aria-busy="true"><span class="sr" role="status">Loading your plan…</span>
-      <div class="pf-hero"><span class="sk-orb"></span><span class="sk-line" style="width:55%"></span><span class="sk-line" style="width:80%"></span><span class="sk-line" style="width:65%"></span></div>
-      <span class="sk-btn"></span></section></div></div>`;
+    app.innerHTML = '<span class="sr" role="status">Loading your plan…</span>';
+    const grown = orbGrow("in");
     try {
       const pickId = params.get("pick");
       const [data, nights, pick, calls] = await Promise.all([
@@ -401,72 +488,76 @@
       // "Plan it" from Saved (/sk?pick=<id>): that event's night is picked, and the event is a candidate pick
       if (pick && !pick.past) {
         flow.pick = pick;
-        if (data.nights.some((n) => n.date === pick.date)) flow.nights = [pick.date];
+        if (data.nights.some((n) => n.date === pick.date)) { flow.nights = [pick.date]; flow.nightsSet = true; }
       }
     } catch (err) {
-      app.querySelector(".pf-card").outerHTML = `<section class="pf-card"><h1 id="pfTitle">Couldn't load your plan</h1><p class="muted">Check your connection and try again.</p><button class="btn out" onclick="location.reload()">Try again</button></section>`;
+      await grown;
+      flow.reveal = true;
+      pfShell("error", `<div class="pf-head"><span class="pf-sp" aria-hidden="true"></span><button class="pf-exit" id="pfExit">✕ Exit</button></div>
+        <h1 class="pf-h" id="pfTitle">Couldn't load your plan</h1><p class="muted">Check your connection and try again.</p><div class="pf-foot"><button class="btn pri" onclick="location.reload()">Try again</button></div>`);
+      orbDone();
       return;
     }
     ss.set("sk:persona", flow.data.persona);
     if (flow.data.squad) { flow.path = "squad"; flow.squad = flow.data.squad; }
     if (flow.voiceAgent && agentPref) loadEL().catch(() => {});
-    pfIntro();
+    await grown;
+    flow.reveal = true;
+    if (flow.path === "squad" && sq) pfWhen(); else pfWho();
+    orbDone();
   }
 
-  // ----- Intro: the orb, a greeting with your first name, one question. Not now is always there. -----
-  function pfIntro() {
-    flow.step = "intro";
-    const d = flow.data;
-    const seen = ss.get("sk:introSeen") === "1"; // like Spotify's DJ: the line plays once per visit
-    const parts = d.intro.match(/^(.*?[.!?])\s+(.*)$/) || [null, d.intro, ""];
-    const hello = parts[1];
-    const line = seen ? "" : parts[2];
-    pfShell("intro", `<div class="pf-intro">
-      <div class="pf-top"><span class="tag pri">Sidekick</span><button class="pf-voice" id="pfVoice" aria-label="Voice: ${esc(d.voiceLabel)}. Change the voice">Voice: ${esc(d.voiceLabel)} · <u>change</u></button></div>
-      <div class="pf-hero">
-        <button class="pf-orb-btn" id="pfOrb" aria-label="Hear Sidekick say it"><span class="orb pf-orb ${seen ? "" : "intro"}" id="pfOrbI"></span></button>
-        <div class="pf-words">
-          <h1 class="pf-hello" id="pfTitle">${esc(hello)}</h1>
-          ${line ? `<p class="pf-line" id="pfLine">${esc(line)}</p>` : ""}
-          ${flow.pick ? `<div class="pf-pick" id="pfPick"><span class="small">From your Saved</span><b>${esc(flow.pick.title)}</b><span class="small">${esc([flow.pick.night, flow.pick.where].filter(Boolean).join(" · "))}</span></div>` : ""}
-          <p class="pf-q">${flow.pick ? "Plan a night around it?" : "Ready to start a plan?"}</p>
-          <div class="pf-acts"><button class="btn pri" id="pfGo">${flow.pick ? "Plan around this event" : "Let's plan"}</button><button class="btn out" id="pfNot">Not now</button></div>
-          ${flow.calls.length ? `<p class="small pf-last" id="pfLast">Your last plan: ${esc(flow.calls[0].locked ? flow.calls[0].locked.title : `${flow.calls[0].crew}, no pick locked`)}</p>` : ""}
-        </div>
-      </div></div>`, "intro");
-    ss.set("sk:introSeen", "1");
-    if (!seen) pfSpeak(d.intro, false);
+  // ----- Leave planning? (✕ Exit, once something's been picked) -----
+  function exitSheet() {
+    const s = document.createElement("div");
+    s.id = "exitSheet";
+    s.className = "sheet-wrap";
+    s.innerHTML = `<div class="sheet-scrim" data-exitno></div><div class="sheet-panel end-sheet" role="dialog" aria-modal="true" aria-labelledby="exitT" tabindex="-1">
+      <span class="grab" aria-hidden="true"></span><h2 id="exitT">Leave planning?</h2><p class="muted">Your choices so far won't be saved.</p>
+      <button class="btn pri" id="exitYes">Leave</button><button class="btn quiet" id="exitNo" data-exitno>Keep planning</button></div>`;
+    document.body.appendChild(s);
+    document.getElementById("exitNo").focus();
   }
-  // Spoken when the voice is on and the browser allows it (after a tap); otherwise it's the text and the orb
-  // In the persona's ElevenLabs voice; the phone's own voice only if that can't play
-  function pfSpeak(text, asked) {
-    const orb = document.getElementById("pfOrbI");
-    if (!asked && (!aloud || !(navigator.userActivation && navigator.userActivation.hasBeenActive))) return;
-    const persona = flow.data.persona === "friend" ? "friend" : "concierge";
-    const live = (on) => orb && orb.classList.toggle("live", on);
-    speakLine(text, persona, persona === "friend" ? { slot: "friend", rate: 1.02, pitch: 1.04 } : { slot: "concierge", rate: 0.95, pitch: 1 }, { onstart: () => live(true), onend: () => live(false) });
-    setTimeout(() => live(false), 1500 + text.split(/\s+/).length * 500);
+  function closeExitSheet() {
+    const s = document.getElementById("exitSheet");
+    if (s) s.remove();
+    const b = document.getElementById("pfExit");
+    if (b) b.focus();
   }
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#pfExit")) {
+      if (flow.touched && flow.step !== "formsent") return void exitSheet();
+      return void exitPlan();
+    }
+    if (e.target.closest("#exitYes")) { const s = document.getElementById("exitSheet"); if (s) s.remove(); return void exitPlan(); }
+    if (e.target.closest("[data-exitno]")) return void closeExitSheet();
+  });
 
-  // ----- Step 1: who's coming? A squad, friends on SideQuest, or a link you send yourself -----
+  // ----- Step 1: who's coming? A squad (photo rows), Sidequesters, or a link you send yourself -----
   function pfWho() {
     flow.step = "who";
     const d = flow.data;
     if (!flow.path) flow.path = d.squads.length ? "squad" : null;
     if (flow.path === "squad" && !flow.squad && d.squads.length) flow.squad = d.squads[0].id;
-    const opt = (key, icon, title, sub, extra = "") => {
-      const on = flow.path === key;
-      return `<div class="pf-opt ${on ? "on" : ""}"><button class="pf-opt-b" role="radio" aria-checked="${on}" data-pfpath="${key}">${icon}<span class="pf-opt-t"><b>${title}</b><span class="small">${sub}</span></span><span class="pf-radio" aria-hidden="true"></span></button>${on ? extra : ""}</div>`;
+    const row = (s) => {
+      const on = flow.path === "squad" && flow.squad === s.id;
+      const mem = s.members.map((k) => d.people[k]).filter(Boolean);
+      return `<button class="pf-crew${on ? " on" : ""}" role="radio" aria-checked="${on}" data-pfsquad="${esc(s.id)}">${photoHTML(s.name)}<span class="pf-crewfade" aria-hidden="true"></span>
+        <span class="stk" aria-hidden="true">${mem.slice(0, 3).map((p, i) => `<span class="av ${PF_COLOURS[i % PF_COLOURS.length]}">${esc(p.initial)}</span>`).join("")}</span>
+        <span class="pf-opt-t"><b>${esc(s.name)}</b><span class="small">${mem.length + 1} people</span></span><span class="pf-radio" aria-hidden="true"></span></button>`;
     };
-    const chips = d.squads.length ? `<div class="pf-chips" role="radiogroup" aria-label="Squads">${d.squads.map((s) => `<button class="chip" role="radio" data-pfsquad="${esc(s.id)}" aria-checked="${s.id === flow.squad}" aria-pressed="${s.id === flow.squad}">${esc(s.name)}</button>`).join("")}</div>` : "";
-    const ready = flow.path === "squad" ? Boolean(flow.squad) : Boolean(flow.path);
-    pfShell("who", `${stepHead(1, "Who", "intro")}<h1 id="pfTitle">Who's coming?</h1>
+    const picked = flow.path === "friends" && flow.friends.length ? flow.friends.map((k) => d.people[k] && d.people[k].name).filter(Boolean).join(", ") : "";
+    const card = (key, icon, title, sub) => `<button class="pf-opt${flow.path === key ? " on" : ""}" role="radio" aria-checked="${flow.path === key}" data-pfpath="${key}"><span class="pf-ib" aria-hidden="true">${icon}</span><span class="pf-opt-t"><b>${title}</b><span class="small">${sub}</span></span></button>`;
+    const ready = flow.path === "squad" ? Boolean(flow.squad) : flow.path === "friends" ? flow.friends.length > 0 : Boolean(flow.path);
+    const around = flow.pick ? `<div class="pf-pick" id="pfPick"><span class="small">Planning around your Saved</span><b>${esc(flow.pick.title)}</b><span class="small">${esc([flow.pick.night, flow.pick.where].filter(Boolean).join(" · "))}</span></div>` : "";
+    pfShell("who", `${stepHead(1, null)}<h1 class="pf-h" id="pfTitle">Who's coming?</h1>${around}
       <div class="pf-opts" role="radiogroup" aria-label="Who's coming">
-        ${d.squads.length ? opt("squad", `<span class="pf-thumb v">${PF.squad}</span>`, "A squad", "Everyone in it, already set up", chips) : ""}
-        ${opt("friends", `<span class="pf-thumb t">${PF.person}</span>`, "Pick friends on SideQuest", flow.path === "friends" && flow.friends.length ? esc(flow.friends.map((k) => d.people[k] && d.people[k].name).filter(Boolean).join(", ")) : "Choose people one by one")}
-        ${opt("link", `<span class="pf-thumb n">${PF.link}</span>`, "I'll send them a link myself", "For anyone, in or out of the app")}
+        ${d.squads.map(row).join("")}
+        ${card("friends", PF.person, "Pick Sidequesters", picked ? esc(picked) : "Choose people one by one")}
+        ${card("link", PF.link, "Send a link", "Anyone, in or out of the app")}
       </div>
-      <div class="pf-foot"><button class="btn pri" id="pfNext" ${ready ? "" : "disabled"}>Next: when?</button></div>`);
+      ${flow.calls.length ? `<p class="small pf-last" id="pfLast">Your last plan: ${esc(flow.calls[0].locked ? flow.calls[0].locked.title : `${flow.calls[0].crew}, no pick locked`)}</p>` : ""}
+      <div class="pf-foot"><button class="btn pri" id="pfNext" ${ready ? "" : "disabled"}>Next: which nights</button></div>`);
   }
 
   function pfFriends() {
@@ -475,20 +566,20 @@
     const s = flow.search.trim().toLowerCase();
     const list = d.friends.filter((k) => !s || d.people[k].full.toLowerCase().includes(s) || d.people[k].name.toLowerCase().includes(s));
     const picked = flow.friends.filter((k) => d.people[k]);
-    const rows = list.map((k, i) => {
+    const rows = list.map((k) => {
       const p = d.people[k];
       const on = picked.includes(k);
       return `<button class="pf-frow" role="checkbox" aria-checked="${on}" data-pffriend="${esc(k)}"><span class="av ${PF_COLOURS[d.friends.indexOf(k) % PF_COLOURS.length]}" aria-hidden="true">${esc(p.initial)}</span><span class="grow">${esc(p.full)}</span><span class="pf-box" aria-hidden="true">${on ? PF.check : ""}</span></button>`;
     }).join("");
     const empty = !d.friends.length
-      ? `<div class="pf-empty"><p style="font-weight:600">No SideQuest friends yet</p><p class="small">Add friends in Squads, or send a link to anyone instead.</p><button class="btn out sm" data-pfpath="link">Send a link instead</button></div>`
-      : !list.length ? `<p class="small">Nobody called "${esc(flow.search)}" in your SideQuest friends.</p>` : "";
-    pfShell("friends", `${stepHead(1, "Who", "who")}<h1 id="pfTitle">Pick friends</h1>
-      ${d.friends.length ? `<label class="pf-search"><span class="sr">Search your SideQuest friends</span>${PF.search}<input id="pfSearch" type="search" placeholder="Search your SideQuest friends" value="${esc(flow.search)}" autocomplete="off"></label>` : ""}
+      ? `<div class="pf-empty"><p style="font-weight:600">No Sidequesters yet</p><p class="small">Add people in Profile, or send a link to anyone instead.</p><button class="btn out sm" data-pfpath="link">Send a link instead</button></div>`
+      : !list.length ? `<p class="small">Nobody called "${esc(flow.search)}" in your Sidequesters.</p>` : "";
+    pfShell("friends", `${stepHead(1, "who")}<h1 class="pf-h" id="pfTitle">Pick Sidequesters</h1>
+      ${d.friends.length ? `<label class="pf-search"><span class="sr">Search your Sidequesters</span>${PF.search}<input id="pfSearch" type="search" placeholder="Search your Sidequesters" value="${esc(flow.search)}" autocomplete="off"></label>` : ""}
       <div class="pf-chips" id="pfPicked" aria-label="Picked">${picked.map((k) => `<button class="chip" aria-pressed="true" data-pfunpick="${esc(k)}" aria-label="Remove ${esc(d.people[k].name)}">${esc(d.people[k].name)} ${ICON.x}</button>`).join("")}</div>
       <div class="pf-flist" id="pfFlist">${rows}</div>${empty}
-      ${d.friends.length ? '<p class="small">Only friends in SideQuest are listed, so everyone here can share free nights.</p>' : ""}
-      <div class="pf-foot"><button class="btn pri" id="pfNext" ${picked.length ? "" : "disabled"}>Next: when?${picked.length ? ` · ${picked.length} friend${picked.length === 1 ? "" : "s"}` : ""}</button></div>`);
+      ${d.friends.length ? '<p class="small">Only people on SideQuest are listed, so everyone here can share free nights.</p>' : ""}
+      <div class="pf-foot"><button class="btn pri" id="pfNext" ${picked.length ? "" : "disabled"}>Next: which nights${picked.length ? ` · ${picked.length}` : ""}</button></div>`);
   }
 
   // The link path makes the room now, so the link is real; the next steps change its nights
@@ -496,7 +587,7 @@
     const d = flow.data;
     const members = pfPeople().slice(1).map((p) => p.name);
     const body = { nights: flow.nights.length ? flow.nights : undefined, members, crew: crewName(), noLearn: flow.noLearn, pick: flow.pick ? flow.pick.id : undefined, deadline: form && flow.deadline ? flow.deadline : undefined };
-    // Friends picked in the app hear about it in SideQuest once the plan or form is sent (held in their quiet hours)
+    // People picked in the app hear about it in SideQuest once the plan or form is sent (held in their quiet hours)
     if (send) body.invite = pfPeople().slice(1).map((p) => p.key);
     // Reuse the room made for the link (or for a form sent before Back), unless it's a form and this is a call
     const reuse = flow.room && (flow.room.form === Boolean(form) || (form && !flow.room.form && !flow.room.started));
@@ -512,11 +603,11 @@
   }
   async function pfLink() {
     flow.step = "link";
-    pfShell("link", `${stepHead(1, "Who", "who")}<h1 id="pfTitle">Send your own link</h1>
-      <p class="muted">Paste it in your group chat. Anyone who opens it can join, no account needed.</p>
+    pfShell("link", `${stepHead(1, "who")}<h1 class="pf-h" id="pfTitle">Send your own link</h1>
+      <p class="muted">Paste it in your group chat. Anyone who opens it can join, no app or account needed.</p>
       <div class="pf-box-card" id="pfShare"><span class="small">Your plan link</span><div class="pf-wait"><span class="sk-line" style="width:70%;height:48px"></span><span class="sk-line" style="height:44px"></span></div></div>
       <div class="pf-note"><span class="orb"></span><p class="small">People who join this way show as <b>unknown</b> on the calendar until they answer.</p></div>
-      <div class="pf-foot"><button class="btn pri" id="pfNext">Next: when?</button></div>`);
+      <div class="pf-foot"><button class="btn pri" id="pfNext">Next: which nights</button></div>`);
     try {
       const r = await ensureRoom(false);
       roomId = r.room;
@@ -527,7 +618,10 @@
     }
   }
 
-  // ----- Step 2: when? Who's free each night for the next three weeks -----
+  // ----- Step 2: which nights work? A calendar of the window (today and the next 20 days) -----
+  // Each night's brightness steps through the violet tints by how many of the crew are free, with a dot in each
+  // free friend's colour. Tapping a night picks it and marks it free for you too (saved to your account, or this
+  // phone when signed out). Friends share free or not, never why.
   function nightInfo(n, people) {
     const st = people.map((p) => ({ p, s: (p.avail && p.avail.nights && p.avail.nights[n.date]) || "unset" }));
     const free = st.filter((x) => x.s === "free");
@@ -536,9 +630,9 @@
     return { st, free, unset, all };
   }
   const STATE_WORD = { free: "free", busy: "busy", unset: "not set" };
-  function nightLabelFull(n, info) {
+  function nightLabelFull(n, info, on) {
     const who = info.st.map((x) => `${x.p.key === "me" ? "you" : x.p.name}: ${STATE_WORD[x.s]}`).join(", ");
-    return `${n.label}. ${info.free.length} of ${info.st.length} free${info.all ? ", everyone free" : ""}. ${who}. Link guests: unknown. ${n.events} event${n.events === 1 ? "" : "s"} that night.`;
+    return `${n.label}${on ? ", picked" : ""}. ${info.free.length} of ${info.st.length} free${info.all ? ", everyone free" : ""}. ${who}. Link guests: unknown. ${n.events} event${n.events === 1 ? "" : "s"} that night.`;
   }
   function defaultNights(people) {
     const list = flow.data.nights.map((n) => ({ n, i: nightInfo(n, people) }));
@@ -548,122 +642,98 @@
     const best = week.sort((a, b) => b.n.events - a.n.events)[0] || list.slice().sort((a, b) => b.i.free.length - a.i.free.length || b.n.events - a.n.events)[0];
     return best ? [best.n.date] : [];
   }
+  // 0 = nobody else free, 3 = every friend free
+  const freeLevel = (f, n) => (!f || !n ? 0 : f >= n ? 3 : f / n >= 0.5 ? 2 : 1);
+  const addDaysISO = (iso, k) => { const x = new Date(`${iso}T12:00:00`); x.setDate(x.getDate() + k); return x; };
+  const dayList = (dates) => { const s = dates.map(shortNight); return s.length > 1 ? `${s.slice(0, -1).join(", ")} & ${s[s.length - 1]}` : s[0] || ""; };
   function pfWhen() {
     flow.step = "when";
     const d = flow.data;
     const people = pfPeople();
-    if (!flow.nights.length) flow.nights = defaultNights(people);
+    const friends = people.slice(1);
+    if (!flow.nightsSet && !flow.nights.length) flow.nights = defaultNights(people);
+    flow.nightsSet = true;
     const backTo = flow.path === "friends" ? "friends" : flow.path === "link" ? "link" : "who";
-    const dot = (p) => `<span class="av xs ${p.colour}" aria-hidden="true">${esc(p.initial)}</span>`;
-    const unk = '<span class="av xs unk" aria-hidden="true">?</span>';
     const sel = flow.nights;
-    const next = sel.length ? `Next: how to decide · ${shortNight(sel[0])}${sel.length > 1 ? ` +${sel.length - 1}` : ""}` : "Pick a night";
-    const legend = `<div class="pf-legend" aria-hidden="true">${people.map((p) => `<span class="row" style="gap:4px"><i class="pf-dot ${p.colour}"></i>${esc(p.key === "me" ? "You" : p.name)}${p.avail && !p.avail.set ? " (not set)" : ""}</span>`).join("")}<span class="row" style="gap:4px"><i class="pf-dot unkd"></i>Link guests ?</span></div>`;
-    const summary = `<div class="pf-sum">${flow.path === "link" ? '<span class="tag soc">Link</span>' : `<span class="tag pri">${esc(whoLabel())}</span>`}<span class="small">+ anyone via link, <b>?</b> unknown</span></div>`;
-    const markBtn = `<button class="btn out sm pf-mark" id="pfMark">${PF.cal}Mark your free nights</button>`;
-    let body;
-    if (wide()) {
-      // A calendar: Monday to Sunday, the window's weeks, dots for who's free, the everyone-free nights lit
-      const first = d.nights[0];
-      const lead = (["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(first.dow) + 7) % 7;
-      const cells = [...Array(lead).fill(null), ...d.nights];
-      while (cells.length % 7) cells.push(null);
-      const focus = pfNightOf(sel[0]) || d.nights[0];
-      const fi = nightInfo(focus, people);
-      body = `<div class="pf-cal-wrap"><div class="pf-cal" role="group" aria-label="Nights in the next three weeks">${["M", "T", "W", "T", "F", "S", "S"].map((x) => `<span class="pf-cal-h" aria-hidden="true">${x}</span>`).join("")}
-        ${cells.map((n) => {
-          if (!n) return '<span class="pf-cell blank" aria-hidden="true"></span>';
-          const i = nightInfo(n, people);
-          return `<button class="pf-cell pf-night ${i.all ? "all" : ""}" data-date="${n.date}" data-all="${i.all ? 1 : 0}" aria-pressed="${sel.includes(n.date)}" aria-label="${esc(nightLabelFull(n, i))}"><span class="pf-cd">${n.day === 1 || n === d.nights[0] ? `${n.mon} ` : ""}${n.day}</span><span class="pf-dots">${i.free.map((x) => `<i class="pf-dot ${x.p.colour}"></i>`).join("")}${i.unset.map(() => '<i class="pf-dot unset"></i>').join("")}<i class="pf-dot unkd"></i></span><span class="pf-ev">${n.events} event${n.events === 1 ? "" : "s"}</span></button>`;
-        }).join("")}</div>
-        <aside class="pf-side" aria-live="polite"><b>${esc(focus.label)}</b>${fi.all ? '<span class="tag soc" style="align-self:flex-start">Everyone free</span>' : ""}
-          <p class="small" style="color:var(--t2)">${fi.free.length} of ${fi.st.length} free · ${focus.events} events that night.</p>
-          <ul class="pf-who">${fi.st.map((x) => `<li><span class="av xs ${x.p.colour}" aria-hidden="true">${esc(x.p.initial)}</span>${esc(x.p.key === "me" ? "You" : x.p.name)}<span class="pf-st ${x.s}">${STATE_WORD[x.s]}</span></li>`).join("")}<li><span class="av xs unk" aria-hidden="true">?</span>Link guests<span class="pf-st unset">unknown</span></li></ul>
-          ${sel.length > 1 ? `<p class="small">Also picked: ${esc(sel.slice(1).map(shortNight).join(", "))}</p>` : ""}
-          ${markBtn}
-          <button class="btn pri" id="pfNext" ${sel.length ? "" : "disabled"}>${esc(next)}</button></aside></div>`;
-      pfShell("when", `${stepHead(2, "When", backTo)}<div class="pf-whenh"><h1 id="pfTitle">When?</h1>${legend}</div>${summary}${body}<p class="small">Tap one night or more (up to 4). Friends share free or not, never why.</p>`, "wide");
-      return;
+    const first = d.nights[0];
+    const last = d.nights[d.nights.length - 1];
+    const lead = (["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(first.dow) + 7) % 7;
+    const past = Array.from({ length: lead }, (_, i) => `<span class="n past" aria-hidden="true">${addDaysISO(first.date, i - lead).getDate()}</span>`);
+    const tail = (7 - ((lead + d.nights.length) % 7)) % 7;
+    const after = Array.from({ length: tail }, (_, i) => `<span class="n out" aria-hidden="true">${addDaysISO(last.date, i + 1).getDate()}</span>`);
+    const cells = d.nights.map((n) => {
+      const i = nightInfo(n, people);
+      const f = i.free.filter((x) => x.p.key !== "me");
+      const on = sel.includes(n.date);
+      return `<button class="n pf-night l${freeLevel(f.length, friends.length)}${on ? " sel" : ""}${n === first ? " today" : ""}" data-date="${n.date}" data-free="${f.length}" data-all="${i.all ? 1 : 0}" aria-pressed="${on}" aria-label="${esc(nightLabelFull(n, i, on))}"><span class="n-d">${n.day}</span><span class="fs" aria-hidden="true">${f.map((x) => `<i class="${x.p.colour}"></i>`).join("")}</span></button>`;
+    });
+    const crew = flow.path === "squad" ? squadName() : flow.path === "friends" ? "your crew" : "";
+    const lede = flow.path === "link" ? "It's just you so far: people who join by the link show up as they answer." : `Brighter nights mean more of ${esc(crew)} is free.`;
+    let sum = '<span class="muted">Tap the nights that could work.</span>';
+    if (sel.length) {
+      const infos = sel.map((dt) => nightInfo(pfNightOf(dt), people));
+      const counts = infos.map((x) => x.free.length);
+      const lo = Math.min(...counts), hi = Math.max(...counts);
+      const right = people.length < 2 ? "" : infos.every((x) => x.all) ? "all free" : `${lo === hi ? lo : `${lo}–${hi}`} of ${people.length} free`;
+      const things = sel.reduce((n, dt) => n + ((pfNightOf(dt) || {}).events || 0), 0);
+      sum = `<div class="pf-sumrow"><b>${esc(dayList(sel))}</b>${right ? `<span class="pf-mono${right === "all free" ? " ok" : ""}" id="pfFreeN">${right}</span>` : ""}</div><span class="muted small">${things} thing${things === 1 ? "" : "s"} on ${sel.length > 1 ? "those nights" : "that night"}</span>`;
     }
-    // Phones: the nights as a list, a week at a time
-    const weekOf = (n) => Math.floor((d.nights.indexOf(n) + ((["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(d.nights[0].dow) + 7) % 7)) / 7);
-    const groups = [];
-    for (const n of d.nights) { const w = weekOf(n); (groups[w] = groups[w] || []).push(n); }
-    body = groups.map((g, w) => `<div class="pf-week"><p class="pf-weekh">${w === 0 ? "This week" : w === 1 ? "Next week" : `Week of ${g[0].mon} ${g[0].day}`}</p>
-      ${g.map((n) => {
-        const i = nightInfo(n, people);
-        return `<button class="pf-night pf-row ${i.all ? "all" : ""}" data-date="${n.date}" data-all="${i.all ? 1 : 0}" aria-pressed="${sel.includes(n.date)}" aria-label="${esc(nightLabelFull(n, i))}">
-          <span class="pf-date"><span class="small">${n.dow}</span><b>${n.day}</b></span>
-          <span class="pf-nmid"><span class="row" style="gap:6px"><span class="stk">${i.free.map((x) => dot(x.p)).join("")}${i.unset.map((x) => `<span class="av xs ${x.p.colour} unset" aria-hidden="true">${esc(x.p.initial)}</span>`).join("")}${unk}</span><span class="pf-cnt">${i.free.length} of ${i.st.length} free${i.unset.length ? ` · ${i.unset.length} not set` : ""}</span></span><span class="small">${n.events} event${n.events === 1 ? "" : "s"} that night</span></span>
-          ${i.all ? '<span class="tag soc">Everyone free</span>' : ""}</button>`;
-      }).join("")}</div>`).join("");
-    pfShell("when", `${stepHead(2, "When", backTo)}<h1 id="pfTitle">When?</h1>${summary}<div class="pf-tools">${markBtn}</div>${legend}<div class="pf-nights">${body}</div>
-      <p class="small">Tap one night or more (up to 4). Friends share free or not, never why.</p>
-      <div class="pf-foot"><button class="btn pri" id="pfNext" ${sel.length ? "" : "disabled"}>${esc(next)}</button></div>`);
+    const month = first.mon === last.mon ? first.mon : `${first.mon} – ${last.mon}`;
+    pfShell("when", `${stepHead(2, backTo)}<h1 class="pf-h" id="pfTitle">Which nights work?</h1><p class="muted pf-lede">${lede}</p>
+      <div class="pf-calwrap"><p class="pf-mono pf-month" aria-hidden="true">${esc(month)}</p>
+      <div class="cal" role="group" aria-label="Nights in the next three weeks">${["M", "T", "W", "T", "F", "S", "S"].map((x) => `<span class="dw" aria-hidden="true">${x}</span>`).join("")}${[...past, ...cells, ...after].join("")}</div></div>
+      <div class="pf-sumcard" id="pfSum" aria-live="polite">${sum}</div>
+      <p class="small">Tapping a night marks you free too. Friends share free or not, never why.${d.signedIn ? "" : " Signed out, your nights stay on this phone."}</p>
+      <div class="pf-foot"><button class="btn pri" id="pfNext" ${sel.length ? "" : "disabled"}>Next: how to decide</button></div>`, "when");
   }
-
-  // Mark your free nights: a sheet with the window's nights. Busy (already going) nights can't be marked free.
-  function pfMarkSheet() {
+  // A picked night is free for you too; un-picking it puts back what it was before the tap
+  function markMine(date, on) {
     const d = flow.data;
-    const nights = d.mine.nights;
-    const free = new Set(Object.keys(nights).filter((k) => nights[k] === "free"));
-    const going = new Set(d.signedIn ? (d.goingNights || []) : []);
-    const s = document.createElement("div");
-    s.id = "pfSheet";
-    s.className = "sheet-wrap";
-    s.innerHTML = `<div class="sheet-scrim" data-pfclose></div><div class="sheet-panel pf-sheet" role="dialog" aria-modal="true" aria-labelledby="pfSheetT" tabindex="-1">
-      <div class="row sb"><h2 id="pfSheetT">Mark your free nights</h2><button class="icon-btn" data-pfclose aria-label="Close">${ICON.x}</button></div>
-      <p class="small" style="color:var(--t2)">Tap the nights you're free. Friends only see free or busy, never why.${d.signedIn ? "" : " Sign in to keep them on your account; for now they stay on this phone."}</p>
-      <div class="pf-markgrid" role="group" aria-label="Your free nights">${d.nights.map((n) => `<button class="chip pf-mchip" data-pffree="${n.date}" aria-pressed="${free.has(n.date)}" ${going.has(n.date) ? "disabled" : ""}><span>${n.dow}</span> ${n.mon} ${n.day}</button>`).join("")}</div>
-      <div class="row"><button class="btn out" data-pfclose style="flex:1">Cancel</button><button class="btn pri" id="pfSaveFree" style="flex:1">Save free nights</button></div></div>`;
-    document.body.appendChild(s);
-    s.querySelector(".sheet-panel").focus();
+    if ((d.goingNights || []).includes(date)) return; // you're already going out that night: it stays busy
+    if (on) {
+      if (d.mine.nights[date] === "free") return;
+      flow.tapFree.set(date, d.mine.nights[date] || "unset");
+      d.mine.nights[date] = "free";
+    } else if (flow.tapFree.has(date)) {
+      d.mine.nights[date] = flow.tapFree.get(date);
+      flow.tapFree.delete(date);
+    } else return;
+    d.mine.set = true;
+    clearTimeout(flow.freeTimer);
+    flow.freeTimer = setTimeout(saveMine, 300);
   }
-  async function pfSaveFree(btn) {
+  async function saveMine() {
     const d = flow.data;
-    const free = [...document.querySelectorAll("#pfSheet [data-pffree][aria-pressed=true]")].map((b) => b.dataset.pffree);
-    pending(btn, "Saving");
-    try {
-      if (d.signedIn) {
-        const out = await api("/api/sk/plan/free", { user: userId(), free });
-        d.mine = out.mine;
-      } else {
-        store.set("sk:free", free);
-        d.mine = { set: true, nights: Object.fromEntries(d.nights.map((n) => [n.date, free.includes(n.date) ? "free" : "busy"])) };
-      }
-      pfCloseSheet();
-      toast(d.signedIn ? "Saved. Friends now see your free nights." : "Saved on this phone.");
-      pfWhen();
-    } catch (err) {
-      unpend(btn);
-      toast(err.message);
-    }
-  }
-  function pfCloseSheet() {
-    const s = document.getElementById("pfSheet");
-    if (s) s.remove();
-    const m = document.getElementById("pfMark");
-    if (m) m.focus();
+    const free = Object.keys(d.mine.nights).filter((k) => d.mine.nights[k] === "free");
+    if (d.signedIn) await api("/api/sk/plan/free", { user: userId(), free }).catch((err) => toast(err.message));
+    else store.set("sk:free", free);
   }
 
   // ----- Step 3: how do you want to decide? A call with Sidekick, or a quick form -----
+  // Starting from: live location by default, one line ("📍 Starting near you · change"); change opens the stations
   function pfHow() {
     flow.step = "how";
     const d = flow.data;
-    const opt = (key, icon, title, sub) => `<div class="pf-opt ${flow.how === key ? "on" : ""}"><button class="pf-opt-b" role="radio" aria-checked="${flow.how === key}" data-pfhow="${key}">${icon}<span class="pf-opt-t"><b>${title}</b><span class="small">${sub}</span></span><span class="pf-radio" aria-hidden="true"></span></button></div>`;
-    const chips = `<div class="pf-sum">${flow.path === "link" ? '<span class="tag soc">Link</span>' : `<span class="tag pri">${esc(whoLabel())}</span>`}${flow.nights.map((x) => `<span class="tag pf-tn">${esc(shortNight(x))}</span>`).join("")}${flow.pick ? `<span class="tag soc pf-around">Around: ${esc(flow.pick.title.length > 28 ? `${flow.pick.title.slice(0, 27)}…` : flow.pick.title)}</span>` : ""}</div>`;
-    const askName = !d.me.name ? `<label class="f">Your name<input class="in" id="pfName" autocomplete="given-name" maxlength="24" value="${esc(store.get("sk:name") || "")}"></label>` : "";
-    pfShell("how", `${stepHead(3, "How", "when")}<h1 id="pfTitle">How do you want to decide?</h1>${chips}
+    const opt = (key, icon, title, sub) => `<button class="pf-opt pf-how${flow.how === key ? " on" : ""}" role="radio" aria-checked="${flow.how === key}" data-pfhow="${key}">${icon}<span class="pf-opt-t"><b>${title}</b><span class="small">${sub}</span></span></button>`;
+    const askName = !d.me.name ? `<label class="f">Your first name<input class="in" id="pfName" autocomplete="given-name" maxlength="24" value="${esc(store.get("sk:name") || "")}"></label>` : "";
+    pfShell("how", `${stepHead(3, "when")}<h1 class="pf-h" id="pfTitle">How do you want to decide?</h1>
       <div class="pf-opts" role="radiogroup" aria-label="How to decide">
-        ${opt("call", '<span class="orb pf-optorb"></span>', "Hop on a call with Sidekick", "About 5 minutes. Sidekick listens, keeps track and suggests two picks.")}
-        ${opt("form", `<span class="pf-thumb t">${PF.form}</span>`, "Send everyone a quick form", "The same questions by tap. Sidekick picks once everyone answers.")}
+        ${opt("call", '<span class="orb pf-optorb"></span>', "Hop on a call with Sidekick", "About 5 min. Sidekick listens and suggests two picks.")}
+        ${opt("form", `<span class="pf-ib" aria-hidden="true">${PF.form}</span>`, "Send a quick form", "Same questions by tap. Sidekick picks once everyone answers.")}
       </div>
       ${flow.how === "form" ? decideByHTML() : ""}
-      <p class="small">Private questions (like budget) are asked one to one. The group only sees one limit, never whose.</p>
-      <button class="pf-switch" id="pfLearn" role="switch" aria-checked="${flow.noLearn}"><span class="pf-opt-t"><b>Don't learn from this plan</b><span class="small">Picks, votes and the final plan won't change your taste.</span></span><span class="osw-k" aria-hidden="true"></span></button>
-      ${askName}${originPicker()}
-      <div class="pf-foot"><button class="btn pri" id="pfStart">${flow.how === "form" ? "Send the form" : "Start the call"}</button></div>`);
+      ${askName}
+      <p class="pf-loc"><span id="pfLocT">📍 ${HAS_GEO ? "Starting near you" : "Starting from Union"}</span><span aria-hidden="true">·</span><button class="pf-change" id="pfLocChange" aria-expanded="false" aria-controls="originWrap">change</button></p>
+      <div id="originWrap" hidden>${originPicker()}</div>
+      <div class="pf-foot"><button class="btn pri" id="pfStart">${flow.how === "form" ? "Send the form" : "Start the call"}</button></div>`, "how");
     initOrigin();
+  }
+  // The one line follows the choice: "Starting near you" or "Starting from Finch"
+  function locLine() {
+    const t = document.getElementById("pfLocT");
+    if (!t) return;
+    const v = picked("origin")[0];
+    t.textContent = `📍 ${v === "here" || !v ? "Starting near you" : `Starting from ${(PRIVATE_OPTS.origin.find(([k]) => k === v) || [, "Union"])[1]}`}`;
   }
 
   // "Decide by" on the form path: the form closes then, and Sidekick picks with the answers it has
@@ -688,7 +758,6 @@
       <p class="small">The form closes then and Sidekick picks with the answers it has.</p></div>`;
   }
   async function pfLaunch(btn) {
-    const d = flow.data;
     const nameIn = document.getElementById("pfName");
     if (nameIn && !nameIn.value.trim()) { nameIn.focus(); return toast("Add your name so your crew knows who's planning."); }
     if (nameIn) store.set("sk:name", nameIn.value.trim());
@@ -729,8 +798,9 @@
     const waiting = rows.filter((x) => !x.answered);
     const first = view.nights[0] || "";
     const card = document.querySelector(".pf-card.formsent");
-    const html = `<div class="pf-head"><button class="icon-btn pf-back" data-pfback="how" aria-label="Back">${PF.back}</button><b class="pf-title2">Form sent</b><button class="icon-btn" id="invitePill" aria-label="Share the form link">${PF.share}</button></div>
-      <div class="pf-sent"><span class="pf-okc">${PF.bigcheck}</span><h1 id="pfTitle" aria-live="polite">${done} of ${rows.length} answered</h1><p class="muted">${view.closed ? "The form has closed. Sidekick is picking with the answers it has." : "Sidekick picks when everyone's in."}</p><span class="row" style="gap:6px;flex-wrap:wrap;justify-content:center">${first ? `<span class="tag hot">For ${esc(first)}</span>` : ""}${view.deadline ? `<span class="tag hot" id="closesTag">${view.closed ? "Closed" : `Closes ${esc(closesLabel(view.deadline))}`}</span>` : ""}</span></div>
+    flow.step = "formsent";
+    const html = `${stepHead(3, "how").replace(/<div class="pf-prog"[\s\S]*$/, "")}
+      <div class="pf-sent"><span class="pf-okc">${PF.bigcheck}</span><h1 class="pf-h" id="pfTitle" aria-live="polite">${done} of ${rows.length} answered</h1><p class="muted">${view.closed ? "The form has closed. Sidekick is picking with the answers it has." : "Sidekick picks when everyone's in."}</p><span class="row" style="gap:6px;flex-wrap:wrap;justify-content:center">${first ? `<span class="tag hot">For ${esc(first)}</span>` : ""}${view.deadline ? `<span class="tag hot" id="closesTag">${view.closed ? "Closed" : `Closes ${esc(closesLabel(view.deadline))}`}</span>` : ""}</span></div>
       <ul class="pf-ans" aria-label="Who's answered">${rows.map((x, i) => `<li><span class="av ${x.me ? "c0" : x.link && !x.answered ? "unk" : PF_COLOURS[i % PF_COLOURS.length]}" aria-hidden="true">${esc(x.me ? (view.me.name || "Y").charAt(0).toUpperCase() : x.name.charAt(0).toUpperCase())}</span><span class="grow">${esc(x.name)}${x.link ? ' <span class="small">(via link)</span>' : ""}</span><span class="tag ${x.answered ? "ok" : "pf-tn"}">${x.answered ? "Answered" : "Not yet"}</span></li>`).join("")}</ul>
       <div class="pf-acts2">${waiting.length ? `<button class="btn sm pf-v" id="pfNudge">Nudge ${esc(waiting.length === 1 ? waiting[0].name : `${waiting.length} people`)}</button>` : ""}<button class="btn out sm" id="pfPickNow" ${done >= 2 ? "" : "disabled"}>Pick now with ${done}</button></div>
       <div class="pf-box-card"><span class="small">Send the form link to the group</span>${shareHTML()}</div>`;
@@ -741,51 +811,44 @@
   }
 
   // Taps in the steps
+  const pfRedraw = (fn, sel) => {
+    const y = window.scrollY;
+    pfFocus = false;
+    fn();
+    window.scrollTo(0, y);
+    const again = sel && app.querySelector(sel);
+    if (again) again.focus({ preventScroll: true });
+  };
   app.addEventListener("click", async (e) => {
     const t = e.target;
-    if (t.closest("#pfGo")) { unlockAudio(); return void (flow.path === "squad" && flow.squad && params.get("squad") ? pfWhen() : pfWho()); }
-    if (t.closest("#pfNot")) { if (document.referrer.startsWith(location.origin) && history.length > 1) history.back(); else location.href = "/"; return; }
-    if (t.closest("#pfOrb")) return void pfSpeak(flow.data.intro, true);
-    if (t.closest("#pfVoice")) {
-      const next = flow.data.persona === "friend" ? "concierge" : "friend";
-      ss.set("sk:persona", next);
-      const q = new URLSearchParams({ persona: next, name: flow.data.me.name || "" });
-      if (userId()) q.set("user", userId());
-      const out = await api(`/api/sk/plan/setup?${q}`).catch(() => null);
-      if (out) Object.assign(flow.data, { persona: out.persona, voiceLabel: out.voiceLabel, intro: out.intro });
-      ss.set("sk:introSeen", "");
-      return void pfIntro();
-    }
     const back = t.closest("[data-pfback]");
     if (back) {
       const to = back.dataset.pfback;
-      if (flow.step === undefined || !flow.data) return void (location.href = "/sk");
+      if (!flow.data) return void (location.href = "/sk");
       if (phase === "formsent" || (view && view.form && document.querySelector(".formsent"))) {
         leaveQuietly();
         view = null;
         roomId = null;
         history.pushState(null, "", "/sk");
       }
-      return void ({ intro: pfIntro, who: pfWho, friends: pfFriends, link: pfLink, when: pfWhen, how: pfHow }[to] || pfIntro)();
+      return void ({ who: pfWho, friends: pfFriends, link: pfLink, when: pfWhen, how: pfHow }[to] || pfWho)();
     }
     const path = t.closest("[data-pfpath]");
     if (path) {
       flow.path = path.dataset.pfpath;
+      flow.touched = true;
       if (flow.path === "friends") return void pfFriends();
       if (flow.path === "link") return void pfLink();
       return void pfWho();
     }
     const sq = t.closest("[data-pfsquad]");
-    if (sq) { flow.squad = sq.dataset.pfsquad; flow.path = "squad"; return void pfWho(); }
+    if (sq) { if (flow.squad !== sq.dataset.pfsquad || flow.path !== "squad") flow.touched = true; flow.squad = sq.dataset.pfsquad; flow.path = "squad"; return void pfRedraw(pfWho, `[data-pfsquad="${CSS.escape(flow.squad)}"]`); }
     const fr = t.closest("[data-pffriend]");
     if (fr) {
       const k = fr.dataset.pffriend;
+      flow.touched = true;
       flow.friends = flow.friends.includes(k) ? flow.friends.filter((x) => x !== k) : [...flow.friends, k];
-      pfFocus = false;
-      pfFriends();
-      const again = app.querySelector(`[data-pffriend="${CSS.escape(k)}"]`);
-      if (again) again.focus();
-      return;
+      return void pfRedraw(pfFriends, `[data-pffriend="${CSS.escape(k)}"]`);
     }
     const un = t.closest("[data-pfunpick]");
     if (un) { flow.friends = flow.friends.filter((x) => x !== un.dataset.pfunpick); pfFocus = false; return void pfFriends(); }
@@ -797,36 +860,27 @@
     const night = t.closest(".pf-night");
     if (night) {
       const dt = night.dataset.date;
-      if (flow.nights.includes(dt)) flow.nights = flow.nights.filter((x) => x !== dt);
+      flow.touched = true;
+      if (flow.nights.includes(dt)) { flow.nights = flow.nights.filter((x) => x !== dt); markMine(dt, false); }
       else if (flow.nights.length >= 4) return void toast("Pick up to 4 nights.");
-      else flow.nights = [...flow.nights, dt].sort();
-      const y = window.scrollY;
-      pfFocus = false;
-      pfWhen();
-      window.scrollTo(0, y);
-      const again = app.querySelector(`.pf-night[data-date="${dt}"]`);
-      if (again) again.focus({ preventScroll: true });
-      return;
+      else { flow.nights = [...flow.nights, dt].sort(); markMine(dt, true); }
+      return void pfRedraw(pfWhen, `.pf-night[data-date="${dt}"]`);
     }
-    if (t.closest("#pfMark")) return void pfMarkSheet();
     const how = t.closest("[data-pfhow]");
-    if (how) {
-      flow.how = how.dataset.pfhow;
-      const y = window.scrollY;
-      pfFocus = false;
-      pfHow();
-      window.scrollTo(0, y);
-      const again = app.querySelector(`[data-pfhow="${flow.how}"]`);
-      if (again) again.focus({ preventScroll: true });
+    if (how) { if (flow.how !== how.dataset.pfhow) flow.touched = true; flow.how = how.dataset.pfhow; return void pfRedraw(pfHow, `[data-pfhow="${flow.how}"]`); }
+    if (t.closest("#pfLocChange")) {
+      const w = document.getElementById("originWrap");
+      w.hidden = !w.hidden;
+      t.closest("#pfLocChange").setAttribute("aria-expanded", String(!w.hidden));
       return;
     }
+    if (t.closest('.chips[data-name="origin"] .chip')) return void locLine(); // after the chip's own toggle
     const dl = t.closest("[data-pfdeadline]");
     if (dl) {
       flow.deadline = Number(dl.dataset.pfdeadline);
       app.querySelectorAll("[data-pfdeadline]").forEach((b) => { const on = b === dl; b.setAttribute("aria-checked", on); b.setAttribute("aria-pressed", on); });
       return;
     }
-    if (t.closest("#pfLearn")) { flow.noLearn = !flow.noLearn; t.closest("#pfLearn").setAttribute("aria-checked", flow.noLearn); return; }
     if (t.closest("#pfStart")) return void pfLaunch(t.closest("#pfStart"));
     if (t.closest("#pfPickNow")) { const b = t.closest("#pfPickNow"); pending(b, "Finding picks"); return void send("ask", {}); }
     if (t.closest("#pfNudge")) {
@@ -846,35 +900,107 @@
     s.focus();
     s.setSelectionRange(pos, pos);
   });
-  document.addEventListener("click", (e) => {
-    if (!e.target.closest("#pfSheet")) return;
-    if (e.target.closest("[data-pfclose]")) return void pfCloseSheet();
-    const c = e.target.closest("[data-pffree]");
-    if (c) return void c.setAttribute("aria-pressed", c.getAttribute("aria-pressed") !== "true");
-    const sv = e.target.closest("#pfSaveFree");
-    if (sv) pfSaveFree(sv);
-  });
   document.addEventListener("keydown", (e) => {
-    const sheet = document.getElementById("pfSheet");
-    if (sheet) {
-      if (e.key === "Escape") { e.preventDefault(); pfCloseSheet(); return; }
-      if (e.key === "Tab") {
-        const items = [...sheet.querySelectorAll("button:not([disabled])")];
-        const [a, b] = [items[0], items[items.length - 1]];
-        if (e.shiftKey && document.activeElement === a) { e.preventDefault(); b.focus(); } else if (!e.shiftKey && document.activeElement === b) { e.preventDefault(); a.focus(); }
-      }
-      return;
-    }
-    // The intro on a computer: Enter means Let's plan, Escape means Not now
-    if (flow.step === "intro" && document.getElementById("pfGo") && !e.target.closest("button,input,a")) {
-      if (e.key === "Enter") { e.preventDefault(); document.getElementById("pfGo").click(); }
-      if (e.key === "Escape") { e.preventDefault(); document.getElementById("pfNot").click(); }
+    const sheet = document.getElementById("exitSheet");
+    if (!sheet) return;
+    if (e.key === "Escape") { e.preventDefault(); closeExitSheet(); return; }
+    if (e.key === "Tab") {
+      const items = [...sheet.querySelectorAll("button:not([disabled])")];
+      const [a, b] = [items[0], items[items.length - 1]];
+      if (e.shiftKey && document.activeElement === a) { e.preventDefault(); b.focus(); } else if (!e.shiftKey && document.activeElement === b) { e.preventDefault(); a.focus(); }
     }
   });
-  window.matchMedia("(min-width: 900px)").addEventListener("change", () => { if (flow.step === "when" && document.querySelector('.pf[data-step="when"]')) { pfFocus = false; pfWhen(); } else pfOn(document.body.classList.contains("pf-mode")); });
 
   // ---------- 2. Join ----------
+  // A friend opens the link (design: nav #12): the crew's photo, who invited them and who's on the call, a first-name
+  // field, "Join by voice" or "Answer by tapping" (in the call with the mic off), and "No app or account needed". Private
+  // questions (budget, places to avoid) are asked one to one on the call. A form opens its questions straight away.
   async function joinScreen() {
+    if (STUDY) return joinScreenStudy();
+    let info;
+    try { info = await api(`/api/sk/rooms/${roomId}/info${userId() ? `?user=${encodeURIComponent(userId())}` : ""}`); } catch (err) {
+      if (err.status === 404) return goneScreen(err.data);
+      app.innerHTML = `<section class="done left"><h1 class="done-t">Can't reach the call</h1><p class="muted">Check your connection and try again.</p><div class="done-foot"><button class="btn pri" onclick="location.reload()">Try again</button><a class="done-link" href="/">Open SideQuest</a></div></section>`;
+      return;
+    }
+    document.body.classList.add("sk-done");
+    if (info.status !== "live") {
+      app.innerHTML = `<section class="done left"><h1 class="done-t">This call has finished</h1><p class="muted">Ask whoever planned it for the plan.</p><div class="done-foot"><a class="btn pri" href="/sk">Start your own plan</a><a class="done-link" href="/">Open SideQuest</a></div></section>`;
+      return;
+    }
+    if (info.closed) {
+      app.innerHTML = `<section class="done left"><span class="pf-mono">Quick form · ${esc(info.crew)}</span><h1 class="done-t">This form has closed</h1><p class="muted">Sidekick picked with the answers it had. Ask whoever planned it for the plan.</p><div class="done-foot"><a class="done-link" href="/">Open SideQuest</a></div></section>`;
+      return;
+    }
+    const names = info.people.slice(0, 3);
+    const onCall = names.length ? `${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]}${info.people.length > 3 ? " and others" : ""} ${info.people.length === 1 ? "is" : "are"} ${info.form ? "in" : "on the call"}` : "";
+    const avs = names.map((n, i) => `<span class="av live ${PF_COLOURS[(i + 1) % PF_COLOURS.length]}" aria-hidden="true">${esc(n.charAt(0).toUpperCase())}</span>`).join("");
+    app.innerHTML = `<div class="done-hero join-hero" aria-hidden="true">${photoHTML(info.crew)}<span class="done-fade"></span></div>
+      <section class="done join" aria-labelledby="joinT">
+        <a class="join-home" href="/" aria-label="SideQuest home">sidequest</a>
+        <span class="pf-mono">${esc(info.people[0] || "Your crew")} invited you</span>${info.deadline ? `<span class="tag hot" id="closesTag">Closes ${esc(closesLabel(info.deadline))}</span>` : ""}
+        <h1 class="done-t" id="joinT">${esc(info.crew)} is<br><span class="grad">${info.form ? "deciding by form" : "planning a night"}</span></h1>
+        ${onCall ? `<div class="row join-who"><span class="stk">${avs}</span><span class="muted">${esc(onCall)}</span></div>` : ""}
+        <label class="f"><span class="sr">Your first name</span><input class="in" id="name" autocomplete="given-name" maxlength="24" placeholder="Your first name" value="${esc(store.get("sk:name") || "")}"></label>
+        <div class="stack" id="formExtra" ${info.form ? "" : "hidden"}>
+          <p style="font-weight:600">Which nights work?</p><div class="chips" data-name="night" data-multi>${info.nights.map((l, i) => chip("night", i, l, false)).join("")}</div>
+          <p style="font-weight:600">What time?</p><div class="chips" data-name="time" data-multi>${PRIVATE_OPTS.time.map(([v, l]) => chip("time", v, l, false)).join("")}</div>
+          <p style="font-weight:600">Feeling like</p><div class="chips" data-name="vibe" data-multi>${(info.vibes ? info.vibes.map((o) => [o.value, o.label]) : PRIVATE_OPTS.vibe).map(([v, l]) => chip("vibe", v, l, false)).join("")}${otherHTML()}</div>
+          <div class="priv"><span class="lock">${ICON.lock}Only Sidekick sees these</span>
+            <p style="font-weight:600">Your max for the night</p>
+            <div class="chips" data-name="budget">${PRIVATE_OPTS.budget.map(([v, l]) => chip("budget", v, l, false)).join("")}</div>
+            <p class="small">The group only ever sees one limit, never your answer.</p></div>
+          ${info.form ? originPicker() : ""}
+        </div>
+        ${info.form ? "" : `<p class="pf-loc"><span id="pfLocT">📍 ${HAS_GEO ? "Starting near you" : "Starting from Union"}</span><span aria-hidden="true">·</span><button class="pf-change" id="pfLocChange" aria-expanded="false" aria-controls="originWrap">change</button></p><div id="originWrap" hidden>${originPicker()}</div>`}
+        <div class="stack" id="joinBtns">
+          ${info.form ? '<button class="btn pri" data-mode="form">Send my answers</button>' : '<button class="btn pri" data-mode="voice">Join by voice</button><button class="btn quiet" data-mode="text">Answer by tapping</button>'}
+        </div>
+        <p class="small center">No app or account needed.</p>
+      </section>`;
+    initOrigin();
+    app.querySelector("#joinBtns").addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-mode]");
+      if (!b) return;
+      const name = document.getElementById("name").value.trim();
+      if (!name) { document.getElementById("name").focus(); return toast("Add your first name first."); }
+      const answers = {};
+      if (b.dataset.mode === "form") {
+        const one = (k) => picked(k)[0];
+        if (one("budget")) answers.budget = one("budget");
+        // the night chips carry an index; the server knows the dates
+        const nightIdx = picked("night").map(Number);
+        if (nightIdx.length) answers.nightIdx = nightIdx;
+        if (picked("time").length) answers.time = picked("time");
+        if (picked("vibe").length) answers.vibe = picked("vibe");
+        const own = other.open ? other.draft.trim() : "";
+        if (own) answers.want = [own]; // their own words, like saying it on the call
+        if (!answers.vibe && !own && other.open) return toast("Type what you're in the mood for, or close Something else.");
+      }
+      unlockAudio();
+      if (picked("origin")[0]) {
+        const origin = await originAnswer(b);
+        if (!origin) return; // no location: Union is now selected, with a note; the next tap joins
+        answers.origin = origin;
+      }
+      b.disabled = true;
+      try {
+        const out = await api(`/api/sk/rooms/${roomId}/join`, { name, mode: b.dataset.mode, answers, user: userId() || undefined });
+        store.set("sk:name", name);
+        me = { person: out.person, mode: b.dataset.mode, boot: info.boot };
+        store.set(`sk:${roomId}`, me);
+        document.body.classList.remove("sk-done");
+        connect();
+        if (me.mode === "voice") startMic(); // a friend joining by voice is heard from the start (this tap allows the mic)
+      } catch (err) {
+        b.disabled = false;
+        toast(err.message);
+      }
+    });
+  }
+
+  // The voice study keeps its own join card (the private questions, location, and "Answer without calling")
+  async function joinScreenStudy() {
     let info;
     try { info = await api(`/api/sk/rooms/${roomId}/info${userId() ? `?user=${encodeURIComponent(userId())}` : ""}`); } catch (err) {
       if (err.status === 404) return goneScreen(err.data);
@@ -1043,6 +1169,7 @@
     }
   }
   function leaveQuietly() {
+    liveMark(false);
     if (ss.get("sk:onCall")) ss.set("sk:onCall", "");
     clearTimeout(retryTimer);
     if (es) es.close();
@@ -1059,9 +1186,12 @@
     leaveQuietly();
     if (saved) store.set(`sk:${roomId}`, null);
     me = null;
-    app.innerHTML = restarted
-      ? `<h1>This call ended when the app restarted</h1><p class="muted">Calls live in the app's memory, so a restart ends them. Start a new one and share the new link with your crew.</p><a class="btn pri" href="/sk">Start a new call</a>`
-      : `<h1>This call isn't running anymore</h1><p class="muted">It may have ended, or the app restarted. The transcript was deleted. Ask whoever sent the link to start a new one, or start your own.</p><a class="btn out" href="/sk">Start a new call</a>`;
+    backdrop(false);
+    document.body.classList.remove("sk-live");
+    document.body.classList.add("sk-done");
+    app.innerHTML = `<section class="done left">${restarted
+      ? `<h1 class="done-t">This call ended when the app restarted</h1><p class="muted">Calls live in the app's memory, so a restart ends them. Start a new one and share the new link with your crew.</p><div class="done-foot"><a class="btn pri" href="/sk">Start a new call</a><a class="done-link" href="/" data-screen-to="discover" id="backHome">Back to Discover</a></div>`
+      : `<h1 class="done-t">This call isn't running anymore</h1><p class="muted">It may have ended, or the app restarted. The transcript was deleted. Ask whoever sent the link to start a new one, or start your own.</p><div class="done-foot"><a class="btn pri" href="/sk">Start a new call</a><a class="done-link" href="/" data-screen-to="discover" id="backHome">Back to Discover</a></div>`}</section>`;
   }
   // A connection can die without an error (a locked phone). The server sends a heartbeat every 15 s.
   setInterval(() => { if (es && phase && Date.now() - lastBeat > 40000) { setConn(false); connect(); } }, 5000);
@@ -1093,19 +1223,24 @@
     if (next !== phase) {
       phase = next;
       landed = phase === "picks" && Boolean(lastThinking); // the steps give way to the cards
-      app.innerHTML = `<div id="top"></div><div id="say"></div><div id="body" class="stack"></div><div id="ticks" class="stack"></div><p class="sr" id="thinkLive" aria-live="polite"></p><div class="dock" id="dock"></div>`;
-      // A live call is full screen (the app's tabs come back when it ends); the voice study keeps its own layout
+      app.innerHTML = `<div id="top"></div>${STUDY ? "" : '<div id="stage"></div>'}<div id="say"></div><div id="body" class="stack"></div><div id="ticks" class="stack"></div><p class="sr" id="thinkLive" aria-live="polite"></p><div class="dock" id="dock"></div>`;
+      // A live call is full screen with the crew's photo behind it, and no app tab bar until it ends; the ended screen's
+      // buttons say where they go. The voice study keeps its own layout.
       const live = phase === "call" || phase === "picks";
-      callNav(!live);
-      // This tab is on a live call until it ends (the Plan tab shows "You're on a call" meanwhile)
+      callNav(false);
+      // This tab is on a live call until it ends (the Plan tab returns to it meanwhile)
       ss.set("sk:onCall", phase === "ended" ? "" : JSON.stringify({ rid: roomId, crew: view.crew }));
+      liveMark(live && !STUDY);
       document.body.classList.toggle("sk-live", live && !STUDY);
+      document.body.classList.toggle("sk-done", !live && !STUDY);
+      backdrop(live && !STUDY);
       if (!live && chatOpen) closeChat(false);
       if (!live && sheetOpen) closeSheet(false);
       watchDock();
       renderDock();
     }
     renderTop();
+    renderStage();
     renderSay();
     const ob = document.querySelector("#orbBtn .orb");
     if (ob) ob.className = `orb ${orbState()}`;
@@ -1153,18 +1288,74 @@
     const waiting = (view.expected || []).filter((x) => !x.joined && !x.link).map((x) => x.name);
     const invited = waiting.length ? `<p class="small" id="invitedLine">${view.people.length} checked in · ${esc(waiting.length > 3 ? `${waiting.slice(0, 3).join(", ")} and ${waiting.length - 3} more` : waiting.join(", "))} invited</p>` : "";
     if (STUDY) { document.getElementById("top").innerHTML = `<div class="row sb"><div class="row avs">${people}</div><div class="row schips">${pill}${modeTag}</div></div>${invited}`; return; }
-    // ⌄ minimizes; the people row (with "+N" for invited people who haven't joined) opens the People sheet
-    const plus = waiting.length ? `<span class="plus-n" aria-hidden="true">+${waiting.length}</span>` : "";
-    const rowLabel = `People: ${view.people.length} in the call${waiting.length ? `, ${waiting.length} invited` : ""}. Invite friends`;
-    const html = `<div class="ctop"><button class="icon-btn min-btn" id="minBtn" aria-label="Minimize call">${ICON.down}</button>
-      <button class="people-row" id="peopleBtn" aria-haspopup="dialog" aria-expanded="${sheetOpen}" aria-controls="sheet" aria-label="${esc(rowLabel)}"><span class="row avs" aria-hidden="true">${people.replace(/ role="img" aria-label="[^"]*"/g, "")}</span>${plus}</button>
-      ${voicePillHTML()}<div class="row schips">${pill}${modeTag}</div></div>${soundBarHTML()}`;
+    // The top row: ⌄ minimizes, the voice status pill in the middle, LIVE on the right. The people are on the stage.
     const top = document.getElementById("top");
+    if (phase === "locked" || phase === "ended") { if (top.innerHTML) { top.innerHTML = ""; top.dataset.html = ""; } return; }
+    const tag = view.me.mode === "voice" ? '<span class="livetag">● LIVE</span>' : modeTag;
+    const html = `<div class="ctop"><button class="icon-btn min-btn" id="minBtn" aria-label="Minimize call">${ICON.down}</button><span class="ctop-mid">${voicePillHTML()}</span>${tag}</div>${pill ? `<div class="row schips">${pill}</div>` : ""}${soundBarHTML()}`;
     if (top.dataset.html === html) return;
     const focused = document.activeElement && top.contains(document.activeElement) ? document.activeElement.id : null;
     top.innerHTML = html;
     top.dataset.html = html;
     if (focused) { const again = document.getElementById(focused); if (again) again.focus(); }
+  }
+
+  // While a call is live: sk:live = { room, crew } for the app (its Plan tab returns to the call, with a green dot)
+  function liveMark(on) {
+    try {
+      // href and at as the app's SQ.liveCall() reads them (at is refreshed on every update, so a dead tab goes stale)
+      if (on && roomId && view) localStorage.setItem("sk:live", JSON.stringify({ room: roomId, crew: view.crew, href: `/sk/${roomId}`, at: Date.now() }));
+      else if (!on) { const v = JSON.parse(localStorage.getItem("sk:live") || "null"); if (!v || !roomId || v.room === roomId) localStorage.removeItem("sk:live"); }
+    } catch {}
+  }
+  window.addEventListener("pagehide", () => { if (phase === "call" || phase === "picks") liveMark(false); });
+  setInterval(() => { if (es && !STUDY && (phase === "call" || phase === "picks")) liveMark(true); }, 30000); // keep "at" fresh
+  window.addEventListener("pageshow", () => { if (es && (phase === "call" || phase === "picks")) liveMark(true); });
+  // The crew's photo behind the call: violet duotone, dimmed under a dark wash
+  function backdrop(on) {
+    let b = document.getElementById("kback");
+    if (!on) { if (b) b.remove(); return; }
+    if (!b) {
+      b = document.createElement("div");
+      b.id = "kback";
+      b.setAttribute("aria-hidden", "true");
+      b.innerHTML = '<span class="duo kphoto"></span><span class="kwash"></span>';
+      document.body.insertBefore(b, document.body.firstChild);
+    }
+    const url = `url("${crewPhoto(view.crew)}")`;
+    const ph = b.querySelector(".kphoto");
+    if (ph.style.backgroundImage !== url) ph.style.backgroundImage = url;
+  }
+  // The stage: the orb with the crew around it, a ring on whoever's talking, and invited people as dashed circles.
+  // Tapping it opens the People sheet. Smaller with just the orb on "I've got everything"; gone on the picks.
+  const ORBIT = [-140, -40, 140, 40, 180, 0, -100, -80, 100, 80];
+  function renderStage() {
+    const el = document.getElementById("stage");
+    if (!el || !view) return;
+    if (phase !== "call") { if (!el.hidden) { el.hidden = true; el.innerHTML = ""; el.dataset.html = ""; } return; }
+    el.hidden = false;
+    const small = Boolean(view.confirm);
+    el.classList.toggle("small", small);
+    const waiting = (view.expected || []).filter((x) => !x.joined && !x.link).map((x) => x.name);
+    const h = el.clientHeight || 180;
+    const R = Math.max(54, Math.min(h / 2 - 22, 104));
+    const at = (i) => { const a = (ORBIT[i % ORBIT.length] * Math.PI) / 180; return `left:calc(50% + ${Math.round(Math.cos(a) * R * 1.3)}px);top:calc(50% + ${Math.round(Math.sin(a) * R)}px)`; };
+    const people = small ? "" : view.people.map((p, i) => {
+      const mine = p.id === view.me.id;
+      const st = mine ? (Audio.on ? "connected" : null) : Audio.on && p.audio ? Audio.stateOf(p.id) || "new" : null;
+      const dot = st === "connected" ? `<span class="adot ${p.muted ? "muted" : ""}"></span>` : st ? '<span class="adot wait"></span>' : "";
+      return `<span class="av orbit ${colour(p.id)}${p.talking ? " talk" : ""}${p.mode === "form" || !p.online ? " away" : ""}" style="${at(i)}" title="${esc(p.name)}">${esc(p.initial)}${dot}</span>`;
+    }).join("");
+    const shown = small ? [] : waiting.slice(0, waiting.length > 3 ? 2 : 3);
+    const inv = shown.map((n, j) => `<span class="orbit inv" style="${at(view.people.length + j)}">${esc(String(n || "?").charAt(0).toUpperCase())}</span>`).join("")
+      + (!small && waiting.length > shown.length ? `<span class="orbit inv plus-n" style="${at(view.people.length + shown.length)}">+${waiting.length - shown.length}</span>` : "");
+    const label = `People: ${view.people.length} in the call${waiting.length ? `, ${waiting.length} invited` : ""}. Invite friends`;
+    const html = `<button class="stage-btn" id="peopleBtn" aria-haspopup="dialog" aria-expanded="${sheetOpen}" aria-controls="sheet" aria-label="${esc(label)}"><span class="ring r1" aria-hidden="true"></span><span class="ring r2" aria-hidden="true"></span><span class="orb stage-orb ${orbState()}" aria-hidden="true"></span><span aria-hidden="true">${people}${inv}</span></button>`;
+    if (el.dataset.html === html) return;
+    const focused = document.activeElement && el.contains(document.activeElement);
+    el.innerHTML = html;
+    el.dataset.html = html;
+    if (focused) document.getElementById("peopleBtn").focus();
   }
 
   function boardHead(extra = "") {
@@ -1212,6 +1403,11 @@
       ? `<div class="chips vibe-chips" role="group" aria-label="${esc(card.prompt)}">${card.options.map((o) => `<button class="chip" data-slot="vibe" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}">${esc(o.label)}${o.voters.length ? ` <span class="vn">${esc(o.voters.join(""))}</span>` : ""}</button>`).join("")}${otherHTML(true)}</div>`
       : card.options.map((o) => `<button class="ans" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="grow">${esc(o.label)}</span>${avStack(o.voters)}</button>`).join("");
     const hint = label || `Sidekick is asking · ${view.me.mode === "voice" ? "say it or tap it" : "tap to answer"}${card.multi ? " · pick any that work" : ""}`;
+    if (!STUDY) {
+      // The full-screen call: Sidekick's caption says the question once; the card is just the answers, as chips
+      const chips = card.slot === "vibe" ? opts : `<div class="chips" role="group" aria-label="${esc(card.prompt)}">${card.options.map((o) => `<button class="chip" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}">${esc(o.label)}${o.voters.length ? ` <span class="vn">${esc(o.voters.join(""))}</span>` : ""}</button>`).join("")}</div>`;
+      return `<div class="q"><span class="sr">${esc(hint)}</span><h2 class="sr">${esc(card.prompt)}</h2>${chips}${card.note ? `<span class="small">${esc(card.note)}</span>` : ""}</div>`;
+    }
     return `<div class="q"><span class="small">${esc(hint)}</span><h2>${esc(card.prompt)}</h2>${opts}${card.note ? `<span class="small">${esc(card.note)}</span>` : ""}</div>`;
   }
 
@@ -1222,8 +1418,12 @@
     const enc = encodeURIComponent;
     const sms = `sms:${IOS ? "&" : "?"}body=${enc(msg)}`;
     const messenger = MOBILE ? `fb-messenger://share/?link=${enc(link)}` : "https://www.messenger.com/";
-    return `<div class="row"><input class="in" readonly value="${esc(link)}" aria-label="Call link" style="font:500 13px var(--m)"><button class="btn sm out" id="copy">Copy</button></div>
-      ${navigator.share ? '<button class="btn sm pri" id="share" style="width:100%">Share to the group chat</button>' : ""}
+    // One Share link button (the phone's own share menu) plus Copy; the per-app buttons only where there's no share menu
+    if (navigator.share) {
+      return `<div class="row"><input class="in link-in" readonly value="${esc(link)}" aria-label="Call link"><button class="btn sm quiet" id="copy">Copy</button></div>
+        <button class="btn pri" id="share" style="width:100%">Share link</button><p class="small center">Opens your phone's share menu: WhatsApp, Messages, Instagram…</p>`;
+    }
+    return `<div class="row"><input class="in link-in" readonly value="${esc(link)}" aria-label="Call link"><button class="btn sm quiet" id="copy">Copy</button></div>
       <div class="share">
         <a href="https://wa.me/?text=${enc(msg)}" target="_blank" rel="noopener">WhatsApp</a>
         <a href="${esc(sms)}">Messages</a>
@@ -1320,7 +1520,7 @@
     }
     const body = document.getElementById("chatBody");
     const items = chatItems();
-    const html = chatHTML(items);
+    const html = chatHTML(items, { chips: false }); // messages only: the answers are on the call's card
     if (body.dataset.html !== html) {
       body.innerHTML = html;
       body.dataset.html = html;
@@ -1354,6 +1554,7 @@
     w.className = "min-wrap";
     w.innerHTML = `<div class="oncall" role="region" aria-label="Ongoing call"><span class="orb sm live" aria-hidden="true"></span><span class="oc-t" id="onCallText"></span><button class="btn sm pri" id="returnCall">Return</button></div><iframe id="appFrame" title="SideQuest" src="${home}"></iframe>`;
     document.body.appendChild(w);
+    document.documentElement.style.setProperty("--sq-top", `${Math.ceil(w.querySelector(".oncall").getBoundingClientRect().height)}px`);
     app.setAttribute("inert", "");
     app.setAttribute("aria-hidden", "true");
     renderMin();
@@ -1364,6 +1565,7 @@
     minimized = false;
     const w = document.getElementById("minWrap");
     if (w) w.remove();
+    document.documentElement.style.removeProperty("--sq-top");
     app.removeAttribute("inert");
     app.removeAttribute("aria-hidden");
     const b = document.getElementById("minBtn");
@@ -1437,7 +1639,7 @@
   function renderVote(card) {
     const why = { lead: "Sidekick asks one thing at a time", sidelines: "Sidekick stays quiet until picks" };
     const opts = card.options.map((o) => `<button class="vote-opt" data-slot="mode" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="vt">${esc(o.label)}</span><span class="small">${esc(why[o.value] || "")}</span>${avStack(o.voters) || '<span class="stk empty"></span>'}</button>`).join("");
-    return `<div class="vote"><span class="small">Quick vote · everyone</span><h2>${esc(card.prompt)}</h2><div class="vote-row">${opts}</div>
+    return `<div class="vote"><span class="small">Quick vote · everyone</span><h2${STUDY ? "" : ' class="sr"'}>${esc(card.prompt)}</h2><div class="vote-row">${opts}</div>
       <div class="cd"><div class="cd-bar"><i id="cdBar"></i></div><span class="small">No answer in 3 seconds and Sidekick takes the lead</span></div></div>`;
   }
   function runCountdown() {
@@ -1514,13 +1716,16 @@
     const cardKey = card && `${card.slot}:${card.at}`;
     const fresh = cardKey && !shownCards.has(cardKey);
     if (fresh) shownCards.add(cardKey);
-    const ask = card && !card.private ? cardHTML(card).replace('<div class="q">', `<div class="q${fresh && waitedCards.has(cardKey) ? " reveal" : ""}">`) : waitCard ? `<div class="q listen" aria-live="polite"><span class="small">Sidekick is asking · just say it</span><h2>${esc(card0.prompt)}</h2><span class="small">Tap options show in a moment.</span></div>` : "";
+    const ask = card && !card.private ? cardHTML(card).replace('<div class="q">', `<div class="q${fresh && waitedCards.has(cardKey) ? " reveal" : ""}">`) : waitCard ? `<div class="q listen" aria-live="polite"><span class="small">Sidekick is asking · just say it</span><h2${STUDY ? "" : ' class="sr"'}>${esc(card0.prompt)}</h2><span class="small">Tap options show in a moment.</span></div>` : "";
     // The full board stays one tap away; sitting back, the board is the form and always open
     const open = form || boardOpen;
     const full = form ? rows : `<button class="plan-toggle" id="planToggle" aria-expanded="${open}" aria-controls="planRows">${open ? "Hide the full plan" : "See the full plan"}</button><div id="planRows" ${open ? "" : "hidden"}>${rows}</div>`;
     const around = view.candidate && view.me.planner ? `<p class="small cand-note">Planning around the event you saved. It goes in as a pick if it fits.</p>` : "";
     const typingOther = document.activeElement && document.activeElement.id === "vibeOtherIn";
-    const html = `${invite}<div class="board ${form ? "as-form" : ""}">${boardHead()}${heardHTML()}${ask}${full}</div>${around}${formNote}${priv}`;
+    // The full-screen call: no board title (the stage shows who's here); progress sits with "See the full plan"
+    const slim = !STUDY && !form;
+    const fullRow = slim ? `<div class="bh slim">${progressHTML()}<button class="plan-toggle" id="planToggle" aria-expanded="${open}" aria-controls="planRows">${open ? "Hide the full plan" : "See the full plan"}</button></div><div id="planRows" ${open ? "" : "hidden"}>${rows}</div>` : full;
+    const html = `${invite}<div class="board ${form ? "as-form" : ""}${slim ? " slim" : ""}">${slim ? "" : boardHead()}${heardHTML()}${ask}${fullRow}</div>${around}${formNote}${priv}`;
     // Nothing changed: leave the card alone, so a chip isn't redrawn under someone's finger (or a text box mid-word)
     if (body.__cardHTML === html && body.__cardNode && body.firstElementChild === body.__cardNode) { renderTicks(); return; }
     body.innerHTML = html;
@@ -1537,6 +1742,17 @@
     // The dot stays with the fact before it, so a line never starts with one
     const recap = c.facts.map((x, i) => `${i ? (x.join ? esc(x.join) : '<span class="cf-sep">\u00a0· </span>') : ""}<span class="cf-f">${esc(x.text)}</span>`).join("");
     const facts = c.facts.map((x) => `<button class="chip cf-fact" data-reopen="${esc(x.slot)}"><span>${esc(x.text)}</span><span class="sr">: change this</span></button>`).join("");
+    if (!STUDY) {
+      // The full-screen call: the caption has Sidekick's line; the card is the facts as chips, the progress bar, and
+      // Looks good / Change something. A fact joined to the one before ("Saturday" + "after 8") shares its chip.
+      const groups = [];
+      for (const x of c.facts) { if (x.join && groups.length) groups[groups.length - 1] += `${x.join}${x.text}`; else groups.push(x.text); }
+      const chips = groups.map((g, i) => `${i ? '<span class="sr cf-sep">\u00a0· </span>' : ""}<span class="chip cf-f">${esc(g)}</span>`).join("");
+      return `<section class="board confirm" aria-labelledby="cfTitle"><div class="cf-b"><h2 class="cf-line sr" id="cfTitle">${esc(c.line)}</h2>
+        ${c.editing ? `<p class="small cf-help">Tap what you'd like to change. Its question comes back.</p><div class="chips cf-facts" role="group" aria-label="The plan so far">${facts}</div>` : `<p class="chips cf-recap" id="cfRecap">${chips}</p>`}
+        ${c.editing || !c.until ? "" : `<div class="cd"><div class="cd-bar"><i id="cfBar"></i></div><span class="small">Finding your picks…</span></div>`}
+        <div class="cf-acts"><button class="btn sm pri" id="cfOk">Looks good</button>${c.editing ? "" : '<button class="btn sm quiet" id="cfChange">Change something</button>'}</div></div></section>`;
+    }
     return `<section class="board confirm" aria-labelledby="cfTitle">${boardHead('<span class="tag pri">Got it</span>')}
       <div class="cf-b"><h2 class="cf-line" id="cfTitle">${esc(c.line)}</h2>
         ${c.editing ? `<p class="small cf-help">Tap what you'd like to change. Its question comes back.</p><div class="chips cf-facts" role="group" aria-label="The plan so far">${facts}</div>` : `<p class="cf-recap" id="cfRecap">${recap}</p>`}
@@ -1614,7 +1830,7 @@
   // Typing: the call reads like a group chat. Sidekick's replies are the shorter text versions, and its
   // latest question has quick replies under it (a tap answers and posts it in the thread).
   const chatMode = () => view && view.me && (view.me.mode === "text" || typing || capsOff);
-  function chatHTML(list) {
+  function chatHTML(list, { chips: withChips = true } = {}) {
     const items = list || view.chat || [];
     // Quick replies stay under Sidekick's latest question while that question is still open
     const lastSk = [...items].reverse().find((m) => m.sk);
@@ -1624,7 +1840,7 @@
       const mine = m.pid === view.me.id;
       return `<li class="msg ${m.sk ? "sk" : mine ? "me" : "them"}"><span class="msg-who">${m.sk ? "Sidekick" : mine ? "You" : esc(m.who)}${!m.sk && m.kind === "spoken" ? " · said" : ""}</span><span class="msg-t">${esc(m.text)}</span></li>`;
     }).join("");
-    const chips = quick ? `<div class="chips quick" role="group" aria-label="Quick replies">${quick.options.map((o) => `<button class="chip" data-quick="${esc(quick.slot)}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join("")}</div>` : "";
+    const chips = quick && withChips ? `<div class="chips quick" role="group" aria-label="Quick replies">${quick.options.map((o) => `<button class="chip" data-quick="${esc(quick.slot)}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join("")}</div>` : "";
     return `<section class="chat" aria-label="Call chat"><ol class="thread" aria-live="polite">${bubbles || '<li class="msg sys"><span class="msg-t">Nothing yet. What everyone says and types shows here.</span></li>'}</ol>${chips}</section>`;
   }
 
@@ -1638,7 +1854,45 @@
       <span class="small" style="color:var(--acc)">${esc(w.why)}</span></div>${link ? `<div class="pk-foot">${link}</div>` : ""}</div>`;
   }
 
+  // The full-screen call's picks: Sidekick's short line in the caption, then each pick with four plain facts (when,
+  // the name, who it's for in their words, price and the trip) and one "Vote for this" button. An event is a ticket;
+  // a place has a rounded corner. Never a score or the matcher's words.
+  function renderPicksCall() {
+    const cards = view.picks.map((p) => {
+      const voters = view.votes[p.id] || [];
+      const mine = view.myVote === p.id;
+      const ev = p.kind !== "place";
+      const tag = ev ? `<span class="tag kt">${ICON.ticket}Event</span>` : `<span class="tag kt">${ICON.mappin}Place</span>`;
+      const meta = [p.price, p.trip || p.where].filter(Boolean).join(" · ");
+      const link = p.url ? `<a class="pk-link" href="${esc(p.url)}" target="_blank" rel="noopener">${ev ? "See tickets" : "Directions"}<span class="sr"> for ${esc(p.title)} (opens in a new tab)</span></a>` : "";
+      return `<article class="pick-card ${ev ? "ev ticket" : "pl place"}${mine ? " mine" : ""}" aria-label="${esc(p.title)}">${photoHTML(p.title, "pk-ph")}<span class="pk-fade" aria-hidden="true"></span>
+        <span class="pk-badge">${tag}<span class="pk-when">${esc(p.when)}</span></span>
+        <h2 class="pk-t">${esc(p.title)}</h2>
+        ${p.forLine ? `<span class="pk-for">${esc(p.forLine)}</span>` : ""}
+        ${meta ? `<span class="pk-meta">${esc(meta)}</span>` : ""}
+        <button class="pick vote-btn" data-vote="${p.id}" aria-pressed="${mine}">Vote for this${voters.length ? ` · ${voters.length}` : ""}<span class="sr">: ${esc(p.title)}</span></button>
+        ${link || p.attribution ? `<span class="pk-foot">${link}${p.attribution ? `<span class="small">Place info from ${esc(p.attribution)}</span>` : ""}</span>` : ""}</article>`;
+    }).join("");
+    const lock = view.me.planner
+      ? `<button class="btn pri" id="lock" ${Object.keys(view.votes).length ? "" : "disabled"}>Lock in the plan</button>`
+      : `<p class="small center">${esc(view.people.find((p) => p.planner)?.name || "The planner")} locks it in once you've voted.</p>`;
+    const land = landed ? " land" : "";
+    if (landed) setTimeout(() => { landed = false; }, 400);
+    lastThinking = null;
+    announceThinking(null);
+    stageIn({ firstElementChild: null }, "picks");
+    const html = `<div class="picks${land}">${cards}</div>${wildHTML(view.wildcard)}<p class="small center">Venues can't pay to appear here.</p>${lock}`;
+    const body = document.getElementById("body");
+    const key = html.replace(land, "");
+    if (body.__picksHTML === key && body.querySelector(".picks")) return;
+    body.__picksHTML = key;
+    const f = document.activeElement && body.contains(document.activeElement) && document.activeElement.dataset.vote;
+    body.innerHTML = html;
+    if (f) { const again = body.querySelector(`[data-vote="${f}"]`); if (again) again.focus(); }
+    renderTicks();
+  }
   function renderPicks() {
+    if (!STUDY) return renderPicksCall();
     const crewSize = view.people.length;
     const summary = view.rows.filter((r) => r.value).map((r) => r.value).join(" · ");
     const picks = view.picks.map((p) => {
@@ -1694,6 +1948,8 @@
     return `<a class="btn pri back-home" id="backHome" href="${b.href}"${b.screen ? ` data-screen-to="${b.screen}"` : ""}>Back to SideQuest</a>`;
   }
   document.addEventListener("click", (e) => {
+    // "See it in Sidequests": the app opens the plan's ticket, with Sidequests behind it
+    if (e.target.closest("#seeQuest")) { ss.set("sq2.screen", "questlog"); return; }
     const a = e.target.closest("#backHome");
     if (!a) return;
     if (a.dataset.screenTo) ss.set("sq2.screen", a.dataset.screenTo);
@@ -1710,7 +1966,54 @@
   }
   document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.id === "vibeOtherIn" && document.getElementById("vibeOtherAdd")) { e.preventDefault(); sendOther(); } });
 
+  // The call's end (design: Call ended): the result first ("Locked in" with the name, the night and who's going, or
+  // "No pick this time"), add to calendar and share, the two survey questions, then "See it in Sidequests" (the
+  // plan's ticket) and "Back to Discover". The transcript is gone, said in one small line.
+  function renderDoneCall() {
+    const L = view.locked;
+    const body = document.getElementById("body");
+    const enc = encodeURIComponent;
+    const when = L ? (L.kind === "place" ? [nightOf(L).split(",")[0], L.when.replace(/ · drop in any time$/, "")] : [L.when.replace(" · starts ", " ")]).filter(Boolean).join(" · ") : "";
+    const result = L
+      ? `<span class="pf-mono ok">Locked in</span><h1 class="done-t" id="recapTitle">${esc(L.title)}</h1><p class="muted" id="doneMeta">${esc([when, String(L.where || "").split(",")[0], `${view.people.length} going`].filter(Boolean).join(" · "))}</p>
+        ${L.url ? `<a class="small done-url" href="${esc(L.url)}" target="_blank" rel="noopener">${L.kind === "place" ? "Directions" : "See tickets"}<span class="sr"> (opens in a new tab)</span></a>` : ""}${L.attribution ? `<span class="small">Place info from ${esc(L.attribution)}</span>` : ""}
+        <div class="recap-act"><button class="btn sm quiet" id="addCal">Add to calendar</button><button class="btn sm quiet" id="sharePlanBtn" aria-expanded="false" aria-controls="planShare">Share to chat</button></div>
+        <div id="planShare" class="stack" hidden>
+          <div class="row"><input class="in" readonly value="${esc(planText())}" aria-label="Plan to share" style="font-size:13px"><button class="btn sm out" id="copyPlan">Copy</button></div>
+          ${navigator.share ? '<button class="btn sm pri" id="nativeSharePlan" style="width:100%">Share</button>' : `<div class="share"><a href="https://wa.me/?text=${enc(planText())}" target="_blank" rel="noopener">WhatsApp</a><a href="${esc(`sms:${IOS ? "&" : "?"}body=${enc(planText())}`)}">Messages</a></div>`}
+        </div>`
+      : `<span class="pf-mono">Call ended</span><h1 class="done-t" id="recapTitle">No pick this time</h1><p class="muted">${esc(view.crew)} can plan again any time.</p>`;
+    const survey = view.surveyed
+      ? `<div class="card done-card"><p>Thanks, that helps us improve Sidekick.</p></div>`
+      : `<div class="card done-card" id="survey"><h2>Two quick questions</h2>
+          <p class="muted" id="rq1">Did Sidekick feel like a friend on the call?</p>
+          <div class="rate" data-q="friend" role="group" aria-labelledby="rq1">${[1, 2, 3, 4, 5].map((n) => `<button data-n="${n}" aria-pressed="false">${n}</button>`).join("")}</div>
+          <p class="muted" id="rq2">Did your input count?</p>
+          <div class="rate" data-q="heard" role="group" aria-labelledby="rq2">${[1, 2, 3, 4, 5].map((n) => `<button data-n="${n}" aria-pressed="false">${n}</button>`).join("")}</div>
+          <p class="small">1 = not at all, 5 = completely</p>
+          <button class="btn sm pri" id="sendSurvey" disabled>Send</button>
+        </div>`;
+    const see = L ? `<a class="btn pri" id="seeQuest" href="/?quest=${enc(L.id)}">See it in Sidequests</a>` : "";
+    const last = (view.sidekick || []).filter((x) => !x.system).slice(-1)[0];
+    const quote = last && L ? `<p class="done-say" id="doneSay"><span class="cap-l">Sidekick</span>${esc(last.text)}</p>` : "";
+    const html = `<div class="done-hero" aria-hidden="true">${photoHTML(view.crew)}<span class="done-fade"></span></div>
+      <section class="done${L ? " recap" : ""}" aria-labelledby="recapTitle">${result}${quote}${survey}
+        <div class="done-foot">${see}<a class="${L ? "done-link" : "btn pri"}" id="backHome" href="/" data-screen-to="discover">Back to Discover</a>
+        <p class="small center">The transcript has been deleted.</p></div></section>`;
+    if (body.__doneHTML === html && body.querySelector(".done")) return;
+    body.__doneHTML = html;
+    // Keep the survey's taps and the open share box when the view updates
+    const picks = [...body.querySelectorAll(".rate [aria-pressed=true]")].map((b) => [b.parentElement.dataset.q, b.dataset.n]);
+    const box = document.getElementById("planShare");
+    const shareOpen = Boolean(box && !box.hidden);
+    body.innerHTML = html;
+    for (const [q, n] of picks) { const b = body.querySelector(`.rate[data-q="${q}"] [data-n="${n}"]`); if (b) b.setAttribute("aria-pressed", "true"); }
+    if (picks.length === 2 && document.getElementById("sendSurvey")) document.getElementById("sendSurvey").disabled = false;
+    if (shareOpen && document.getElementById("planShare")) { document.getElementById("planShare").hidden = false; document.getElementById("sharePlanBtn").setAttribute("aria-expanded", "true"); }
+    renderTicks();
+  }
   function renderDone() {
+    if (!STUDY) return renderDoneCall();
     const L = view.locked;
     const plan = L ? recapHTML(L) : `<h1>Call ended</h1><p class="muted">The transcript has been deleted.</p>`;
     const survey = view.surveyed
@@ -1783,11 +2086,29 @@
 
   // Sidekick's latest line, as one speaker strip right under the people
   let sayTimer = null;
+  // The full-screen call: Sidekick's line as large captions, each word brightening as it's said (paced at about a
+  // word every 280 ms from when the line came in; all bright straight away with reduced motion or for an old line).
+  // On the picks it's the short line ("Two good ones. Tap the one you want."), with the full one for screen readers.
+  const WORD_MS = 280;
+  const picksLine = () => (view.picks.some((p) => p.closest) ? "Nothing matched exactly, so here's the closest. Tap the one you want." : view.picks.length > 1 ? "Two good ones. Tap the one you want." : "Here's the one. Tap it to vote.");
+  function renderCaption(el, last, sitting) {
+    if (!last || phase === "locked" || phase === "ended") { if (el.innerHTML) { el.innerHTML = ""; el.dataset.key = ""; } return; }
+    const short = phase === "picks" ? picksLine() : null;
+    const key = `${last.at}|${last.text}|${sitting}|${short || ""}`;
+    if (el.dataset.key === key) return;
+    el.dataset.key = key;
+    const text = short || last.text;
+    const age = Date.now() - (last.at || 0);
+    const speaking = !last.system && !sitting && age < 20000;
+    const words = text.split(/\s+/).filter(Boolean);
+    el.innerHTML = `<div class="cap${speaking ? " speaking" : ""}${last.system ? " sys" : ""}${sitting ? " sitting" : ""}"><span class="cap-l">${sitting ? "Sidekick is sitting back" : "Sidekick"}</span><p class="cap-t${text.length > 120 ? " long" : ""}">${words.map((w, i) => `<span class="w" style="--d:${i * WORD_MS - age}ms">${esc(w)}</span>`).join(" ")}</p>${short ? `<span class="sr">${esc(last.text)}</span>` : ""}</div>`;
+  }
   function renderSay() {
     const el = document.getElementById("say");
     if (!el) return;
     const last = view.sidekick.slice(-1)[0];
     const sitting = view.mode === "sidelines" && phase === "call";
+    if (!STUDY) return renderCaption(el, last, sitting);
     if (!last || phase === "ended") { el.innerHTML = ""; return; }
     const fresh = !last.system && !sitting && Date.now() - last.at < 20000;
     clearTimeout(sayTimer);
@@ -2019,17 +2340,7 @@
     if (t.closest("#mic")) return void (agent ? setAgentMuted(!agentMuted) : micOn ? stopMic() : startMic());
     if (t.closest("#kb")) { typing = !typing; closeOrb(!typing); renderDock(); if (typing) document.getElementById("line").focus(); return; }
     if (t.closest("#aloud")) { aloud = !aloud; store.set("sk:aloud", aloud); renderDock(); if (!aloud) { Tts.stop(); if ("speechSynthesis" in window) speechSynthesis.cancel(); } return; }
-    if (t.closest("#leave") || t.closest("#endCall")) {
-      if (agent) stopAgent();
-      if (view.me.planner) {
-        if (confirm("End the call for everyone? The transcript will be deleted.")) send("end", {});
-      } else {
-        leaveQuietly();
-        app.innerHTML = `<h1>You left the call</h1><p class="muted">You can rejoin with the same link while it's running.</p>${backBtn()}<button class="btn out" onclick="location.reload()">Rejoin</button>`;
-        callNav(true);
-      }
-      return;
-    }
+    if (t.closest("#leave") || t.closest("#endCall")) return void openEndSheet(t.closest("#leave, #endCall").id);
     const rate = t.closest(".rate button");
     if (rate) {
       rate.parentElement.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b === rate));
@@ -2044,6 +2355,71 @@
   }
   app.addEventListener("click", onTap);
   document.addEventListener("click", (e) => { if (e.target.closest("#sheet") || e.target.closest("#orbSheet") || e.target.closest("#chatSheet")) onTap(e); });
+
+  // ---------- The red ✕ asks first ----------
+  // The planner: End for everyone, Just leave (they carry on; the next person can lock the plan), or Keep going.
+  // A friend: Leave call or Keep going. A dialog: focus inside, Escape keeps going, focus back on the ✕.
+  let endFrom = null;
+  function openEndSheet(from) {
+    if (!view) return;
+    endFrom = from;
+    if (orbOpen) closeOrb(false);
+    if (sheetOpen) closeSheet(false);
+    if (chatOpen) closeChat(false);
+    const others = view.people.filter((p) => p.id !== view.me.id);
+    const names = others.map((p) => p.name);
+    const who = names.length > 2 ? `${names[0]} and the others` : names.join(" and ");
+    const planner = view.me.planner;
+    const s = document.createElement("div");
+    s.id = "endSheet";
+    s.className = "sheet-wrap";
+    s.innerHTML = `<div class="sheet-scrim" data-endno></div><div class="sheet-panel end-sheet" role="dialog" aria-modal="true" aria-labelledby="endT" tabindex="-1"><span class="grab" aria-hidden="true"></span>
+      ${planner
+        ? `<h2 id="endT">End the call?</h2><p class="muted">${others.length ? `You started this plan. Ending it closes the call for ${esc(who)} too.` : "The transcript is deleted when it ends."}</p>
+          <button class="btn danger" id="endAll">End for everyone</button>${others.length && phase !== "locked" ? '<button class="btn quiet" id="justLeave">Just leave (they carry on)</button>' : ""}`
+        : `<h2 id="endT">Leave the call?</h2><p class="muted">You can rejoin with the same link while it's running.</p><button class="btn danger" id="leaveCall">Leave call</button>`}
+      <button class="btn plain" id="keepGoing" data-endno>Keep going</button></div>`;
+    document.body.appendChild(s);
+    document.getElementById("keepGoing").focus();
+  }
+  function closeEndSheet(restore = true) {
+    const s = document.getElementById("endSheet");
+    if (s) s.remove();
+    const b = restore && endFrom && document.getElementById(endFrom);
+    if (b) b.focus();
+  }
+  // Left the call (a friend, or the planner who let the others carry on): rejoin with the same link, or back to the app
+  function leftScreen() {
+    liveMark(false);
+    leaveQuietly();
+    backdrop(false);
+    document.body.classList.remove("sk-live");
+    document.body.classList.add("sk-done");
+    app.innerHTML = `<section class="done left" aria-labelledby="leftT"><span class="pf-mono">Call</span><h1 class="done-t" id="leftT">You left the call</h1><p class="muted">You can rejoin with the same link while it's running.</p>
+      <div class="done-foot"><button class="btn pri" onclick="location.reload()">Rejoin</button><a class="done-link" id="backHome" href="/" data-screen-to="discover">Back to Discover</a></div></section>`;
+  }
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#endSheet")) return;
+    if (e.target.closest("[data-endno]")) return void closeEndSheet();
+    if (e.target.closest("#endAll")) { closeEndSheet(false); if (agent) stopAgent(); return void send("end", {}); }
+    if (e.target.closest("#justLeave") || e.target.closest("#leaveCall")) {
+      closeEndSheet(false);
+      if (agent) stopAgent();
+      send("leave", {});
+      return void leftScreen();
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    const sheet = document.getElementById("endSheet");
+    if (!sheet) return;
+    if (e.key === "Escape") { e.preventDefault(); closeEndSheet(); return; }
+    if (e.key === "Tab") {
+      const items = [...sheet.querySelectorAll("button")];
+      const [a, b] = [items[0], items[items.length - 1]];
+      if (!sheet.contains(document.activeElement)) { e.preventDefault(); a.focus(); }
+      else if (e.shiftKey && document.activeElement === a) { e.preventDefault(); b.focus(); } else if (!e.shiftKey && document.activeElement === b) { e.preventDefault(); a.focus(); }
+    }
+  });
   // Arrow keys move between the two segments of the mode switch
   document.addEventListener("keydown", (e) => {
     const r = e.target.closest && e.target.closest(".seg [role=radio]");
@@ -2838,7 +3214,13 @@
     bar.innerHTML = `<a href="/study?s=${encodeURIComponent(STUDY)}" style="color:var(--acc);text-decoration:none;min-height:44px;display:flex;align-items:center">&larr; Study checklist</a><span>${STUDY_V === "form" ? "Practice" : `Voice ${esc(STUDY_V)}`}</span>`;
     document.body.insertBefore(bar, app);
   }
-  if (!roomId) (STUDY || params.get("quick") ? startScreen() : flowStart());
+  // The app over a minimized call asked for this same call (its Plan tab): open the call underneath instead
+  let parentRoom = null;
+  try { parentRoom = inFrame ? JSON.parse(window.parent.sessionStorage.getItem("sk:onCall") || "null") : null; } catch {}
+  if (inFrame && roomId && parentRoom && parentRoom.rid === roomId) {
+    app.innerHTML = "";
+    try { window.parent.document.getElementById("returnCall").click(); } catch {}
+  } else if (!roomId) (STUDY || params.get("quick") ? startScreen() : flowStart());
   else if (me && me.person) { if (me.mode === "form") pfOn(true); connect(); }
   else joinScreen();
 })();

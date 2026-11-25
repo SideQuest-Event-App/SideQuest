@@ -576,3 +576,246 @@ body.sk-live #say:empty,body.sk-live #ticks:empty{display:none}
 .vr-r.bad{color:var(--hot-x)}
 .vr-r .small{font-weight:400}
 .vtip{color:var(--t2)}
+
+/* ==================== The redesign: Plan and the call (approve.html: Plan, The call; nav.html #5-8, #11, #12) ====================
+   The site's tokens; photos in violet duotone (#duoViolet in sidekick.html); weights 400/500/600 only, text 12 px and up,
+   44 px targets. */
+:root{--hot:#f28dc8;--ok-x:#8fdcaa;--red:#ee6e6e;--red-t:#742424}
+main{position:relative;z-index:1}
+.duo{position:absolute;inset:0;background-size:cover;background-position:center;filter:url(#duoViolet);pointer-events:none}
+.pf-mono,.cap-l{font:500 12px/16px var(--m);letter-spacing:.12em;text-transform:uppercase;color:var(--acc)}
+.pf-mono.ok{color:var(--ok-x)}
+.grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.btn.quiet{background:rgba(255,255,255,.08);color:var(--t1)}
+.btn.plain{background:none;color:var(--t2)}
+.btn.danger{background:var(--red);color:var(--base)}
+.grab{display:block;width:34px;height:4px;border-radius:9px;background:rgba(255,255,255,.2);margin:0 auto -4px;flex:none}
+.card{background:var(--surf);border:1px solid var(--bs);border-radius:20px;padding:14px;display:flex;flex-direction:column;gap:10px}
+
+/* ----- The orb transition: from the tab bar's orb to the whole screen and back ----- */
+.pf-orbx{position:fixed;z-index:0;left:50%;bottom:29px;width:50px;height:50px;margin-left:-25px;border-radius:999px;pointer-events:none;
+  background:radial-gradient(circle at 35% 30%,#fff1ff 0%,#f5d6ff 10%,#c98adf 38%,#a97af2 62%,#452871 100%);box-shadow:0 0 22px rgba(169,122,242,.45);
+  transform:scale(1);transform-origin:50% 50%;view-transition-name:sk-orb;will-change:transform,opacity}
+.pf-orbx.full{transform:scale(var(--orb-s,30))}
+::view-transition-group(sk-orb){animation-duration:.6s;animation-timing-function:cubic-bezier(.65,0,.35,1)}
+::view-transition-old(sk-orb){display:none}
+::view-transition-new(sk-orb){animation:none}
+::view-transition-old(root),::view-transition-new(root){animation:none}
+.pf-reveal .pf-card{animation:pf-reveal .32s var(--ease) both}
+@keyframes pf-reveal{from{opacity:0}}
+
+/* ----- The flow: no tab bar, ✕ Exit top right, ‹ back from step 2 ----- */
+body.pf-mode .pf:not(.pf-tabs){display:block;min-height:100dvh}
+.pf:not(.pf-tabs) .pf-main{max-width:480px;margin:0 auto;padding:max(12px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom))}
+.pf:not(.pf-tabs) .pf-card{gap:12px;min-height:calc(100dvh - max(12px,env(safe-area-inset-top)) - max(16px,env(safe-area-inset-bottom)));background:none;border:0;padding:0;border-radius:0;max-width:none}
+.pf-head{min-height:44px}
+.pf-sp{width:44px;height:44px}
+.pf-back{background:rgba(255,255,255,.09);border-radius:14px}
+.pf-exit{min-height:44px;padding:0 16px;border-radius:999px;background:rgba(255,255,255,.09);font-weight:600;font-size:14px;color:var(--t1);display:inline-flex;align-items:center}
+.pf-prog{gap:5px}
+.pf-prog i{height:4px;background:rgba(255,255,255,.15)}
+.pf-prog i.on{background:var(--grad)}
+.pf-h{font:600 28px/1.05 var(--f);letter-spacing:-.035em;margin:2px 0 0}
+.pf-lede{font-size:14px;margin-top:-4px}
+.pf-opts{gap:10px}
+.pf-opt{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:12px;min-height:64px;padding:12px 14px;border-radius:20px;background:var(--surf);border:1px solid var(--bs);text-align:left;width:100%}
+.pf-opt.on{background:linear-gradient(180deg,rgba(69,40,113,.35),var(--surf));border-color:var(--bs);box-shadow:inset 0 0 0 1.5px var(--pri-e);padding-bottom:12px}
+.pf-ib{width:40px;height:40px;border-radius:13px;background:rgba(255,255,255,.09);display:grid;place-items:center;color:var(--t1)}
+.pf-optorb{width:48px;height:48px;box-shadow:0 0 22px rgba(169,122,242,.4)}
+/* squads as photo rows */
+.pf-crew{position:relative;isolation:isolate;overflow:hidden;display:flex;align-items:center;gap:12px;min-height:76px;padding:12px 14px;border-radius:18px;background:var(--surf);border:1px solid var(--bs);text-align:left;width:100%}
+.pf-crew .duo{left:45%;z-index:-2}
+.pf-crewfade{position:absolute;inset:0;z-index:-1;background:linear-gradient(90deg,var(--surf) 45%,rgba(29,24,40,.3))}
+.pf-crew.on{box-shadow:inset 0 0 0 1.5px var(--pri-e)}
+.pf-crew .stk .av{width:30px;height:30px;margin-left:-8px;box-shadow:0 0 0 2px var(--surf)}
+.pf-crew .stk .av:first-child{margin-left:0}
+.pf-crew .pf-opt-t{flex:1}
+.pf-crew .pf-radio{margin-left:auto;background:rgba(19,16,27,.6)}
+.pf-crew.on .pf-radio{background:var(--pri);box-shadow:inset 0 0 0 5px var(--surf)}
+.pf-pick{border-color:rgba(194,165,246,.35)}
+.pf-pick .small:first-child{color:var(--acc)}
+/* the calendar */
+.pf-calwrap{display:flex;flex-direction:column;gap:6px}
+.pf-month{color:var(--t3)}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cal .dw{font:500 12px/16px var(--m);color:var(--t3);text-align:center}
+.n{aspect-ratio:.85;min-height:44px;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:6px 0;font-weight:600;font-size:14px;line-height:18px;background:var(--surf);color:var(--t1);text-align:center;border:0}
+.n.past,.n.out{opacity:.25}
+.n.l1{background:#2c2541}.n.l2{background:#3a2f58}.n.l3{background:var(--pri-t);box-shadow:inset 0 0 0 1px var(--pri-e)}
+.n.today .n-d{text-decoration:underline;text-underline-offset:3px}
+.n.sel{background:var(--grad);color:var(--base);box-shadow:0 0 0 2px var(--t1)}
+.n.pf-night:focus-visible{outline-offset:3px}
+.fs{display:flex;min-height:7px}
+.fs i{width:7px;height:7px;border-radius:999px;margin-right:-2px;box-shadow:0 0 0 1px var(--base)}
+.pf-sumcard{background:var(--surf);border:1px solid var(--bs);border-radius:20px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.pf-sumrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.pf-sumrow b{font-weight:600}
+/* step 3 */
+.pf-loc{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--t2)}
+.pf-change{min-height:44px;padding:0 4px;color:var(--acc);font-weight:600;font-size:14px}
+.pf-foot .btn{height:52px}
+/* the minimized call's Plan tab: "You're on a call with ...", on the crew's photo */
+.pf-tabs .pf-card{gap:14px}
+.pf-big{font:600 32px/1 var(--f);letter-spacing:-.04em}
+.pf-livecard{position:relative;isolation:isolate;overflow:hidden;min-height:180px;border-radius:24px;padding:16px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;box-shadow:0 0 0 1px rgba(255,255,255,.1)}
+.pf-livecard .duo{z-index:-2}
+.pf-livefade{position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,rgba(19,16,27,0) 20%,rgba(19,16,27,.92) 90%)}
+.pf-livecard .pf-mono{margin-bottom:auto}
+.pf-livecard h2{font-size:19px;line-height:24px}
+.pf-tab{position:relative}
+.pf-livedot{position:absolute;top:-24px;right:calc(50% - 30px);width:10px;height:10px;border-radius:999px;background:var(--ok);box-shadow:0 0 0 2px #1a1626}
+@media (min-width:900px){.pf-livedot{top:12px;right:12px}}
+
+/* ----- The call: the crew's photo behind the orb ----- */
+#kback{position:fixed;inset:0;z-index:0;pointer-events:none;background:#0d0916}
+#kback .kphoto{background-position:center 30%;opacity:.75}
+#kback .kwash{position:absolute;inset:0;background:linear-gradient(180deg,rgba(13,9,22,.45),rgba(13,9,22,.86) 56%,#0d0916)}
+body.sk-live{background:#0d0916}
+body.sk-live main{gap:8px}
+body.sk-live #top{flex:none}
+.ctop{justify-content:space-between}
+.ctop .min-btn{background:rgba(255,255,255,.09);border-radius:14px}
+.ctop-mid{flex:1;display:flex;justify-content:center;min-width:0}
+.livetag{flex:none;font:500 12px/16px var(--m);letter-spacing:.1em;padding:6px 10px;border-radius:999px;background:var(--red-t);color:var(--red)}
+body.sk-live #top .schips{justify-content:center;margin-top:4px}
+body.sk-live .vpill.ok{background:var(--ok-t);color:var(--ok-x)}
+/* the stage */
+#stage{flex:none;height:clamp(150px,29dvh,230px);margin:0 -16px;position:relative}
+#stage.small{height:clamp(110px,20dvh,150px)}
+.stage-btn{position:absolute;inset:0;width:100%;border-radius:24px}
+.stage-btn:focus-visible{outline-offset:-4px}
+.ring{position:absolute;left:50%;top:50%;border-radius:999px;border:1px solid rgba(194,165,246,.25);transform:translate(-50%,-50%);pointer-events:none}
+.ring.r1{width:min(180px,78%);aspect-ratio:1}
+.ring.r2{width:min(230px,96%);aspect-ratio:1;border-style:dashed;opacity:.5}
+#stage .ring{width:auto;height:76%}
+#stage .ring.r2{height:96%}
+#stage.small .ring{display:none}
+.stage-orb{position:absolute;left:50%;top:50%;width:clamp(84px,15dvh,108px);height:clamp(84px,15dvh,108px);margin:calc(clamp(84px,15dvh,108px) / -2) 0 0 calc(clamp(84px,15dvh,108px) / -2);
+  background:radial-gradient(circle at 35% 30%,#fff1ff 0%,#f5d6ff 10%,#c98adf 38%,#a97af2 62%,#452871 100%);box-shadow:0 0 50px rgba(169,122,242,.6)}
+#stage.small .stage-orb{width:80px;height:80px;margin:-40px 0 0 -40px}
+.orbit{position:absolute;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:14px;color:#13101b}
+.av.orbit{position:absolute}
+.orbit.talk{box-shadow:0 0 0 3px #0d0916,0 0 0 5px var(--ok)}
+.orbit.inv{background:transparent;border:1.5px dashed var(--t3);color:var(--t2)}
+.orbit.plus-n{font:600 12px var(--m);min-width:40px;padding:0}
+/* captions: Sidekick's line, large, words brightening as they're said */
+body.sk-live #say{flex:none}
+.cap{display:flex;flex-direction:column;gap:6px}
+.cap-t{font:600 22px/1.2 var(--f);letter-spacing:-.02em;color:var(--t1)}
+.cap-t.long{font-size:18px;line-height:24px}
+.cap.speaking .w{color:rgba(246,242,255,.45);animation:w-on .18s linear forwards;animation-delay:var(--d,0ms)}
+@keyframes w-on{to{color:var(--t1)}}
+.cap.sitting .cap-t,.cap.sys .cap-t{color:var(--t2);font-size:17px;line-height:23px}
+@media (prefers-reduced-motion:reduce){.cap.speaking .w{color:var(--t1)}}
+/* the card: just the answers, as chips (the caption has the question) */
+body.sk-live .board{background:rgba(29,24,40,.9);border-color:rgba(255,255,255,.08)}
+body.sk-live .board.slim{background:none;border:0;overflow:visible;display:flex;flex-direction:column;gap:8px}
+body.sk-live .board.slim .q{background:none;border:0;padding:0}
+body.sk-live .q .chip{min-height:44px;padding:0 14px;font-size:14px;background:rgba(29,24,40,.85);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+body.sk-live .q .chip[aria-pressed=true]{background:var(--pri-t);color:var(--acc);box-shadow:inset 0 0 0 1.5px var(--pri-e)}
+body.sk-live .q .chip.other{background:none;box-shadow:inset 0 0 0 1.5px var(--pri-e);border:0;color:var(--acc);border-style:dashed}
+body.sk-live .q .chip .vn{font:500 12px var(--m);color:var(--t3)}
+body.sk-live .q.listen .small{color:var(--t2)}
+.bh.slim{padding:0;border-radius:16px;background:rgba(29,24,40,.7);border:1px solid rgba(255,255,255,.06);padding-left:14px}
+.bh.slim .plan-toggle{border-top:0;width:auto;margin-left:auto}
+body.sk-live .board.slim #planRows{background:rgba(29,24,40,.9);border-radius:16px;overflow:hidden}
+body.sk-live .heard{padding:0}
+/* "I've got everything" */
+body.sk-live .board.confirm{background:rgba(29,24,40,.9);border-color:rgba(255,255,255,.08)}
+.cf-b{padding:14px}
+.cf-recap{gap:6px}
+.cf-recap .chip{min-height:32px;padding:0 12px;font-size:13px;background:rgba(29,24,40,.85);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.board.confirm .cd-bar{height:3px;background:rgba(255,255,255,.12)}
+.board.confirm .cd-bar i{background:var(--grad)}
+/* the bar: mic · chat · orb · leave */
+body.sk-live .dock{background:none;border:0;padding:0 12px max(14px,env(safe-area-inset-bottom));max-width:464px}
+body.sk-live .ctrls{height:64px;border-radius:28px;background:rgba(28,22,42,.85);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.09);justify-content:space-around;gap:0;padding:0 8px}
+body.sk-live .ctrl{width:44px;height:44px;background:rgba(255,255,255,.1)}
+body.sk-live .ctrl svg{width:20px;height:20px}
+body.sk-live .ctrl-sp{width:44px;height:44px}
+body.sk-live .orb-ctrl{width:52px;height:52px;background:none;box-shadow:none}
+body.sk-live .orb-ctrl .orb{width:34px;height:34px;box-shadow:0 0 22px rgba(169,122,242,.4)}
+body.sk-live .orb-ctrl[aria-expanded=true]{box-shadow:inset 0 0 0 2px var(--acc)}
+body.sk-live .ctrl.end{width:56px;border-radius:18px;background:var(--red);color:var(--base)}
+body.sk-live .ctrl[aria-pressed=true]{background:var(--pri-t)}
+body.sk-live .udot{top:6px;right:6px;background:var(--hot);box-shadow:none}
+body.sk-live .vhint{background:rgba(69,40,113,.9)}
+/* picks: four facts and one vote; events are tickets, places have a rounded corner */
+.picks{display:flex;flex-direction:column;gap:12px}
+body.sk-live .pick-card{position:relative;isolation:isolate;overflow:hidden;min-height:176px;padding:14px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;border:0;border-radius:20px;background:#1d1828;box-shadow:0 0 0 1px rgba(255,255,255,.1)}
+.pick-card .pk-ph{z-index:-2}
+.pk-fade{position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,rgba(19,16,27,.1) 0%,rgba(19,16,27,.92) 70%)}
+.pick-card.place{border-radius:20px 20px 64px 20px!important}
+
+.pick-card.ticket{-webkit-mask:radial-gradient(circle 9px at 0 46%,transparent 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 9px at 100% 46%,transparent 98%,#000) right/51% 100% no-repeat;mask:radial-gradient(circle 9px at 0 46%,transparent 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 9px at 100% 46%,transparent 98%,#000) right/51% 100% no-repeat}
+.pk-badge{position:absolute;top:12px;left:12px;right:12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pk-badge .tag{background:rgba(19,16,27,.75);color:var(--t1);gap:5px}
+.pk-badge .tag svg{width:13px;height:13px}
+.pk-badge .pk-when{font-size:12px;line-height:16px;font-weight:500;color:var(--t1);background:rgba(19,16,27,.75);padding:4px 9px;border-radius:999px}
+.pk-t{font:600 20px/1.1 var(--f);letter-spacing:-.02em;margin-top:44px}
+.pk-for{font-size:14px;line-height:19px;font-weight:500;color:var(--acc)}
+body.sk-live .pk-meta{font-size:13px;line-height:18px;color:var(--t2)}
+body .pick-card .pick.vote-btn{margin-top:8px;padding:0 16px;flex-direction:row;justify-content:center;align-items:center;display:flex;min-height:44px;border-radius:999px;display:grid;place-items:center;text-align:center;font-weight:600;font-size:14px;background:rgba(19,16,27,.6);border:1px solid rgba(255,255,255,.2);color:var(--t1);width:100%}
+body .pick-card .pick.vote-btn[aria-pressed=true]{background:var(--grad);color:var(--base);border-color:transparent}
+body.sk-live .pick-card .pk-foot{padding:4px 0 0;flex-direction:row;align-items:center;flex-wrap:wrap;gap:4px 12px}
+body.sk-live .pick-card .pk-link{background:none!important;padding:0;color:var(--acc);font-size:13px}
+body.sk-live .wild-card{background:rgba(29,24,40,.9)}
+body.sk-live #lock{flex:none}
+/* the People and chat sheets */
+.sheet-panel{gap:12px}
+.people-sheet .pp-s.on{color:var(--ok-x)}
+.link-in{font:500 13px var(--m);color:var(--t3);border-color:rgba(255,255,255,.1)}
+.chat-sheet .msg.sk{background:#2a1f45;border:0}
+.chat-sheet .msg.me{background:var(--pri-t)}
+.chat-sheet .msg{background:var(--raise)}
+/* the red ✕ asks first */
+.end-sheet{gap:10px}
+.end-sheet h2{font-size:19px}
+.end-sheet .btn{height:48px}
+/* minimized: the On call bar in the violet tint, pushing the app down (the app sits under it, never behind it) */
+.oncall{min-height:56px;gap:10px;background:var(--pri-t);border-bottom:0}
+.oncall .orb{box-shadow:0 0 16px rgba(169,122,242,.5)}
+.oncall .btn{height:44px;padding:0 18px;background:var(--grad);color:var(--base)}
+
+/* ----- After the call, and the join screen: the crew's photo across the top ----- */
+body.sk-done main{gap:0}
+.done-hero{position:absolute;top:0;left:0;right:0;height:min(300px,40dvh);isolation:isolate;overflow:hidden;z-index:-1;pointer-events:none}
+.done-hero .duo{z-index:-2}
+.done-fade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(19,16,27,.2),var(--base) 96%)}
+body.sk-done main > .done-hero,body.sk-done #body > .done-hero{margin:0 -16px}
+body.sk-done #body{position:relative;z-index:0}
+section.done{display:flex;flex-direction:column;gap:10px;padding-top:min(140px,18dvh);min-height:calc(100dvh - 40px)}
+section.done.left{padding-top:12dvh}
+.done-t{font:600 30px/1.05 var(--f);letter-spacing:-.035em}
+.done .recap-act{margin-top:4px}
+.done-card h2{font-size:16px}
+.done-say{display:flex;flex-direction:column;gap:2px;font-size:14px;line-height:20px;color:var(--t2)}
+.rate button{display:grid;place-items:center;text-align:center;height:48px;font-size:15px}
+.done-foot{margin-top:auto;padding-top:12px;display:flex;flex-direction:column;gap:6px}
+.done-link{min-height:44px;display:flex;align-items:center;justify-content:center;color:var(--acc);font-weight:600;font-size:14px;text-decoration:none}
+.done-url{color:var(--soc-x)}
+.join{padding-top:min(150px,20dvh)}
+.join-home{position:absolute;top:0;left:0;min-height:44px;display:flex;align-items:center;font-weight:600;color:var(--t1);text-decoration:none}
+.join .done-t{font-size:30px}
+.join-who{gap:8px}
+.join-who .av{width:30px;height:30px;margin-left:-6px}
+.join-who .av:first-child{margin-left:0}
+.av.live{box-shadow:0 0 0 2px var(--base),0 0 0 4px var(--ok)}
+.join .btn.quiet{height:48px}
+@media (min-width:900px){
+  .pf:not(.pf-tabs) .pf-main{padding-top:40px;display:block;max-width:480px}
+  .pf:not(.pf-tabs) .pf-card{min-height:0}
+  .pf:not(.pf-tabs) .pf-foot{flex-direction:column}
+  .pf:not(.pf-tabs) .pf-foot .btn{width:100%}
+}
+body.sk-live .vote{background:rgba(29,24,40,.9);border-color:rgba(255,255,255,.08);gap:8px}
+body.sk-live .vote-opt{min-height:0;padding:10px 12px;gap:2px}
+.join{position:static}
+.join-home{left:16px;top:max(6px,env(safe-area-inset-top))}
+body .pick-card.place .pick.vote-btn{width:calc(100% - 30px)}
+body.sk-compact #stage{display:none}
+body.sk-compact .cap-t{font-size:17px;line-height:22px}
+.join .tag.hot{align-self:flex-start}
+@media (max-height:700px){#stage{height:clamp(130px,25dvh,200px)}.cap-t{font-size:20px}.cap-t.long{font-size:17px;line-height:22px}}
+.bh.slim .prog{flex:0 0 auto}
+.bh.slim .plan-toggle{flex:0 1 auto;white-space:nowrap}

@@ -11,6 +11,8 @@
 <link rel="stylesheet" href="/sidekick.css">
 </head>
 <body>
+<!-- Violet duotone for every photo: greyscale, then shadows #13101b to highlights #c2a5f6 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><filter id="duoViolet" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncR type="table" tableValues="0.075 0.761"/><feFuncG type="table" tableValues="0.063 0.647"/><feFuncB type="table" tableValues="0.106 0.965"/></feComponentTransfer></filter></svg>
 <main id="app" aria-live="polite"><p class="muted center pad">Loading…</p></main>
 <div class="conn" id="conn" role="status" hidden>Reconnecting…</div>
 <div class="toast" id="toast" role="status"></div>
