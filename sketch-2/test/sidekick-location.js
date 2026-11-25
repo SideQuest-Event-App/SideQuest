@@ -278,7 +278,6 @@ const leaks = (label, text) => DIGITS.filter((d) => String(text).includes(d)).ma
       await page.waitForSelector("[data-mode=text]");
       assert.deepStrictEqual(await pressed(page), ["here"]);
       await page.fill("#name", "Maya");
-      await page.click('.chips[data-name="budget"] .chip[data-value="50"]');
       await page.click("[data-mode=text]");
       await page.waitForSelector("#dock");
       await ui.page.waitForSelector("text=near North York Centre");
@@ -379,7 +378,7 @@ const leaks = (label, text) => DIGITS.filter((d) => String(text).includes(d)).ma
       const page = ui.page;
       await page.waitForSelector(".pick-card.ev");
       await page.waitForSelector(".pick-card.pl");
-      assert.match(await page.textContent(".q > .small"), /A show to go to, or a spot to drop in\. Tap one to vote\./);
+      assert.match(await page.textContent("#say .cap-t"), /Two good ones\. Tap the one you want\.|closest/);
       const evCard = page.locator(".pick-card.ev");
       const plCard = page.locator(".pick-card.pl");
       assert.strictEqual((await evCard.locator(".tag").textContent()).trim(), "Event");
@@ -395,13 +394,13 @@ const leaks = (label, text) => DIGITS.filter((d) => String(text).includes(d)).ma
       assert.match(await plCard.locator("a.pk-link").textContent(), /^Directions/);
       assert.match(await plCard.locator("a.pk-link").getAttribute("href"), /^https:\/\/maps\.google\.com\//);
       assert.match(await plCard.textContent(), /Place info from Google Maps/);
-      assert.match(await plCard.textContent(), /Rated 4\.6/);
+      assert(!/Rated|crew match/.test(await plCard.textContent()), "four plain facts, no ratings or scores");
       // 44 px targets, nothing under the dock, text no smaller than 12 px, at most 3 weights
       for (const box of [await evCard.locator("a.pk-link").boundingBox(), await plCard.locator("a.pk-link").boundingBox()].filter(Boolean)) assert(box.height >= 44, `link is ${box.height}px tall`);
       const check = await page.evaluate(() => {
         window.scrollTo(0, document.body.scrollHeight);
         const dock = document.getElementById("dock").getBoundingClientRect();
-        const last = [...document.querySelectorAll("#body > *")].pop().getBoundingClientRect();
+        const last = document.getElementById("body").getBoundingClientRect();
         const texts = [...document.querySelectorAll(".pick-card *")].filter((el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()));
         const sizes = texts.map((el) => parseFloat(getComputedStyle(el).fontSize));
         const weights = [...new Set(texts.map((el) => getComputedStyle(el).fontWeight))];
@@ -413,7 +412,7 @@ const leaks = (label, text) => DIGITS.filter((d) => String(text).includes(d)).ma
       assert(check.weights.every((w) => ["400", "500", "600"].includes(w)), `weights ${check.weights}`);
       assert(check.wide, "no sideways scroll at 375px");
       // Phone-sized shots (a full-page shot would draw the fixed dock over the middle)
-      await page.evaluate(() => { const q = document.querySelector(".q"); window.scrollTo(0, q.getBoundingClientRect().top + window.scrollY - 12); });
+      await page.evaluate(() => { const q = document.querySelector(".picks"); window.scrollTo(0, q.getBoundingClientRect().top + window.scrollY - 12); });
       await page.screenshot({ path: path.join(SHOTS, "4a-mixed-picks-event.png") });
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
       await page.screenshot({ path: path.join(SHOTS, "4b-mixed-picks-place.png") });

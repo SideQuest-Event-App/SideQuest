@@ -120,11 +120,11 @@ async function a11y(page, where) {
 
     await test("(b) Voice first: the voice phone waits about 5 s for a spoken answer; the text phone sees the card straight away", async () => {
       assert(room.card && room.card.slot === "night", `the night card is up (${JSON.stringify(room.card)})`);
-      await jayPage.waitForSelector(".q .ans", { timeout: 2000 });
+      await jayPage.waitForSelector(".q [data-answer]", { timeout: 2000 });
       const jayAt = Date.now() - asked;
       await asia.waitForSelector(".q.listen", { timeout: 2000 });
-      assert.strictEqual(await asia.locator(".q .ans").count(), 0, "no tap options yet on the voice phone");
-      await asia.waitForSelector(".q .ans", { timeout: 8000 });
+      assert.strictEqual(await asia.locator(".q [data-answer]").count(), 0, "no tap options yet on the voice phone");
+      await asia.waitForSelector(".q [data-answer]", { timeout: 8000 });
       const asiaAt = Date.now() - asked;
       assert(jayAt < 2000, `text phone: ${jayAt} ms`);
       assert(asiaAt >= 4500 && asiaAt <= 7500, `voice phone: ${asiaAt} ms (about 5 s)`);
@@ -164,24 +164,23 @@ async function a11y(page, where) {
       await asia.waitForFunction(() => !document.querySelector(".hc"), null, { timeout: 9000 });
     });
 
-    await test("(c) Typing reads like a group chat: Sidekick's replies in the chat sheet, with quick replies that answer", async () => {
+    await test("(c) Typing reads like a group chat: Sidekick's replies in the chat sheet (messages only), answers on the card", async () => {
       await jayPage.click("#chatBtn");
       await jayPage.waitForSelector("#chatSheet .chat .thread .msg.sk", { timeout: 4000 });
-      await jayPage.waitForSelector(".chips.quick .chip", { timeout: 4000 });
+      assert.strictEqual(await jayPage.locator("#chatSheet .chip").count(), 0, "no answer chips in the chat");
       const sk = await jayPage.locator(".chat .msg.sk .msg-t").last().textContent();
       const spoken = room.said.filter((x) => !x.system).slice(-1)[0];
       assert(sk.split(/\s+/).length <= spoken.text.split(/\s+/).length, `text version is no longer than the spoken one: "${sk}" vs "${spoken.text}"`);
-      const quick = jayPage.locator(".chips.quick .chip", { hasText: "Saturday" });
-      assert(await quick.count(), "a Saturday quick reply");
-      await quick.first().click();
-      await until(() => room.answers[jay].night && room.answers[jay].night.value.includes(SAT), 4000, "Jay's quick reply to count");
+      // Jay types his answer; it counts and lands in the thread
+      await jayPage.fill("#chatLine", "Saturday works for me");
+      await jayPage.press("#chatLine", "Enter");
+      await until(() => room.answers[jay].night && room.answers[jay].night.value.includes(SAT), 6000, "Jay's typed answer to count");
       await jayPage.waitForFunction(() => [...document.querySelectorAll(".msg.me .msg-t")].some((m) => /Saturday/.test(m.textContent)), null, { timeout: 4000 });
       // Jay types; Sidekick's next line lands in the thread
       await post(`/api/sk/rooms/${rid}/line`, { p: maya, text: "saturday after 6 for me", kind: "spoken" });
       room.lastSaidAt = 0;
       await until(() => room.card && room.card.slot !== "night", 6000, "the next question");
       await jayPage.waitForFunction((n) => document.querySelectorAll(".chat .msg.sk").length >= n, 2, { timeout: 5000 });
-      await jayPage.waitForSelector(".chips.quick .chip", { timeout: 4000 });
       await jayPage.evaluate(() => window.scrollTo(0, document.scrollingElement.scrollHeight));
       await wait(400);
       await jayPage.screenshot({ path: path.join(SHOTS, "chat-thread.png") });
@@ -201,7 +200,7 @@ async function a11y(page, where) {
       await asia.waitForSelector(".recap #addCal", { timeout: 6000 });
       const title = room.locked.title;
       assert((await asia.textContent("#recapTitle")).trim() === title, "the recap names the plan");
-      assert(/Asia, Maya, Jay/.test(await asia.textContent(".recap-who")), "who's going");
+      assert(/3 going/.test(await asia.textContent("#doneMeta")), "who's going");
       const [dl] = await Promise.all([asia.waitForEvent("download", { timeout: 5000 }), asia.click("#addCal")]);
       const file = path.join(tmp, "plan.ics");
       await dl.saveAs(file);
@@ -224,7 +223,7 @@ async function a11y(page, where) {
       await until(() => room.said.some((x) => x.move === "wrap"), 9000, "the goodbye line");
       const bye = room.said.filter((x) => x.move === "wrap").pop().text;
       assert(/see you|have the best|enjoy|lovely/i.test(bye), `a warm goodbye: ${bye}`);
-      await asia.waitForFunction((t) => document.getElementById("say").textContent.includes(t.slice(0, 20)), bye, { timeout: 4000 });
+      await asia.waitForFunction((t) => document.getElementById("doneSay").textContent.includes(t.slice(0, 20)), bye, { timeout: 4000 });
       await asia.screenshot({ path: path.join(SHOTS, "recap.png") });
       await asia.screenshot({ path: path.join(SHOTS, "recap-full.png"), fullPage: true });
       await a11y(asia, "recap");

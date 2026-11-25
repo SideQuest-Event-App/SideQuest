@@ -14,9 +14,9 @@
 //  8. "Don't learn from this plan": that person's taste doesn't move; someone else's does.
 //  9. A form's "Decide by": the pink "Closes ..." tag, and at that time the form closes and Sidekick picks.
 // 10. Friends picked in the app get an in-app invite linking to the room, held during their quiet hours.
-// 11. The app's tab bar is hidden during a live call and back when it ends, with "Back to SideQuest".
+// 11. No app tab bar during a live call or after it; the ended screen has "Back to Discover" (the red ✕ asks first).
 // 12. 375 and 1280 px: no sideways scroll, 44 px targets, text 12 px or larger, weights 400/500/600.
-// 13. The People sheet (from the people row, "+N" for invited people), the chat sheet (unread dot, typing),
+// 13. The People sheet (from the stage, dashed circles for invited people), the chat sheet (unread dot, typing),
 //     minimize ("On call · Return" over the app, the same call still live) and no page scroll at 375×667 and 390×844.
 //
 // Screenshots (375 px, 2x) go to CALLUI_SHOTS (or a temp folder). The database file is copied first and put back.
@@ -388,22 +388,26 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       const { ctx, page } = await phone();
       await page.goto(`${base}/sk?pick=${ev.id}&persona=friend`);
       await page.waitForSelector("#pfPick");
-      assert((await page.textContent("#pfPick")).includes(ev.title), "the event is on the intro");
-      assert.strictEqual((await page.textContent("#pfGo")).trim(), "Plan around this event");
-      await page.click("#pfGo");
+      assert((await page.textContent("#pfPick")).includes(ev.title), "the event is on step 1");
       await page.click("#pfNext"); // the squad
       await page.waitForSelector(".pf-night");
       assert.deepStrictEqual(await page.$$eval('.pf-night[aria-pressed="true"]', (b) => b.map((x) => x.dataset.date)), [SAT], "that night is picked");
       await page.click("#pfNext");
-      await page.click("#pfLearn"); // and don't learn from it (the planner's own switch)
+      await page.click("#pfLocChange");
       await page.click('.chips[data-name="origin"] .chip[data-value="union"]');
       await page.click("#pfStart");
       await page.waitForSelector("#dock .ctrls");
       const rid = page.url().split("/sk/")[1];
       const me = await page.evaluate((r) => JSON.parse(localStorage.getItem(`sk:${r}`)), rid);
+      // Don't learn from it: the switch is in the call's orb sheet
+      if (await page.locator("#sheet").count()) await page.keyboard.press("Escape");
+      await page.click("#orbBtn");
+      await page.click("#orbSheet #learnBtn");
+      await until(async () => (await viewOf(rid, me.person)).me.noLearn === true, 4000, "don't learn on");
+      await page.keyboard.press("Escape");
       const v = await viewOf(rid, me.person);
       assert.strictEqual(v.candidate, ev.id, "the room plans around the event");
-      assert.strictEqual(v.me.noLearn, true, "Don't learn from this plan, from the last step");
+      assert.strictEqual(v.me.noLearn, true, "Don't learn from this plan, from the orb sheet");
       await page.waitForSelector(".cand-note");
       // Asked for picks: it's the first one
       const R = (await post(`/api/sk/rooms/${rid}/join`, { name: "Ravi", mode: "text", answers: {} })).body.person;
@@ -411,7 +415,7 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       const picks = (await viewOf(rid, R)).picks;
       assert.strictEqual(picks[0].id, ev.id, "the saved event is a pick");
       assert.strictEqual(picks[0].candidate, true);
-      await page.waitForFunction(() => /You saved this/.test(document.body.textContent));
+      await page.waitForFunction(() => /You saved this|The one you saved/.test(document.body.textContent));
       await ctx.close();
     });
 
@@ -501,18 +505,18 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       await act(tess, "saveSettings", { change: { notifications: { quiet: false } } });
       const { ctx, page } = await phone();
       await page.goto(`${base}/sk?persona=friend`);
-      await page.click("#pfGo");
       await page.click('[data-pfpath="friends"]');
       await page.click(`[data-pffriend="u:${ravi}"]`);
       await page.click(`[data-pffriend="u:${tess}"]`);
       await page.click("#pfNext");
       await page.waitForSelector(".pf-night");
-      for (const b of await page.$$('.pf-night[aria-pressed="true"]')) await b.click();
+      for (const d of await page.$$eval('.pf-night[aria-pressed="true"]', (b) => b.map((x) => x.dataset.date))) await page.click(`.pf-night[data-date="${d}"]`);
       await page.click(`.pf-night[data-date="${SAT}"]`);
       await page.click("#pfNext");
       await page.click('[data-pfhow="form"]');
       await page.waitForSelector("[data-pfdeadline]");
       assert((await page.$$("[data-pfdeadline]")).length >= 1, "Decide by choices on the form path");
+      await page.click("#pfLocChange");
       await page.click('.chips[data-name="origin"] .chip[data-value="union"]');
       await page.click("#pfStart");
       await page.waitForSelector(".formsent #closesTag");
@@ -531,7 +535,7 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       await ctx.close();
     });
 
-    await test("11+12. No tab bar during the call, and 375 / 1280 px checks; it's back after the call, with Back to SideQuest", async () => {
+    await test("11+12. No tab bar during the call, and 375 / 1280 px checks; after the call, Back to Discover (still no tab bar)", async () => {
       const call = await newCall();
       await toLead(call);
       for (const [width, height] of [[375, 740], [1280, 800]]) {
@@ -545,14 +549,13 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
         await basics(page, `${width} orb sheet`);
         await ctx.close();
       }
-      // The planner ends the call: the tabs come back, and Back to SideQuest lands in the app (the Plan tab, signed in)
+      // The planner ends the call (the ✕ asks first): Back to Discover lands in the app
       const { ctx, page } = await callPage(call);
-      page.on("dialog", (d) => d.accept());
       await page.click("#leave");
+      await page.click("#endSheet #endAll");
       await page.waitForSelector("#backHome");
-      await page.waitForSelector("#callNav");
-      assert.deepStrictEqual(await page.$$eval("#callNav .pf-tab", (as) => as.map((a) => a.textContent.trim())), ["Discover", "Squads", "Plan", "Sidequests", "Profile"]);
-      assert.strictEqual((await page.textContent("#backHome")).trim(), "Back to SideQuest");
+      assert.strictEqual(await page.locator("#callNav").count(), 0, "the end screen's buttons say where they go");
+      assert.strictEqual((await page.textContent("#backHome")).trim(), "Back to Discover");
       await basics(page, "375 call ended");
       await shot(page, "375-call-ended.png");
       // Still there after the survey is sent
@@ -560,15 +563,16 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       await page.click("#sendSurvey");
       await page.waitForFunction(() => /Thanks/.test(document.getElementById("body").textContent));
       await page.waitForSelector("#backHome");
-      await Promise.all([page.waitForURL(`${base}/sk`), page.click("#backHome")]);
-      await page.waitForSelector(".pf-nav");
+      await Promise.all([page.waitForURL(`${base}/`), page.click("#backHome")]);
+      assert.strictEqual(await page.evaluate(() => sessionStorage.getItem("sq2.screen")), "discover");
       await ctx.close();
-      // Someone who leaves (not the planner) gets the same way back; signed out, it goes to Discover
+      // Someone who leaves (not the planner) gets the same way back
       const c2 = await newCall();
       const ph = await phone({ user: null, rooms: { [c2.rid]: { person: c2.R, mode: "text" } } });
       await ph.page.goto(`${base}/sk/${c2.rid}?cardwait=0`);
       await ph.page.waitForSelector("#dock .ctrls");
       await ph.page.click("#leave");
+      await ph.page.click("#endSheet #leaveCall");
       await ph.page.waitForSelector("#backHome");
       await Promise.all([ph.page.waitForURL(`${base}/`), ph.page.click("#backHome")]);
       assert.strictEqual(await ph.page.evaluate(() => sessionStorage.getItem("sq2.screen")), "discover");
@@ -583,7 +587,7 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       const { ctx, page } = await callPage(call);
       await page.waitForSelector("#peopleBtn");
       assert.strictEqual(await page.locator("#sheet").count(), 0, "not opened by itself when the crew isn't alone");
-      assert.strictEqual((await page.textContent("#peopleBtn .plus-n")).trim(), "+2", "+2 for Maya and Kai");
+      assert.strictEqual(await page.locator("#peopleBtn .orbit.inv").count(), 2, "dashed circles for Maya and Kai");
       assert.strictEqual(await page.locator("#peopleBtn .av").count(), 2, "two in the call");
       await page.click("#peopleBtn");
       await page.waitForSelector("#sheet [role=dialog]");
@@ -649,10 +653,10 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       const frame = page.frameLocator("#appFrame");
       await frame.locator(".pf-nav").first().waitFor({ timeout: 10000 }); // the app's Plan tab, with its tabs
       assert(await page.evaluate(() => document.getElementById("app").hasAttribute("inert")), "the call stays mounted underneath");
-      // The Plan tab knows: "You're on a call", no way to start a second one
-      await frame.locator("#pfReturn").waitFor({ timeout: 10000 });
+      // The Plan tab knows: "You're on a call", no way to start a second one, and no second Return (the bar has it)
+      await frame.locator("#pfLive").waitFor({ timeout: 10000 });
       assert.strictEqual((await frame.locator("#pfTitle").textContent()).trim(), "You're on a call with Test crew");
-      assert.strictEqual(await frame.locator("#pfGo").count(), 0, "no Let's plan while a call is live");
+      assert.strictEqual(await frame.locator("#pfNext, #pfReturn").count(), 0, "no new plan and no second Return while a call is live");
       assert.strictEqual(await page.$eval("#minWrap .oncall", (e) => getComputedStyle(e).backgroundColor), "rgb(69, 40, 113)", "the On call bar is the design's purple");
       // Content clears the tab bar and its raised orb
       const clear = await frame.locator("body").evaluate(() => {
@@ -666,8 +670,8 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       await shot(page, "375-minimized-on-call-v2.png");
       // The call carries on while minimized
       await post(`/api/sk/rooms/${call.rid}/line`, { p: call.R, text: "still here", kind: "typed" });
-      // Return from the Plan tab's own button works too
-      await frame.locator("#pfReturn").click();
+      // Return, then minimize and return again
+      await page.click("#returnCall");
       await page.waitForFunction(() => !document.getElementById("minWrap"));
       await page.click("#minBtn");
       await page.waitForSelector("#minWrap #returnCall");
