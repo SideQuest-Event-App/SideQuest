@@ -146,6 +146,8 @@ function restore() {
         return { r: q("feFuncR").getAttribute("tableValues"), g: q("feFuncG").getAttribute("tableValues"), b: q("feFuncB").getAttribute("tableValues"), sat: q("feColorMatrix").getAttribute("values") };
       });
       assert.deepStrictEqual(f, { r: "0.075 0.761", g: "0.063 0.647", b: "0.106 0.965", sat: "0" });
+      // Wait for the photos to be drawn (slower machines render the rows a moment later)
+      await page.waitForFunction(() => document.querySelectorAll(".dx-img, .poster.has-img, .ph").length >= 3, null, { timeout: 15000 }).catch(() => {});
       const filters = await page.$$eval(".dx-img, .poster.has-img, .ph", (els) => els.map((e) => getComputedStyle(e).filter));
       assert(filters.length >= 3 && filters.every((x) => /url\("?#duoViolet"?\)/.test(x)), `filters: ${[...new Set(filters)].join(" | ")}`);
       assert(!(await page.evaluate(() => [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => /grayscale\(1\)/.test(r.cssText)); } catch { return false; } }))), "no greyscale photo rule left");

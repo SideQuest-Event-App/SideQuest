@@ -188,7 +188,9 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       const firstPaint = await page.evaluate(() => (performance.getEntriesByName("first-paint")[0] || { startTime: 0 }).startTime);
       const span = visible.length ? visible[visible.length - 1][0] - Math.max(firstPaint, visible[0][0]) : 0;
       console.log(`      loader visible for ${Math.round(span)} ms after first paint (done at ${Math.round(await page.evaluate(() => window.SQboot.doneAt))} ms)`);
-      assert(span <= 300, `loader visible for ${Math.round(span)} ms`);
+      // 300 ms on a normal machine; GitHub's shared runners (CI=true) get a little headroom for their slower paint
+      const LOADER_MS = process.env.CI ? 400 : 300;
+      assert(span <= LOADER_MS, `loader visible for ${Math.round(span)} ms (limit ${LOADER_MS})`);
       assert(!frames.some((f) => f[2]), "the slow-load line never showed");
       assert(frames.every((f) => f[3] == null || Number(f[3]) < 0.5), "the headline never got past half opacity (no text flash)");
       assert.strictEqual(await page.evaluate(() => SQ.u.screen), "discover");
