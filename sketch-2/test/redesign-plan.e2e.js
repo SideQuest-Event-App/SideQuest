@@ -122,7 +122,6 @@ async function until(fn, ms, what) {
       await ctx.addInitScript(([u, r, sh]) => {
         try {
           if (u) localStorage.setItem("sq2.user", u);
-          localStorage.setItem("sk:agentVoice", "false");
           localStorage.setItem("sk:voiceHint", "true");
           for (const [rid, me] of Object.entries(r)) localStorage.setItem(`sk:${rid}`, JSON.stringify(me));
           if (sh) { window.__shared = []; navigator.share = (d) => { window.__shared.push(d); return Promise.resolve(); }; }
@@ -214,12 +213,13 @@ async function until(fn, ms, what) {
       assert.strictEqual((await page.textContent("#pfExit")).trim(), "✕ Exit");
       assert(await page.locator(".pf-crew .duo").count() >= 1, "squads as photo rows");
       assert.strictEqual(await page.$eval(".pf-crew .duo", (e) => getComputedStyle(e).filter), 'url("#duoViolet")');
-      assert(/Pick Sidequesters/.test(await page.textContent(".pf-opts")) && /Send a link/.test(await page.textContent(".pf-opts")));
+      const optsText = await page.textContent(".pf-opts");
+      assert(/Choose people/.test(optsText) && /I'll decide later/.test(optsText) && !/Send a link/.test(optsText), "squads, Choose people, I'll decide later");
       await wayOut(page, "step 1");
       await shot(page, "step1-who");
       // Picking something: Exit asks first
       await page.click('[data-pfpath="friends"]');
-      await page.waitForSelector('h1:has-text("Pick Sidequesters")');
+      await page.waitForSelector('h1:has-text("Choose people")');
       await wayOut(page, "friends");
       await noTabBar(page, "friends");
       await page.click(`[data-pffriend="u:${ravi}"]`);
@@ -480,13 +480,12 @@ async function until(fn, ms, what) {
       await ctx.close();
     });
 
-    await test("o. No dead ends: the link step, the form, and the Plan tab returning to a live call", async () => {
+    await test("o. No dead ends: I'll decide later, the form, and the Plan tab returning to a live call", async () => {
       const { ctx, page } = await phone();
       await page.goto(`${base}/sk?persona=friend`);
-      await page.click('[data-pfpath="link"]');
-      await page.waitForSelector("#pfShare #copy");
-      await wayOut(page, "link");
-      await page.click("#pfNext");
+      await page.click('[data-pfpath="later"]');
+      await page.waitForSelector('h1:has-text("Which nights work?")');
+      await wayOut(page, "later");
       await page.click("#pfNext");
       await page.click('[data-pfhow="form"]');
       await page.click("#pfLocChange");

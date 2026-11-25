@@ -209,7 +209,7 @@
     let nights = [];
     let voiceAgent = false; // ElevenLabs is set up and under its minute cap
     try { ({ nights, voiceAgent } = await api("/api/sk/nights")); } catch (err) { toast(err.message); }
-    const autoAgent = Boolean(voiceAgent) && !STUDY && agentPref;
+    const autoAgent = Boolean(voiceAgent) && !STUDY;
     if (autoAgent) loadEL().catch(() => {}); // fetch the SDK now, so the Start tap doesn't wait for it
     const weekend = nights.filter((n) => n.events > 0 && /^(Fri|Sat)/.test(n.label));
     const defaults = (weekend.length ? weekend : nights.filter((n) => n.events > 0)).slice(0, 2).map((n) => n.date);
@@ -428,7 +428,7 @@
     return [me, ...keys.map((k, i) => d.people[k] && { ...d.people[k], colour: PF_COLOURS[i % PF_COLOURS.length] }).filter(Boolean)];
   }
   const squadName = () => ((flow.data.squads.find((s) => s.id === flow.squad) || {}).name || "");
-  const crewName = () => flow.crew || (flow.path === "squad" ? squadName() : flow.data && flow.data.me.name ? `${flow.data.me.name}'s crew` : "The crew");
+  const crewName = () => flow.crew || (flow.path === "squad" ? squadName() : flow.data && flow.data.me.name ? `${flow.data.me.name}'s plan` : "The crew");
   const pfNightOf = (date) => flow.data.nights.find((n) => n.date === date);
   const shortNight = (date) => { const n = pfNightOf(date); return n ? `${n.dow} ${n.day}` : date; };
 
@@ -500,7 +500,7 @@
     }
     ss.set("sk:persona", flow.data.persona);
     if (flow.data.squad) { flow.path = "squad"; flow.squad = flow.data.squad; }
-    if (flow.voiceAgent && agentPref) loadEL().catch(() => {});
+    if (flow.voiceAgent) loadEL().catch(() => {});
     await grown;
     flow.reveal = true;
     if (flow.path === "squad" && sq) pfWhen(); else pfWho();
@@ -533,7 +533,8 @@
     if (e.target.closest("[data-exitno]")) return void closeExitSheet();
   });
 
-  // ----- Step 1: who's coming? A squad (photo rows), Sidequesters, or a link you send yourself -----
+  // ----- Step 1: who's coming? A squad (photo rows), people you choose, or "I'll decide later" (straight to the nights;
+  // the call link is shared from the call's People sheet) -----
   function pfWho() {
     flow.step = "who";
     const d = flow.data;
@@ -548,13 +549,14 @@
     };
     const picked = flow.path === "friends" && flow.friends.length ? flow.friends.map((k) => d.people[k] && d.people[k].name).filter(Boolean).join(", ") : "";
     const card = (key, icon, title, sub) => `<button class="pf-opt${flow.path === key ? " on" : ""}" role="radio" aria-checked="${flow.path === key}" data-pfpath="${key}"><span class="pf-ib" aria-hidden="true">${icon}</span><span class="pf-opt-t"><b>${title}</b><span class="small">${sub}</span></span></button>`;
+    if (flow.path === "link") flow.path = "later"; // older builds had "Send a link" here
     const ready = flow.path === "squad" ? Boolean(flow.squad) : flow.path === "friends" ? flow.friends.length > 0 : Boolean(flow.path);
     const around = flow.pick ? `<div class="pf-pick" id="pfPick"><span class="small">Planning around your Saved</span><b>${esc(flow.pick.title)}</b><span class="small">${esc([flow.pick.night, flow.pick.where].filter(Boolean).join(" · "))}</span></div>` : "";
     pfShell("who", `${stepHead(1, null)}<h1 class="pf-h" id="pfTitle">Who's coming?</h1>${around}
       <div class="pf-opts" role="radiogroup" aria-label="Who's coming">
         ${d.squads.map(row).join("")}
-        ${card("friends", PF.person, "Pick Sidequesters", picked ? esc(picked) : "Choose people one by one")}
-        ${card("link", PF.link, "Send a link", "Anyone, in or out of the app")}
+        ${card("friends", PF.person, "Choose people", picked ? esc(picked) : "Pick Sidequesters one by one")}
+        ${card("later", PF.link, "I'll decide later", "Pick nights now, share the link from the call")}
       </div>
       ${flow.calls.length ? `<p class="small pf-last" id="pfLast">Your last plan: ${esc(flow.calls[0].locked ? flow.calls[0].locked.title : `${flow.calls[0].crew}, no pick locked`)}</p>` : ""}
       <div class="pf-foot"><button class="btn pri" id="pfNext" ${ready ? "" : "disabled"}>Next: which nights</button></div>`);
@@ -572,9 +574,9 @@
       return `<button class="pf-frow" role="checkbox" aria-checked="${on}" data-pffriend="${esc(k)}"><span class="av ${PF_COLOURS[d.friends.indexOf(k) % PF_COLOURS.length]}" aria-hidden="true">${esc(p.initial)}</span><span class="grow">${esc(p.full)}</span><span class="pf-box" aria-hidden="true">${on ? PF.check : ""}</span></button>`;
     }).join("");
     const empty = !d.friends.length
-      ? `<div class="pf-empty"><p style="font-weight:600">No Sidequesters yet</p><p class="small">Add people in Profile, or send a link to anyone instead.</p><button class="btn out sm" data-pfpath="link">Send a link instead</button></div>`
+      ? `<div class="pf-empty"><p style="font-weight:600">No Sidequesters yet</p><p class="small">Add people in Profile, or decide later and share the call link from the call.</p><button class="btn out sm" data-pfpath="later">I'll decide later</button></div>`
       : !list.length ? `<p class="small">Nobody called "${esc(flow.search)}" in your Sidequesters.</p>` : "";
-    pfShell("friends", `${stepHead(1, "who")}<h1 class="pf-h" id="pfTitle">Pick Sidequesters</h1>
+    pfShell("friends", `${stepHead(1, "who")}<h1 class="pf-h" id="pfTitle">Choose people</h1>
       ${d.friends.length ? `<label class="pf-search"><span class="sr">Search your Sidequesters</span>${PF.search}<input id="pfSearch" type="search" placeholder="Search your Sidequesters" value="${esc(flow.search)}" autocomplete="off"></label>` : ""}
       <div class="pf-chips" id="pfPicked" aria-label="Picked">${picked.map((k) => `<button class="chip" aria-pressed="true" data-pfunpick="${esc(k)}" aria-label="Remove ${esc(d.people[k].name)}">${esc(d.people[k].name)} ${ICON.x}</button>`).join("")}</div>
       <div class="pf-flist" id="pfFlist">${rows}</div>${empty}
@@ -582,14 +584,14 @@
       <div class="pf-foot"><button class="btn pri" id="pfNext" ${picked.length ? "" : "disabled"}>Next: which nights${picked.length ? ` · ${picked.length}` : ""}</button></div>`);
   }
 
-  // The link path makes the room now, so the link is real; the next steps change its nights
+  // Makes the room (or updates the one made before Back): the crew, nights and setup
   async function ensureRoom(form, send = false) {
     const d = flow.data;
     const members = pfPeople().slice(1).map((p) => p.name);
     const body = { nights: flow.nights.length ? flow.nights : undefined, members, crew: crewName(), noLearn: flow.noLearn, pick: flow.pick ? flow.pick.id : undefined, deadline: form && flow.deadline ? flow.deadline : undefined };
     // People picked in the app hear about it in SideQuest once the plan or form is sent (held in their quiet hours)
     if (send) body.invite = pfPeople().slice(1).map((p) => p.key);
-    // Reuse the room made for the link (or for a form sent before Back), unless it's a form and this is a call
+    // Reuse the room made for a form sent before Back, unless it's a form and this is a call
     const reuse = flow.room && (flow.room.form === Boolean(form) || (form && !flow.room.form && !flow.room.started));
     if (reuse) {
       await api(`/api/sk/rooms/${flow.room.room}/setup`, { p: flow.room.person, ...body, form: Boolean(form) });
@@ -600,22 +602,6 @@
     const out = await api("/api/sk/rooms", { ...body, name, persona: d.persona, form: Boolean(form), path: flow.path, user: userId() || undefined });
     flow.room = { room: out.room, person: out.person, form: Boolean(form) };
     return flow.room;
-  }
-  async function pfLink() {
-    flow.step = "link";
-    pfShell("link", `${stepHead(1, "who")}<h1 class="pf-h" id="pfTitle">Send your own link</h1>
-      <p class="muted">Paste it in your group chat. Anyone who opens it can join, no app or account needed.</p>
-      <div class="pf-box-card" id="pfShare"><span class="small">Your plan link</span><div class="pf-wait"><span class="sk-line" style="width:70%;height:48px"></span><span class="sk-line" style="height:44px"></span></div></div>
-      <div class="pf-note"><span class="orb"></span><p class="small">People who join this way show as <b>unknown</b> on the calendar until they answer.</p></div>
-      <div class="pf-foot"><button class="btn pri" id="pfNext">Next: which nights</button></div>`);
-    try {
-      const r = await ensureRoom(false);
-      roomId = r.room;
-      const box = document.getElementById("pfShare");
-      if (box && flow.step === "link") box.innerHTML = `<span class="small">Your plan link</span>${shareHTML()}`;
-    } catch (err) {
-      toast(err.message);
-    }
   }
 
   // ----- Step 2: which nights work? A calendar of the window (today and the next 20 days) -----
@@ -653,7 +639,7 @@
     const friends = people.slice(1);
     if (!flow.nightsSet && !flow.nights.length) flow.nights = defaultNights(people);
     flow.nightsSet = true;
-    const backTo = flow.path === "friends" ? "friends" : flow.path === "link" ? "link" : "who";
+    const backTo = flow.path === "friends" ? "friends" : "who";
     const sel = flow.nights;
     const first = d.nights[0];
     const last = d.nights[d.nights.length - 1];
@@ -668,7 +654,7 @@
       return `<button class="n pf-night l${freeLevel(f.length, friends.length)}${on ? " sel" : ""}${n === first ? " today" : ""}" data-date="${n.date}" data-free="${f.length}" data-all="${i.all ? 1 : 0}" aria-pressed="${on}" aria-label="${esc(nightLabelFull(n, i, on))}"><span class="n-d">${n.day}</span><span class="fs" aria-hidden="true">${f.map((x) => `<i class="${x.p.colour}"></i>`).join("")}</span></button>`;
     });
     const crew = flow.path === "squad" ? squadName() : flow.path === "friends" ? "your crew" : "";
-    const lede = flow.path === "link" ? "It's just you so far: people who join by the link show up as they answer." : `Brighter nights mean more of ${esc(crew)} is free.`;
+    const lede = flow.path === "later" ? "It's just you so far. Share the call link from People once you're on." : `Brighter nights mean more of ${esc(crew)} is free.`;
     let sum = '<span class="muted">Tap the nights that could work.</span>';
     if (sel.length) {
       const infos = sel.map((dt) => nightInfo(pfNightOf(dt), people));
@@ -762,7 +748,7 @@
     if (nameIn && !nameIn.value.trim()) { nameIn.focus(); return toast("Add your name so your crew knows who's planning."); }
     if (nameIn) store.set("sk:name", nameIn.value.trim());
     const form = flow.how === "form";
-    const autoAgent = !form && flow.voiceAgent && agentPref;
+    const autoAgent = !form && flow.voiceAgent;
     unlockAudio();
     if (autoAgent) primeAgentAudio(); // the microphone prompt comes from this tap
     const origin = await originAnswer(btn);
@@ -831,14 +817,14 @@
         roomId = null;
         history.pushState(null, "", "/sk");
       }
-      return void ({ who: pfWho, friends: pfFriends, link: pfLink, when: pfWhen, how: pfHow }[to] || pfWho)();
+      return void ({ who: pfWho, friends: pfFriends, when: pfWhen, how: pfHow }[to] || pfWho)();
     }
     const path = t.closest("[data-pfpath]");
     if (path) {
       flow.path = path.dataset.pfpath;
       flow.touched = true;
       if (flow.path === "friends") return void pfFriends();
-      if (flow.path === "link") return void pfLink();
+      if (flow.path === "later") return void pfWhen(); // no crew yet: straight to the nights
       return void pfWho();
     }
     const sq = t.closest("[data-pfsquad]");
@@ -853,8 +839,8 @@
     const un = t.closest("[data-pfunpick]");
     if (un) { flow.friends = flow.friends.filter((x) => x !== un.dataset.pfunpick); pfFocus = false; return void pfFriends(); }
     if (t.closest("#pfNext")) {
-      if (flow.step === "who") return void (flow.path === "friends" ? pfFriends() : flow.path === "link" ? pfLink() : pfWhen());
-      if (flow.step === "friends" || flow.step === "link") return void pfWhen();
+      if (flow.step === "who") return void (flow.path === "friends" ? pfFriends() : pfWhen());
+      if (flow.step === "friends") return void pfWhen();
       if (flow.step === "when") return void pfHow();
     }
     const night = t.closest(".pf-night");
@@ -1178,6 +1164,7 @@
     setConn(true);
     if (micOn) stopMic();
     Audio.stop();
+    Audio.autoTried = false;
     if (agent) stopAgent();
   }
   function goneScreen(data) {
@@ -1949,9 +1936,12 @@
   }
   document.addEventListener("click", (e) => {
     // "See it in Sidequests": the app opens the plan's ticket, with Sidequests behind it
-    if (e.target.closest("#seeQuest")) { ss.set("sq2.screen", "questlog"); return; }
+    // Both go straight into the app: no start-up loader, and never the opening question (this tab is already in the app)
+    const intoApp = () => { ss.set("sq2.quickboot", "1"); if (!ss.get("sq2.mode")) ss.set("sq2.mode", userId() ? "app" : "demo"); };
+    if (e.target.closest("#seeQuest")) { intoApp(); ss.set("sq2.screen", "questlog"); return; }
     const a = e.target.closest("#backHome");
     if (!a) return;
+    intoApp();
     if (a.dataset.screenTo) ss.set("sq2.screen", a.dataset.screenTo);
     if (a.getAttribute("href") === "/sk") { e.preventDefault(); location.assign("/sk"); }
   }, true);
@@ -2170,8 +2160,7 @@
   const HINT_MS = 8000;
 
   // ---------- The orb sheet: everything that used to sit in the bar ----------
-  // Sidekick leads or sits back, talk in the app (and mute), captions, natural or built-in voice, read aloud,
-  // type instead, invite friends, ask for picks now, and "Don't learn from this plan". A dialog with focus
+  // Sidekick leads or sits back, captions, type instead (study), invite friends, ask for picks now, and "Don't learn from this plan". A dialog with focus
   // kept inside, Escape to close, and focus back on the orb.
   let orbOpen = false;
   let capsShown = store.get("sk:captions") !== false;
@@ -2200,15 +2189,8 @@
           <button role="radio" data-setmode="lead" aria-checked="${view.mode === "lead"}" tabindex="${view.mode === "lead" || vote ? 0 : -1}">Sidekick leads</button>
           <button role="radio" data-setmode="sidelines" aria-checked="${view.mode === "sidelines"}" tabindex="${view.mode === "sidelines" ? 0 : -1}">Sidekick sits back</button></div>`
       : "";
-    const audio = voice && Audio.supported
-      ? osw("audioBtn", "Talk in the app", Audio.on ? "Connected. Friends who aren't with you can hear you." : Audio.starting ? "Connecting audio…" : "For friends who aren't in the same room", Audio.on, Audio.starting ? "disabled" : "") + (Audio.on ? osw("muteBtn", "Mute me", micOn ? "Your crew can hear you" : "Your crew can't hear you", !micOn) : "")
-      : "";
-    const natural = view.voiceAgent && !STUDY && !agentCapped
-      ? osw("agent", "Natural voice", agent ? "On. Turn off for the built-in voice." : agentStarting ? "Connecting Sidekick's natural voice…" : "Off. The built-in voice is reading.", Boolean(agent), agentStarting ? "disabled" : "")
-      : "";
-    const readAloud = (view.me.planner && !agent) || Audio.on ? osw("aloud", "Read Sidekick aloud", "On this phone", aloud) : "";
     return `${seg}
-      <div class="ogroup">${audio}${osw("capsBtn", "Captions", "Live words from the call", capsShown)}${natural}${readAloud}
+      <div class="ogroup">${osw("capsBtn", "Captions", "Live words from the call", capsShown)}
         ${osw("learnBtn", "Don't learn from this plan", "This call won't change your taste", view.me.noLearn)}</div>
       <div class="ogroup acts">
         ${voice && STUDY ? oact("kb", typing ? "Hide the text box" : "Type instead", '<span class="oi" aria-hidden="true">Aa</span>') : ""}
@@ -2262,7 +2244,13 @@
   function setAgentMuted(m) {
     agentMuted = m;
     try { if (agent && agent.setMicMuted) agent.setMicMuted(m); } catch {}
+    Audio.setMuted(m); // the crew in in-app audio can't hear you either
     renderDock();
+  }
+  // The mic button mutes everything on this phone: in-app audio, captions, and (on the planner's phone) the agent's mic
+  function toggleMute() {
+    if (agent) return setAgentMuted(!agentMuted);
+    if (micOn) stopMic(); else startMic();
   }
 
   // Taps (in the call, and in the invite sheet, which lives outside #app)
@@ -2274,7 +2262,6 @@
     if (t.closest("[data-orbclose]")) return void closeOrb();
     if (t.closest("#inviteBtn")) { closeOrb(false); return void openSheet("orbBtn"); }
     if (t.closest("#capsBtn")) { capsShown = !capsShown; store.set("sk:captions", capsShown); renderTicks(); renderOrb(); toast(capsShown ? "Captions on." : "Captions off on this phone."); return; }
-    if (t.closest("#muteBtn")) return void (micOn ? stopMic() : startMic());
     if (t.closest("#learnBtn")) {
       const off = !view.me.noLearn;
       view.me.noLearn = off;
@@ -2324,22 +2311,13 @@
     if (t.closest("#share")) return void navigator.share({ title: `${(view && view.crew) || (flow.data ? crewName() : "The crew")}: help plan our next night`, text: "Help plan our next night! Sidekick's on the call:", url: inviteLink() }).catch(() => {});
     if (t.closest("#ask")) { if (orbOpen) closeOrb(); return void send("ask", {}); }
     if (t.closest("#practice")) { t.closest("#practice").disabled = true; return void studyApi("practice", { room: roomId, p: me.person }).catch((err) => { toast(err.message); renderCall(); }); }
-    if (t.closest("#agent")) {
-      if (agentStarting) return;
-      agentPref = !agent;
-      store.set("sk:agentVoice", agentPref);
-      if (agent) { stopAgent(); vset("agent", "off"); if (view.me.mode === "voice" && !micOn) startMic(); } else startAgent();
-      return;
-    }
-    if (t.closest("#audioBtn")) return void (Audio.on ? Audio.stop() : Audio.start().then(() => { if (Audio.on && !micOn) startMic(); }));
     const sm = t.closest("[data-setmode]");
     if (sm) {
       if (view.mode === "voting" || sm.dataset.setmode === view.mode) return;
       return void send("mode", { value: sm.dataset.setmode });
     }
-    if (t.closest("#mic")) return void (agent ? setAgentMuted(!agentMuted) : micOn ? stopMic() : startMic());
+    if (t.closest("#mic")) return void toggleMute();
     if (t.closest("#kb")) { typing = !typing; closeOrb(!typing); renderDock(); if (typing) document.getElementById("line").focus(); return; }
-    if (t.closest("#aloud")) { aloud = !aloud; store.set("sk:aloud", aloud); renderDock(); if (!aloud) { Tts.stop(); if ("speechSynthesis" in window) speechSynthesis.cancel(); } return; }
     if (t.closest("#leave") || t.closest("#endCall")) return void openEndSheet(t.closest("#leave, #endCall").id);
     const rate = t.closest(".rate button");
     if (rate) {
@@ -2454,7 +2432,9 @@
   let agentStart = 0;
   let agentCapped = false; // the minute cap was hit: no natural voice for the rest of this call
   let agentDropped = false; // shown once: "switched to the built-in voice"
-  let agentPref = store.get("sk:agentVoice") !== false; // the "Use the built-in voice" switch, remembered
+  // Every call starts the natural voice when it's available. Older builds remembered a "Natural voice" switch
+  // here; once it was off, no later call reached ElevenLabs. That key is ignored and cleared.
+  try { localStorage.removeItem("sk:agentVoice"); localStorage.removeItem("sk:aloud"); } catch {}
   let elModule = null;
   let primedMic = null;
   const relayed = new Set();
@@ -2489,6 +2469,7 @@
       let Conversation;
       try { ({ Conversation } = await sdk); } catch { throw Object.assign(new Error("The voice code didn't load"), { vreason: "sdk" }); }
       if (micOn) stopMic();
+      Audio.setMuted(agentMuted); // the agent has the mic now; in-app audio stays open unless you muted
       if ("speechSynthesis" in window) speechSynthesis.cancel();
       // Mark everything already on screen as passed on, so the agent only gets what happens next
       if (view) { view.captions.forEach((c) => relayed.add(`l:${c.id}`)); view.sidekick.forEach((x) => relayed.add(`s:${x.id}`)); (view.agentNotes || []).forEach((n) => relayed.add(`n:${n.id}`)); }
@@ -2708,7 +2689,7 @@
       if (!b) { b = document.createElement("div"); b.id = "skAudio"; b.hidden = true; document.body.appendChild(b); }
       return b;
     },
-    async start() {
+    async start({ auto = false } = {}) {
       if (this.on || this.starting || !this.supported) return;
       this.starting = true;
       renderDock();
@@ -2725,12 +2706,26 @@
       } catch (err) {
         if (this.local) this.local.getTracks().forEach((t) => t.stop());
         this.local = null;
-        toast(err.name === "NotAllowedError" ? "The microphone is blocked, so in-app audio can't start." : err.message || "In-app audio couldn't start.");
+        toast(err.name === "NotAllowedError" ? (auto ? "The microphone is blocked, so friends who aren't with you can't hear you." : "The microphone is blocked, so in-app audio can't start.") : err.message || "In-app audio couldn't start.");
       } finally {
         this.starting = false;
         renderDock();
         renderTop();
       }
+    },
+    // Talk in the app is automatic: once this phone is in voice and someone else on the call is in voice too,
+    // in-app audio starts (once per call), then the mic is on as before. No switch.
+    autoTried: false,
+    auto() {
+      if (this.autoTried || this.on || this.starting || !this.supported || STUDY) return;
+      if (view.me.mode !== "voice" || (phase !== "call" && phase !== "picks")) return;
+      if (!view.people.some((p) => p.id !== me.person && p.mode === "voice" && p.online)) return;
+      this.autoTried = true;
+      this.start({ auto: true }).then(() => {
+        if (!this.on) return;
+        if (agent) this.setMuted(agentMuted);
+        else if (!micOn) startMic();
+      });
     },
     stop() {
       if (!this.on && !this.local) return;
@@ -2757,6 +2752,7 @@
       if (!view || !me) return;
       const mine = view.people.find((p) => p.id === me.person);
       if (!this.on && !this.starting && mine && mine.audio) api(`/api/sk/rooms/${roomId}/audio`, { p: me.person, on: false }).catch(() => {}); // a reload ended our audio
+      this.auto();
       if (!this.on) return;
       const others = new Map(view.people.filter((p) => p.id !== me.person && p.audio).map((p) => [p.id, p]));
       for (const pid of [...this.peers.keys()]) if (!others.has(pid)) this.drop(pid);
@@ -2914,7 +2910,7 @@
   window.SidekickVoice = Voice;
   if ("speechSynthesis" in window) { speechSynthesis.getVoices(); speechSynthesis.addEventListener?.("voiceschanged", () => {}); }
 
-  let aloud = store.get("sk:aloud") !== false;
+  const aloud = true; // Sidekick is always read aloud: the phone's volume and the mute button are enough
   let lastRead = null;
   function readAloud(tries = 0) {
     // Barge-in: if anyone else starts talking while Sidekick is speaking, stop at once
@@ -3028,7 +3024,7 @@
       if (!v) return ["Not tried", ""];
       if (v === "connecting") return ["Connecting…", ""];
       if (v === "live") return ["Working", ""];
-      if (v === "off") return ["Turned off", "Natural voice is switched off in the Sidekick menu."];
+      if (v === "off") return ["Turned off", ""];
       if (v === "capped") return ["Daily limit reached", AGENT_WHY.limit];
       const r = v.split(":")[1] || "";
       return [AGENT_WORDS[r] || "Couldn't connect", AGENT_WHY[r] || ""];
@@ -3088,7 +3084,7 @@
     if (VS.phone === "blocked") VS.phone = null;
     if (VS.backup && VS.backup !== "ok" && VS.backup !== "not-set-up") VS.backup = null;
     VS.reported.clear();
-    const agentAgain = agentToo && view && view.me.planner && view.voiceAgent && agentPref && !agent && !agentStarting && !agentCapped && VS.setup && VS.setup.key && VS.setup.agent;
+    const agentAgain = agentToo && view && view.me.planner && view.voiceAgent && !agent && !agentStarting && !agentCapped && VS.setup && VS.setup.key && VS.setup.agent;
     if (agentAgain) startAgent({ auto: false });
     else if (VS.last) speakLine(VS.last.text, VS.last.persona, VS.last.builtIn);
     renderVoice();

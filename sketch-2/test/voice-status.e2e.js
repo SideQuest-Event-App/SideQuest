@@ -117,7 +117,9 @@ const INIT = () => {
     const ctx = await browser.newContext({ viewport: { width: 375, height: 667 }, deviceScaleFactor: 2, permissions: ["microphone"] });
     await ctx.route(/cdn\.jsdelivr\.net\/npm\/@elevenlabs\/client/, (route) => route.fulfill({ status: 200, contentType: "application/javascript", headers: { "access-control-allow-origin": "*" }, body: FAKE_SDK }));
     await ctx.addInitScript(INIT);
-    await ctx.addInitScript((a) => { try { localStorage.setItem("sk:agentVoice", a ? "true" : "false"); } catch {} }, agent);
+    // Every call starts the natural voice when the server has it. "agent: false" means ElevenLabs won't let the agent
+    // in (401), so the backup and phone voices carry the call, which is what those cases test.
+    if (!agent) mode.agent = 401;
     const page = await ctx.newPage();
     page.on("pageerror", (e) => pageErrors.push(e.message));
     await page.goto(`${base}/sk?quick=1`);
@@ -155,9 +157,13 @@ const INIT = () => {
       assert(logs.some((l) => l.includes(`[voice] ${roomTag(c.rid)} agent requested key=yes agent=yes`)), "agent requested, logged");
       assert(logs.some((l) => l.includes(`[voice] ${roomTag(c.rid)} agent session token=ok signed_url=ok`)), "session result, logged");
       await until(() => logs.some((l) => l.includes(`[voice] ${roomTag(c.rid)} agent live`)), 4000, "agent live, logged");
-      // Turning the natural voice off ends the session
+      // There's no switch to turn it off: ending the call ends the session
       await c.page.click("#orbBtn");
-      await c.page.click("#orbSheet #agent");
+      await c.page.waitForSelector("#orbSheet [role=dialog]");
+      assert.strictEqual(await c.page.$("#orbSheet #agent"), null, "no Natural voice switch");
+      await c.page.keyboard.press("Escape");
+      await c.page.click("#leave");
+      await c.page.click("#endAll");
       await until(() => logs.some((l) => l.includes(`[voice] ${roomTag(c.rid)} agent ended secs=`)), 6000, "agent ended, logged");
       await c.ctx.close();
     });
@@ -191,10 +197,10 @@ const INIT = () => {
     });
 
     await test("c. ElevenLabs refuses the backup voice (401): Backup voice, and the sheet's backup row says why", async () => {
-      mode.agent = 200; mode.tts = 401;
+      mode.tts = 401;
       tts._reset();
       const c = await call({ agent: false });
-      await until(async () => (await c.page.getAttribute("#mic", "aria-pressed")) === "true", 4000, "the mic on from the start without the natural voice");
+      await until(async () => (await c.page.getAttribute("#mic", "aria-pressed")) === "true", 4000, "the mic on once the natural voice can't start");
       await friend(c.rid);
       await until(async () => (await pill(c.page)) === "backup", 10000, "Backup voice (the phone's voice carries on)");
       await c.page.click("#voicePill");

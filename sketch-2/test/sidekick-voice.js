@@ -173,14 +173,26 @@ const INIT = () => {
       assert.deepStrictEqual(opts.starts[0], { connectionType: "webrtc", token: true, signed: false }, "WebRTC first, with a conversation token");
       assert(eleven.some((u) => u.includes("/conversation/token")) && eleven.some((u) => u.includes("get-signed-url")), "both ways in were fetched");
       assert(A.requests.includes(`/api/sk/rooms/${rid}/voice-agent`) && A.requests.includes(`/api/sk/rooms/${rid}/voice-agent/live`));
-      // The switch lives in the orb sheet now; the bar shows a "Natural voice" status chip
+      // No switch: the bar shows a "Natural voice" status chip, and the orb sheet has no voice switches
       assert.strictEqual((await A.page.textContent("#chipVoice")).trim(), "Natural voice", "a status chip says the natural voice is on");
       if (await A.page.$("#sheet")) await A.page.keyboard.press("Escape"); // the People sheet a planner sees on starting alone
       await A.page.click("#orbBtn");
-      assert.strictEqual(await A.page.getAttribute("#orbSheet #agent", "aria-checked"), "true", "the switch is on");
-      assert.match(await A.page.textContent("#orbSheet #agent"), /Turn off for the built-in voice/, "the switch says how to get back to the built-in voice");
+      await A.page.waitForSelector("#orbSheet [role=dialog]");
+      for (const sel of ["#agent", "#aloud", "#audioBtn", "#muteBtn"]) assert.strictEqual(await A.page.$(`#orbSheet ${sel}`), null, `no ${sel} switch in the orb sheet`);
+      assert(!/Natural voice|Read Sidekick aloud|Talk in the app/.test(await A.page.textContent("#orbSheet")), "no voice switches by name");
       await A.page.keyboard.press("Escape");
       assert.deepStrictEqual(A.errors, []);
+    });
+
+    await test("(a) An old stored 'natural voice off' or 'read aloud off' is ignored: the agent still starts, and the keys are cleared", async () => {
+      const O = await plannerPage();
+      await O.ctx.addInitScript(() => { if (!sessionStorage.getItem("oldKeys")) { sessionStorage.setItem("oldKeys", "1"); localStorage.setItem("sk:agentVoice", "false"); localStorage.setItem("sk:aloud", "false"); } });
+      const { room } = await startCall(O.page, "Old switch test");
+      await until(() => session(O.page), 8000, "the agent session to start despite sk:agentVoice=false");
+      await until(() => room.agentMode, 4000, "the server to hear the session is live");
+      assert.deepStrictEqual(await O.page.evaluate(() => [localStorage.getItem("sk:agentVoice"), localStorage.getItem("sk:aloud")]), [null, null], "the old keys are gone");
+      assert.deepStrictEqual(O.errors, []);
+      await O.ctx.close();
     });
 
     // ---------- (b) ----------
@@ -273,11 +285,13 @@ const INIT = () => {
       assert(toasts.length <= 1, `at most one note, got ${JSON.stringify(toasts)}`);
       assert(await D.page.evaluate(() => window.__el.sessions[0].ended), "the session was ended");
       if (await D.page.$("#sheet")) await D.page.keyboard.press("Escape"); // the People sheet a planner sees on starting alone
-      await D.page.click("#orbBtn");
-      assert.strictEqual(await D.page.getAttribute("#orbSheet #agent", "aria-checked"), "false", "the switch offers the natural voice again");
-      assert.match(await D.page.textContent("#orbSheet #agent"), /built-in voice is reading/);
-      await D.page.keyboard.press("Escape");
       assert((await usage.status()).elevenlabs_minutes.used.month < reserved, "unused minutes came back");
+      // "Try sound again" in the voice sheet retries the natural voice (there's no switch for it)
+      await D.page.click("#voicePill");
+      await D.page.click("#voiceRetry");
+      await until(() => D.page.evaluate(() => window.__el.sessions.length >= 2), 6000, "Try sound again to start a new agent session");
+      await until(() => room.agentMode, 4000, "the server to hear the agent is back");
+      if (await D.page.$("#voiceSheet")) await D.page.keyboard.press("Escape");
       assert.deepStrictEqual(D.errors, []);
       await D.ctx.close();
     });
@@ -317,7 +331,7 @@ const INIT = () => {
       if (await C.page.$("#sheet")) await C.page.keyboard.press("Escape"); // the People sheet a planner sees on starting alone
       await C.page.click("#orbBtn");
       await C.page.waitForSelector("#orbSheet [role=dialog]");
-      assert.strictEqual(await C.page.$("#agent"), null, "the natural-voice switch is hidden for the rest of the call");
+      assert.strictEqual(await C.page.$("#agent"), null, "no natural-voice switch");
       await C.page.keyboard.press("Escape");
       assert.strictEqual(T.rooms.get(crid).agentMode, false);
       // And a fresh start screen at the cap doesn't even try

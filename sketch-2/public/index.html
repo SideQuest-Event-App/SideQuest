@@ -54,8 +54,17 @@
       .b-st { transform: none; }
     }
   </style>
+  <style>
+    /* Coming back from a call: no start-up loader or opening question, just the night background until the app is in */
+    .quickboot #boot .b-lights, .quickboot #boot .b-in { display: none; }
+  </style>
 </head>
 <body>
+  <script>
+    try {
+      if (sessionStorage.getItem("sq2.quickboot")) { document.documentElement.classList.add("quickboot"); sessionStorage.removeItem("sq2.quickboot"); }
+    } catch (e) {}
+  </script>
   <div id="boot" role="status" aria-live="polite" aria-label="Sidequest is loading">
     <div class="b-lights"></div>
     <div class="b-in">

@@ -5,9 +5,10 @@
 //
 // What it does: starts the app on a free local port (no AI, no Google, no STUN), then opens three
 // separate browser contexts with Chromium's fake microphone. The planner starts a call from /sk, two
-// friends join from the link with "Join with voice", everyone taps "Talk in the app", and the test
-// waits until every phone reports RTCPeerConnection.connectionState === "connected" with every
-// other phone (window.__skAudioState()). It also checks that turning audio off drops the peer.
+// friends join from the link with "Join with voice", and in-app audio starts on its own (there's no
+// switch: a phone in voice starts it once someone else is in voice too). The test waits until every phone
+// reports RTCPeerConnection.connectionState === "connected" with every other phone
+// (window.__skAudioState()). It also checks the mic button mutes in-app audio, and that leaving drops the peer.
 //
 // Needs Playwright with Chromium (dev only; the app itself has no dependencies). Real phones on
 // mobile networks may also need a TURN server; see the README.
@@ -76,13 +77,9 @@ async function waitFor(fn, ms, what) {
       await f.waitForSelector("#dock #orbBtn");
     }
     await planner.waitForSelector("#dock #orbBtn");
-    // Everyone turns on in-app audio (the "Talk in the app" switch is in the Sidekick orb's sheet)
-    const audioSwitch = async (p) => {
-      if (await p.$("#sheet")) await p.keyboard.press("Escape"); // the People sheet the planner saw on starting alone
-      if (!(await p.$("#orbSheet"))) await p.click("#orbBtn");
-      await p.click("#orbSheet #audioBtn");
-    };
-    for (const p of pages) await audioSwitch(p);
+    // Nobody taps anything: in-app audio starts on every phone once a second voice person is on the call
+    for (const p of pages) if (await p.$("#sheet")) await p.keyboard.press("Escape"); // the People sheet the planner saw on starting alone
+    for (const p of pages) if (await p.$("#orbSheet #audioBtn")) throw new Error("the orb sheet still has a Talk in the app switch");
     const ids = await Promise.all(pages.map((p) => p.evaluate(() => JSON.parse(localStorage.getItem(`sk:${location.pathname.split("/")[2]}`)).person)));
     const states = await waitFor(async () => {
       const all = await Promise.all(pages.map((p) => p.evaluate(() => window.__skAudioState && window.__skAudioState())));
@@ -98,13 +95,22 @@ async function waitFor(fn, ms, what) {
     });
     if (bytes !== N - 1) throw new Error(`expected ${N - 1} remote audio streams on the planner's phone, got ${bytes}`);
     console.log(`PASS  the planner's phone plays ${bytes} remote audio streams`);
-    // Turning audio off drops that person for everyone
-    await audioSwitch(friends[0]);
+    // The mic button mutes in-app audio (and unmutes it again)
+    const f0 = friends[0];
+    if (await f0.$("#orbSheet")) await f0.keyboard.press("Escape");
+    if ((await f0.evaluate(() => window.__skAudioState().muted))) throw new Error("the friend starts unmuted");
+    await f0.click("#dock #mic");
+    await waitFor(() => f0.evaluate(() => window.__skAudioState().muted), 5000, "the mic button to mute in-app audio");
+    await f0.click("#dock #mic");
+    await waitFor(() => f0.evaluate(() => !window.__skAudioState().muted), 5000, "the mic button to unmute in-app audio");
+    console.log("PASS  the mic button mutes and unmutes in-app audio");
+    // Leaving the call drops that person for everyone
+    await f0.goto("about:blank");
     await waitFor(async () => {
       const s = await planner.evaluate(() => window.__skAudioState());
       return !s.peers[ids[1]];
-    }, 10000, "the planner to drop the friend who left audio");
-    console.log("PASS  leaving audio closes the connection on the other phones");
+    }, 15000, "the planner to drop the friend who left");
+    console.log("PASS  leaving closes the audio connection on the other phones");
     if (errors.length) throw new Error(`Page errors:\n${errors.join("\n")}`);
   } catch (err) {
     failed = true;

@@ -148,7 +148,7 @@ function createRoom({ crew, planner, nights, persona, members, form, path: how, 
   if (form) asForm(room);
   if (deadline) setDeadline(room, deadline);
   if (invite) callside.invite(room, person, invite);
-  track("plan_started", { sessionId: room.id, path: form ? "form" : ["squad", "friends", "link"].includes(how) ? `call_${how}` : "call", persona: room.persona, nights: room.nights.length, members: room.expected.length });
+  track("plan_started", { sessionId: room.id, path: form ? "form" : ["squad", "friends", "later", "link"].includes(how) ? `call_${how}` : "call", persona: room.persona, nights: room.nights.length, members: room.expected.length });
   return { room: room.id, person: person.id };
 }
 

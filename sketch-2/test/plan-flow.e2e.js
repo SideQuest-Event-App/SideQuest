@@ -1,7 +1,8 @@
 // The Plan tab's step-by-step flow (design TB2-Plan), end to end in a real browser against the real server:
 //
 //  1. No intro: Plan opens on "Who's coming?"; the A/B persona is kept for the visit, or set by ?persona=.
-//  2. Step 1: squads as photo rows, Sidequesters (picked chips, no phone contacts), and a link (the share card).
+//  2. Step 1: squads as photo rows, Choose people (picked chips, no phone contacts), and "I'll decide later", which goes
+//     straight to the nights and starts a call with no crew (the link is in the call's People sheet).
 //  3. /sk?squad=<id> opens on step 2 with that squad picked (signed in, and signed out with the sample squads).
 //  4. Step 2 (the calendar) shows who's free each night (free, busy or "not set", never why), lights the night
 //     everyone's free, shows link guests as unknown, and a tapped night is saved free on the account.
@@ -140,17 +141,18 @@ async function until(fn, ms, what) {
       await c3.ctx.close();
     });
 
-    await test("2. Step 1: squads as rows, Sidequesters (picked chips, no contacts), or a link (the share card)", async () => {
+    await test("2. Step 1: squads as rows, Choose people (picked chips, no contacts), or I'll decide later (straight to nights, a call with no crew)", async () => {
       const { ctx, page } = await phone();
       await page.goto(`${base}/sk?persona=friend`);
       await page.waitForSelector('h1:has-text("Who\'s coming?")');
       const opts = await page.$$eval("[data-pfpath]", (els) => els.map((e) => e.dataset.pfpath));
-      assert.deepStrictEqual(opts, ["friends", "link"]);
+      assert.deepStrictEqual(opts, ["friends", "later"], "squads, Choose people, I'll decide later: no Send a link");
+      assert(!/Send a link/.test(await page.textContent(".pf-opts")));
       assert.deepStrictEqual(await page.$$eval("[data-pfsquad] b", (els) => els.map((e) => e.textContent.trim())), ["Friday Crew"]);
       assert.strictEqual(await page.getAttribute("[data-pfsquad]", "aria-checked"), "true", "a squad is the default when you have one");
       // Sidequesters: only people on SideQuest, picked ones as chips on top
       await page.click('[data-pfpath="friends"]');
-      await page.waitForSelector('h1:has-text("Pick Sidequesters")');
+      await page.waitForSelector('h1:has-text("Choose people")');
       const listed = await page.$$eval("[data-pffriend] .grow", (els) => els.map((e) => e.textContent.trim()));
       assert(listed.includes("Ravi Shah") && listed.includes("Tess Moreau") && listed.includes("Maya Chen"), listed.join(", "));
       assert(!/contact/i.test(await page.textContent(".pf-card")), "no phone contacts");
@@ -161,15 +163,31 @@ async function until(fn, ms, what) {
       await page.fill("#pfSearch", "tes");
       assert.deepStrictEqual(await page.$$eval("[data-pffriend] .grow", (els) => els.map((e) => e.textContent.trim())), ["Tess Moreau"]);
       await page.fill("#pfSearch", "");
-      // Link: the share card with a real call link
+      // I'll decide later: straight to the nights (no Next), with nobody picked; then a call starts with no crew
       await page.click("[data-pfback]");
-      await page.click('[data-pfpath="link"]');
-      await page.waitForSelector("#pfShare #copy");
-      const link = await page.inputValue('#pfShare input[aria-label="Call link"]');
-      assert(/\/sk\/[\w-]+$/.test(link), link);
-      assert(await page.locator('#pfShare a[href^="https://wa.me/"]').count(), "the per-app buttons (no share menu in this browser)");
-      const info = await (await fetch(`${base}/api/sk/rooms/${link.split("/sk/")[1]}/info`)).json();
-      assert.strictEqual(info.status, "live");
+      await page.click('[data-pfpath="later"]');
+      await page.waitForSelector('h1:has-text("Which nights work?")');
+      assert(/just you so far/i.test(await page.textContent(".pf-lede")), "the nights say it's just you");
+      await page.click("[data-pfback]");
+      await page.waitForSelector('h1:has-text("Who\'s coming?")');
+      assert.strictEqual(await page.getAttribute('[data-pfpath="later"]', "aria-checked"), "true", "I'll decide later stays picked");
+      await page.click("#pfNext");
+      await page.waitForSelector('h1:has-text("Which nights work?")');
+      if (!(await page.$(".pf-night[aria-pressed=true]"))) await page.click(`.pf-night[data-date="${sat.date}"]`);
+      await page.click("#pfNext");
+      await page.waitForSelector('h1:has-text("How do you want to decide?")');
+      await toHow(page);
+      await page.click("#pfStart");
+      await page.waitForURL(/\/sk\/[\w-]+$/);
+      const rid = page.url().split("/sk/")[1];
+      const info = await (await fetch(`${base}/api/sk/rooms/${rid}/info`)).json();
+      assert.strictEqual(info.status, "live", "a call with no crew picked");
+      assert.strictEqual(info.crew, "Asia's plan", "the crew name defaults to <Name>'s plan");
+      const me = await page.evaluate((r) => JSON.parse(localStorage.getItem(`sk:${r}`)), rid);
+      assert.deepStrictEqual((await firstView(rid, me.person)).expected, [], "nobody invited");
+      // The call link is shared from the call's People sheet (opened by itself while the planner is alone)
+      await page.waitForSelector("#sheet #copy");
+      assert(/\/sk\/[\w-]+$/.test(await page.inputValue('#sheet input[aria-label="Call link"]')));
       await ctx.close();
     });
 
@@ -235,11 +253,10 @@ async function until(fn, ms, what) {
       await until(async () => (await (await fetch(`${base}/api/sk/plan/setup?user=${asia}`)).json()).mine.nights[fri.date] === "free", 4000, "saved on the server");
       const fresh = await (await fetch(`${base}/api/sk/plan/setup?user=${asia}`)).json();
       assert.strictEqual(fresh.mine.nights[sat.date], "free");
-      // ... and on another phone, after a reload; the link path is just you, with link guests unknown
+      // ... and on another phone, after a reload; "I'll decide later" is just you, with link guests unknown
       const c2 = await phone();
       await c2.page.goto(`${base}/sk?persona=friend`);
-      await c2.page.click('[data-pfpath="link"]');
-      await c2.page.click("#pfNext");
+      await c2.page.click('[data-pfpath="later"]');
       await c2.page.waitForSelector(".cal");
       assert(/you: free/.test(await c2.page.getAttribute(`.pf-night[data-date="${fri.date}"]`, "aria-label")));
       assert(/Link guests: unknown/.test(await c2.page.getAttribute(`.pf-night[data-date="${fri.date}"]`, "aria-label")));
@@ -259,7 +276,7 @@ async function until(fn, ms, what) {
       const room = page.url().split("/sk/")[1];
       const info = await (await fetch(`${base}/api/sk/rooms/${room}/info`)).json();
       assert.deepStrictEqual(info.nights, [fri, sat].sort((a, b) => a.date.localeCompare(b.date)).map((n) => n.label));
-      assert.strictEqual(info.crew, "Asia's crew");
+      assert.strictEqual(info.crew, "Asia's plan");
       const me = await page.evaluate((r) => JSON.parse(localStorage.getItem(`sk:${r}`)), room);
       const v = await firstView(room, me.person);
       assert.deepStrictEqual(v.expected.map((x) => x.name), ["Ravi"]);
@@ -321,9 +338,10 @@ async function until(fn, ms, what) {
       await page.click("[data-pfback]");
       assert.strictEqual(await title(), "Who's coming?");
       assert.strictEqual(await page.getAttribute('[data-pfpath="friends"]', "aria-checked"), "true", "Sidequesters stays picked");
-      await page.click('[data-pfpath="link"]');
-      assert.strictEqual(await title(), "Send your own link");
+      await page.click('[data-pfpath="later"]');
+      assert.strictEqual(await title(), "Which nights work?", "I'll decide later goes straight to the nights");
       await page.click("[data-pfback]");
+      assert.strictEqual(await title(), "Who's coming?");
       await page.click('[data-pfpath="friends"]');
       assert.strictEqual(await page.getAttribute(`[data-pffriend="u:${ravi}"]`, "aria-checked"), "true", "Ravi stays picked");
       await page.click("#pfNext");
@@ -331,7 +349,7 @@ async function until(fn, ms, what) {
       await page.click(`.pf-night[data-date="${nights[2].date}"]`);
       const picked = await page.$$eval(".pf-night[aria-pressed=true]", (els) => els.map((e) => e.dataset.date));
       await page.click("[data-pfback]");
-      assert.strictEqual(await title(), "Pick Sidequesters", "step 2 goes back to the picker");
+      assert.strictEqual(await title(), "Choose people", "step 2 goes back to the picker");
       await page.click("#pfNext");
       assert.deepStrictEqual(await page.$$eval(".pf-night[aria-pressed=true]", (els) => els.map((e) => e.dataset.date)), picked, "the nights stay picked");
       await page.click("#pfNext");
@@ -388,10 +406,6 @@ async function until(fn, ms, what) {
         await page.click('[data-pffriend="Maya"]');
         await page.click(`[data-pffriend="u:${ravi}"]`);
         await check("1b-friends");
-        await page.click("[data-pfback]");
-        await page.click('[data-pfpath="link"]');
-        await page.waitForSelector("#pfShare #copy");
-        await check("1c-link");
         await page.click("[data-pfback]");
         await page.click("[data-pfsquad]");
         await page.click("#pfNext");

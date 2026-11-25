@@ -2,9 +2,9 @@
 // real browser against the real server (AI off, places off, the voice agent's setup present but never reached):
 //
 //  1. The call is full screen: the bar is exactly mic, chat, orb and leave; nothing else is visible.
-//  2. The orb sheet has every control that moved there (leads / sits back, talk in the app and mute, captions,
-//     natural or built-in voice, read aloud, invite friends, ask for picks, don't learn), each
-//     works, focus stays inside, Escape closes it and focus goes back to the orb.
+//  2. The orb sheet has leads / sits back, captions, don't learn, invite friends and ask for picks, each works, and
+//     no Natural voice / Read aloud / Talk in the app switches (those are automatic now); the bar's mic mutes;
+//     focus stays inside, Escape closes it and focus goes back to the orb.
 //  3. The voice-command hint shows once per phone; typed or spoken commands work, each with a short note.
 //  4. The confirmation card: the persona's line and the public facts (no names, no private answers), then it
 //     carries on by itself; "Change something" turns the facts into buttons and one reopens its card.
@@ -132,7 +132,8 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       await ctx.addInitScript(([u, r]) => {
         try {
           if (u) localStorage.setItem("sq2.user", u);
-          localStorage.setItem("sk:agentVoice", "false");
+          localStorage.setItem("sk:agentVoice", "false"); // an old stored switch: ignored and cleared
+          localStorage.setItem("sk:aloud", "false");
           for (const [rid, me] of Object.entries(r)) localStorage.setItem(`sk:${rid}`, JSON.stringify(me));
         } catch {}
       }, [user, rooms]);
@@ -218,14 +219,19 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       await ctx.close();
     });
 
-    await test("2. The orb sheet has every moved control, each works, and it's a proper dialog", async () => {
+    await test("2. The orb sheet has its controls (and no voice switches), each works, and it's a proper dialog", async () => {
       const call = await newCall();
       await toLead(call);
       const { ctx, page } = await callPage(call);
       await page.click("#orbBtn");
       await page.waitForSelector("#orbSheet [role=dialog]");
       assert.strictEqual(await page.getAttribute("#orbBtn", "aria-expanded"), "true");
-      for (const sel of ['[data-setmode="lead"]', '[data-setmode="sidelines"]', "#audioBtn", "#capsBtn", "#agent", "#aloud", "#inviteBtn", "#ask", "#learnBtn"]) assert(await page.locator(`#orbSheet ${sel}`).isVisible(), `${sel} is in the sheet`);
+      for (const sel of ['[data-setmode="lead"]', '[data-setmode="sidelines"]', "#capsBtn", "#inviteBtn", "#ask", "#learnBtn"]) assert(await page.locator(`#orbSheet ${sel}`).isVisible(), `${sel} is in the sheet`);
+      for (const sel of ["#audioBtn", "#muteBtn", "#agent", "#aloud"]) assert.strictEqual(await page.locator(`#orbSheet ${sel}`).count(), 0, `no ${sel} switch in the sheet`);
+      const sheetText = await page.textContent("#orbSheet");
+      assert(!/Natural voice|Read Sidekick aloud|Talk in the app/.test(sheetText), "no Natural voice, Read aloud or Talk in the app switch");
+      assert(/Or just say it/.test(sheetText), "the voice commands line");
+      assert.deepStrictEqual(await page.evaluate(() => [localStorage.getItem("sk:agentVoice"), localStorage.getItem("sk:aloud")]), [null, null], "old stored voice switches are cleared");
       assert(await page.evaluate(() => document.getElementById("orbSheet").contains(document.activeElement)), "focus moves into the sheet");
       await basics(page, "375 orb sheet");
       await wait(350); // the sheet's slide-up has finished
@@ -247,40 +253,25 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       await page.waitForFunction(() => /sitting back/i.test(document.getElementById("toast").textContent));
       await page.click('#orbSheet [data-setmode="lead"]');
       await until(async () => (await viewOf(call.rid, call.A)).mode === "lead", 6000, "leading again");
-      // Talk in the app: on (status chip), mute, off
-      await page.click("#orbSheet #audioBtn");
-      await page.waitForFunction(() => document.querySelector("#orbSheet #audioBtn").getAttribute("aria-checked") === "true", null, { timeout: 8000 });
-      await page.waitForSelector("#top #chipAudio");
-      assert.strictEqual((await page.textContent("#chipAudio")).trim(), "In-app audio");
-      assert.strictEqual(await page.$eval("#chipAudio", (e) => e.tagName), "SPAN", "status is a chip, not a button");
-      const muted0 = await page.getAttribute("#orbSheet #muteBtn", "aria-checked");
-      await page.click("#orbSheet #muteBtn");
-      await page.waitForFunction((m) => document.querySelector("#orbSheet #muteBtn").getAttribute("aria-checked") !== m, muted0);
-      await page.click("#orbSheet #audioBtn");
-      await page.waitForFunction(() => document.querySelector("#orbSheet #audioBtn").getAttribute("aria-checked") === "false");
-      assert.strictEqual(await page.locator("#chipAudio").count(), 0, "the chip goes with it");
       // Captions off and on (what's said aloud shows in the chat sheet while captions are on)
       await page.click("#orbSheet #capsBtn");
       assert.strictEqual(await page.getAttribute("#orbSheet #capsBtn", "aria-checked"), "false");
       await page.click("#orbSheet #capsBtn");
       assert.strictEqual(await page.getAttribute("#orbSheet #capsBtn", "aria-checked"), "true");
-      // Read aloud
-      const aloud0 = await page.getAttribute("#orbSheet #aloud", "aria-checked");
-      await page.click("#orbSheet #aloud");
-      assert.notStrictEqual(await page.getAttribute("#orbSheet #aloud", "aria-checked"), aloud0);
       // Don't learn from this plan (saved on the server for this person)
       await page.click("#orbSheet #learnBtn");
       await until(async () => (await viewOf(call.rid, call.A)).me.noLearn === true, 4000, "don't learn on");
-      // Natural voice: the switch asks for the agent (answered here: it's resting), the call carries on with the built-in voice
-      await page.route("**/voice-agent", (rt) => rt.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ error: "resting", fallback: true, capped: true }) }));
-      await page.click("#orbSheet #agent");
-      await page.waitForFunction(() => /natural voice is resting/i.test(document.getElementById("toast").textContent));
-      await page.waitForFunction(() => !document.querySelector("#orbSheet #agent"));
       // Invite friends: the People sheet
       await page.click("#orbSheet #inviteBtn");
       await page.waitForSelector("#sheet [role=dialog] #copy");
       await page.keyboard.press("Escape");
       assert.strictEqual(await page.evaluate(() => document.activeElement && document.activeElement.id), "orbBtn", "focus back on the orb after the share sheet");
+      // The bar's mic mutes and unmutes
+      const live0 = await page.getAttribute("#mic", "aria-pressed");
+      await page.click("#mic");
+      await page.waitForFunction((m) => document.getElementById("mic").getAttribute("aria-pressed") !== m, live0);
+      await page.click("#mic");
+      await page.waitForFunction((m) => document.getElementById("mic").getAttribute("aria-pressed") === m, live0);
       await ctx.close();
     });
 
@@ -563,8 +554,25 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       await page.click("#sendSurvey");
       await page.waitForFunction(() => /Thanks/.test(document.getElementById("body").textContent));
       await page.waitForSelector("#backHome");
+      // Watch every frame of the app's start-up: the loader's "Who's in tonight?" and the opening question never show
+      await ctx.addInitScript(() => {
+        if (location.pathname !== "/") return;
+        window.__seen = { loader: false, question: false };
+        const look = () => {
+          const hl = document.querySelector("#boot .b-hl");
+          if (hl && hl.getClientRects().length && /in\s*tonight/i.test(hl.textContent)) window.__seen.loader = true;
+          if (document.querySelector(".mode.lights, #boot.asking, #boot .b-q")) window.__seen.question = true;
+          requestAnimationFrame(look);
+        };
+        look();
+        document.addEventListener("DOMContentLoaded", look);
+      });
       await Promise.all([page.waitForURL(`${base}/`), page.click("#backHome")]);
       assert.strictEqual(await page.evaluate(() => sessionStorage.getItem("sq2.screen")), "discover");
+      await page.waitForFunction(() => window.SQ && window.SQ.u && window.SQ.u.screen === "discover" && !document.getElementById("boot"), null, { timeout: 15000 });
+      const seen = await page.evaluate(() => window.__seen);
+      assert.strictEqual(seen.loader, false, "no \"Who's in tonight\" loader on the way back to Discover");
+      assert.strictEqual(seen.question, false, "no opening question on the way back to Discover");
       await ctx.close();
       // Someone who leaves (not the planner) gets the same way back
       const c2 = await newCall();
