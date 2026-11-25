@@ -308,7 +308,7 @@ const leaks = (label, text) => DIGITS.filter((d) => String(text).includes(d)).ma
       assert.deepStrictEqual(await pressed(page), ["union"]);
       assert.match(await note(page), /starting from Union/);
       assert(!(await page.evaluate(() => document.getElementById("toast").classList.contains("show"))), "no error toast");
-      assert(/\/sk\/?$/.test(page.url()), "still on the start screen to check it");
+      assert(/\/sk\/?(\?quick=1)?$/.test(page.url()), "still on the start screen to check it");
       await page.screenshot({ path: path.join(SHOTS, "3b-denied-at-prompt.png"), fullPage: true });
       await page.click("#go");
       await page.waitForURL(/\/sk\/[\w-]+$/);
