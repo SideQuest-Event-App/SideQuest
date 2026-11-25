@@ -18,6 +18,7 @@ const usage = require("./usage");
 const { track } = require("../analytics");
 const weather = require("../search/weather"); // context for the plan engine: rain or deep cold puts indoor picks first
 const rank = require("../search/rank"); // who-it's-for, crew match and the Wildcard on the picks
+const callside = require("./callside"); // signed-in people on a call: taste learning, call history, in-app invites
 
 const rooms = new Map();
 const SUMMARY_FILE = path.join(__dirname, "..", "..", "data", "sidekick-summaries.jsonl");
@@ -55,7 +56,32 @@ function asForm(room) {
   if (planner) planner.mode = "form";
 }
 
-function createRoom({ crew, planner, nights, persona, members, form, path: how, squad }) {
+// A form's "Decide by": the planner picks a time on the Plan tab's last step (e.g. Thu 9 PM). Then the form
+// closes (nobody new can answer) and Sidekick picks with the answers it has. At most three weeks out.
+function setDeadline(room, when) {
+  const t = typeof when === "number" ? when : Date.parse(when);
+  if (!Number.isFinite(t) || t <= now() || t > now() + 21 * 86400000) return false;
+  room.deadline = t;
+  clearTimeout(room.deadlineTimer);
+  room.deadlineTimer = setTimeout(() => closeForm(room).catch((err) => console.error("Closing the form failed:", err)), t - now());
+  if (room.deadlineTimer.unref) room.deadlineTimer.unref();
+  return true;
+}
+async function closeForm(room) {
+  if (room.closed || room.status !== "live") return;
+  room.closed = true;
+  clearTimeout(room.deadlineTimer);
+  track("sk_form_closed", { sessionId: room.id, persona: room.persona, answered: P.crew(room).filter((p) => Object.keys(room.answers[p.id] || {}).length).length });
+  if (!room.picks) {
+    room.confirmed = true; // the deadline is the go-ahead: no confirmation card
+    const events = [...upcoming(), ...(room.places || [])];
+    const r = P.readiness(events, room, factsOf(room));
+    if (r.pool >= 1) await makePicks(room, r.list);
+  }
+  broadcast(room);
+}
+
+function createRoom({ crew, planner, nights, persona, members, form, path: how, user, noLearn, deadline, pick, invite, squad }) {
   const room = {
     id: id(),
     crew: String(crew || "The crew").slice(0, 40),
@@ -99,18 +125,30 @@ function createRoom({ crew, planner, nights, persona, members, form, path: how, 
     context: { weather: weather.at }, // read by plan.js score(); no forecast cached means no effect
     history: [], // each pick shown, with everyone's fit, so later picks favour whoever was served least
     wildcard: null, // one labelled pick from outside the crew's vibes (shown, not voted on)
+    confirm: null, // "I've got everything": { at, until, facts, editing } between the questions and the picks
+    confirmed: false,
+    reopened: null, // a fact reopened from the confirmation card: { slot, at }
+    deadline: null, // a form's "Decide by" (ms); the form closes and Sidekick picks then
+    closed: false,
+    candidate: null, // "Plan it" from Saved: the event to plan around (an id), shown as a pick when it fits
   };
   weather.refresh().catch(() => {}); // fetched at most hourly; skipped when unreachable
   if (!room.nights.length) room.nights = suggestNights().slice(0, 2).map((n) => n.date);
   rooms.set(room.id, room);
-  const person = addPerson(room, { name: planner, mode: "voice", role: "planner" });
+  const person = addPerson(room, { name: planner, mode: "voice", role: "planner", user });
+  if (noLearn) person.noLearn = true;
+  const cand = pick != null && callside.pickInfo(pick);
+  if (cand && !cand.past) room.candidate = cand.id;
   if (form) asForm(room);
+  if (deadline) setDeadline(room, deadline);
+  if (invite) callside.invite(room, person, invite);
   track("plan_started", { sessionId: room.id, path: form ? "form" : ["squad", "friends", "link"].includes(how) ? `call_${how}` : "call", persona: room.persona, nights: room.nights.length, members: room.expected.length });
   return { room: room.id, person: person.id };
 }
 
-function addPerson(room, { name, mode, role }) {
+function addPerson(room, { name, mode, role, user }) {
   const person = { id: id(), name: String(name || "Friend").trim().slice(0, 24) || "Friend", mode: ["voice", "text", "form"].includes(mode) ? mode : "voice", role: role || "friend", joinedAt: now(), lastSpokeAt: 0 };
+  if (user && /^[\w-]{1,40}$/.test(String(user))) person.user = String(user); // a SideQuest account (never in a view)
   room.people.push(person);
   room.answers[person.id] = {};
   track("sk_joined", { sessionId: room.id, persona: room.persona, mode: person.mode, role: person.role, crewSize: room.people.length });
@@ -545,6 +583,7 @@ async function speak(room, move, c = {}) {
       switch_sidelines: `Someone asked you to step back. Say you'll stay quiet until they need you.`,
       guide: `People seem unsure about this: ${PROMPTS[c.slot]} Help them answer by offering these concrete options from what's actually on: ${c.options}. Keep it light and end with a question.`,
       locked: `The planner just locked the plan: ${c.pick}. Confirm it warmly in one short sentence.`,
+      confirm: `You now have everything you need to pick. Say so in your own voice ("${CONFIRM_HEAD[personas.resolve(room.persona)]}"), then recap the plan in a few words: ${c.recap}. No names, no amounts beyond what's in the recap, and no question.`,
       wrap: `Say one warm goodbye (the plan's set for ${ctx.night || "the night"}), and point everyone to the two quick survey questions on their screen. Two short sentences at most.`,
       answer: `${c.person} just spoke to you: "${redact(c.question || "")}". Reply briefly, using only the facts and events here. If picks aren't ready yet, say what you still need.`,
     };
@@ -659,6 +698,7 @@ function lineContext(room, f, c) {
     story1: c.story && c.story[0], story2: c.story && c.story[1],
     a_who: c.aWho, b_who: c.bWho,
     hot: c.hot,
+    recap: c.recap || null, // the confirmation's plan in public words
   };
 }
 
@@ -754,6 +794,7 @@ const MOVE_HINT = {
   none: "Nothing fits everything. Offer to loosen one thing, without saying whose limit it is",
   answer: "Reply briefly to what was just asked",
   locked: "Confirm the locked plan warmly",
+  confirm: "You have everything you need. Say so, then recap the plan in a few words; the confirmation card is on screen",
   wrap: "Point everyone to the two quick survey questions on their screen",
 };
 function moveText(room, move, c) {
@@ -767,7 +808,8 @@ function moveText(room, move, c) {
     : move === "nudge" ? `Person: ${c.person}. Question: ${PROMPTS[c.slot] || ""}`
     : move === "none" && c.relax ? `${c.relax} would open up ${c.n} options.`
     : move === "answer" ? `${c.person} asked: "${redact(c.question || "")}"`
-    : move === "locked" ? `Plan: ${c.pick}.` : "";
+    : move === "locked" ? `Plan: ${c.pick}.`
+    : move === "confirm" ? `Recap: ${c.recap}.` : "";
   return `${MOVE_HINT[move] || "Say this"}. ${detail}`.replace(/\s+/g, " ").trim();
 }
 // A note for the agent about something it can't hear: someone joined, a tap on a card, picks on screen.
@@ -854,6 +896,7 @@ async function decide(room, opts = {}) {
 
 async function decideNow(room, { forcePicks = false } = {}) {
   if (room.status !== "live" || room.picks || room.picking) return;
+  if (room.confirm) return forcePicks ? finishConfirm(room, "ask") : undefined; // the confirmation card is up
   // The agent leads: no spoken check-in vote (people can still say "step back" or tap "sits back")
   if (room.agentMode && (!room.mode || room.mode === "voting")) {
     clearTimeout(room.modeTimer);
@@ -948,7 +991,11 @@ async function decideNow(room, { forcePicks = false } = {}) {
 
   // A form waits for everyone the planner invited (or for "Pick now")
   const waitingOn = room.form && (room.expected || []).length > 0 && expectedView(room).some((x) => !x.answered && !x.link);
-  if (r.ready && !waitingOn) return makePicks(room, r.list);
+  if (r.ready && !waitingOn) {
+    if (room.reopened && !reopenedAnswered(room)) return; // a fact reopened from the confirmation: wait for its answer
+    room.reopened = null;
+    return wantsConfirm(room) ? startConfirm(room) : makePicks(room, r.list);
+  }
   if (r.ready && waitingOn) return;
   if (r.reason === "too-few" && (f.night.known || room.nights.length === 1) && f.budget.known) {
     const best = P.bestRelax(events, room, f);
@@ -1043,6 +1090,85 @@ function startTime(iso, spoken = false) {
   return spoken ? t.replace(/\s?[AP]M$/, "") : t;
 }
 
+// ---------- "I've got everything": a short confirmation before the picks ----------
+// When the engine has enough to pick, everyone sees a card with Sidekick's line and the plan so far in public
+// words only ("Saturday after 8 · Live music · around Union · under $30 for the group"): never a name, never
+// anyone's own budget or the areas they'd rather avoid. "Looks good" (or about 4 s with no tap) goes on to the
+// steps and the picks; "Change something" pauses it and each fact becomes a button that reopens its card.
+// Calls nobody is watching (the unit tests) and forms skip it; so does asking for picks outright.
+const CONFIRM_MS = () => Number(process.env.SIDEKICK_CONFIRM_MS == null ? 4000 : process.env.SIDEKICK_CONFIRM_MS);
+const CONFIRM_HEAD = { friend: "Okay, I think I've got it!", concierge: "Thank you, I have everything I need." };
+const wantsConfirm = (room) => CONFIRM_MS() > 0 && !room.form && !room.confirmed && (room.streams.size > 0 || room.agentMode);
+const lower = (s) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+function confirmFacts(room, f = factsOf(room)) {
+  const out = [];
+  const nights = f.night.known && f.night.value.length ? f.night.value : room.nights;
+  out.push({ slot: "night", text: nights.map((d) => spokenDay(P.nightLabel(d))).join(" or ") });
+  if (f.time.known && f.time.value.length) out.push({ slot: "time", text: [].concat(f.time.value).map((v) => lower(P.labelOf("time", v, room))).join(" or "), join: " " });
+  // A specific cuisine or venue ("Chinese skewers"), when the crew said one (the want fact, if this build has it)
+  const w = f.want || null;
+  const wantText = w && w.value != null && [].concat(w.value).length ? [].concat(w.value).map((v) => { try { return P.labelOf("want", v, room) || String(v); } catch { return String(v); } }).join(", ") : typeof room.want === "string" && room.want ? room.want : null;
+  if (wantText) out.push({ slot: P.SLOTS.want ? "want" : "vibe", text: wantText });
+  else if (f.vibe.value && f.vibe.value.length) out.push({ slot: "vibe", text: f.vibe.value.slice(0, 2).map((v) => P.labelOf("vibe", v, room)).join(" + ") });
+  if (f.kind && f.kind.known && f.kind.value.length === 1 && f.kind.value[0] !== "either" && room.places && room.places.length) out.push({ slot: "kind", text: lower(P.labelOf("kind", f.kind.value[0], room)) });
+  const from = [...new Set(P.answersFor(room, "origin").map((x) => originLabel(room, x, null)))].filter(Boolean);
+  if (from.length === 1) out.push({ slot: "origin", text: `around ${from[0].replace(/^near /, "")}` });
+  else if (from.length > 1) out.push({ slot: "origin", text: `from ${talk.andList(from.slice(0, 3))}` });
+  const budget = P.budgetLabel(f, room); // the group label only, never whose
+  if (budget) out.push({ slot: "budget", text: lower(budget) });
+  return out;
+}
+const recapText = (facts, sep = " · ") => facts.map((x, i) => (i && x.join ? x.join : i ? sep : "") + x.text).join("");
+async function startConfirm(room) {
+  const facts = confirmFacts(room);
+  room.card = null;
+  room.confirm = { at: now(), until: now() + CONFIRM_MS(), facts, editing: false };
+  room.confirmTimer = setTimeout(() => finishConfirm(room, "auto").catch((err) => console.error(err)), CONFIRM_MS());
+  track("sk_confirm_shown", { sessionId: room.id, persona: room.persona, facts: facts.length });
+  broadcast(room);
+  if (room.agentMode) agentNote(room, `[app] You have everything you need; a confirmation card is on everyone's screens with: ${recapText(facts, ", ")}. Say it in one short line, like: "${personas.fallbackLine(room.persona, "confirm", { recap: recapText(facts, ", ") })}" Then wait: the steps and picks follow on their own.`);
+  await speak(room, "confirm", { recap: recapText(facts, ", "), deadline: now() + 1500, lateKey: "confirm" });
+  broadcast(room);
+}
+// how: "ok" (Looks good), "auto" (nobody tapped), "ask" (someone asked for picks outright)
+async function finishConfirm(room, how) {
+  if (!room.confirm) return;
+  clearTimeout(room.confirmTimer);
+  room.confirm = null;
+  room.confirmed = true;
+  if (room.status !== "live") return;
+  track("sk_confirm_done", { sessionId: room.id, persona: room.persona, how });
+  const events = [...upcoming(), ...(room.places || [])];
+  const r = P.readiness(events, room, factsOf(room));
+  if (r.pool >= 2) {
+    // The confirmation hands over to the steps: they show at once and stay up long enough to read
+    const t = startThinking(room);
+    t.visible = true;
+    t.minUntil = now() + THINK.afterConfirmMs();
+    broadcast(room);
+    await makePicks(room, r.list);
+  } else { room.confirmed = false; schedule(room, 300); }
+  broadcast(room);
+}
+function changeConfirm(room) {
+  if (!room.confirm) return false;
+  clearTimeout(room.confirmTimer);
+  room.confirm.editing = true;
+  room.confirm.until = null;
+  return true;
+}
+// A fact tapped on the card: its question comes back; the confirmation shows again once it's answered
+function reopenFact(room, slot) {
+  if (!room.confirm || !(P.SLOTS[slot] || slot === "want")) return false;
+  clearTimeout(room.confirmTimer);
+  room.confirm = null;
+  room.reopened = { slot: P.SLOTS[slot] ? slot : "vibe", at: now() };
+  if (room.mode !== "sidelines") room.card = { slot: room.reopened.slot, at: now() };
+  track("sk_confirm_reopen", { sessionId: room.id, persona: room.persona, slot });
+  return true;
+}
+const reopenedAnswered = (room) => room.reopened && P.answersFor(room, room.reopened.slot).some((x) => x.a && x.a.at > room.reopened.at);
+
 // ---------- While Sidekick finds the picks: show the work ----------
 // Picks can take a while (places search, the AI choosing, the AI writing the line). Instead of silence,
 // the plan board turns into a short checklist with real numbers from the engine, Sidekick says how it's
@@ -1055,6 +1181,7 @@ const THINK = {
   stillMs: () => Number(process.env.SIDEKICK_STILL_MS || 10000), // "Still looking..."
   giveUpMs: () => Number(process.env.SIDEKICK_PICKS_MAX_MS || 12000), // the engine's own top two
   placesMs: () => Number(process.env.SIDEKICK_PLACES_WAIT_MS || 3000), // most the places search may hold up picks
+  afterConfirmMs: () => Number(process.env.SIDEKICK_CONFIRM_STEPS_MS || 1600), // after the confirmation card, the steps show at least this long
 };
 const LATE = Symbol("late");
 // A promise's result, or LATE once the deadline (a time) passes. A late failure is swallowed.
@@ -1185,6 +1312,12 @@ async function pickTwo(room, list, deadline) {
     console.error(err.message);
   }
   matches = matches.filter((m) => pool.some((e) => e.id === m.id));
+  // "Plan it" from Saved: the event the planner started from goes first when it fits every hard limit
+  const cand = room.candidate != null ? list.find((e) => e.id === room.candidate) : null;
+  if (cand) {
+    if (!pool.includes(cand)) pool.push(cand);
+    matches = [{ id: cand.id, reason: "The one you saved", fits: {} }, ...matches.filter((m) => m.id !== cand.id)];
+  }
   // The list is already ranked by the engine's score, and holds only what obeys every hard limit
   for (const e of pool) if (matches.length < 2 && !matches.some((m) => m.id === e.id)) matches.push({ id: e.id, reason: "", fits: {} });
   setThinkStage(room, 4);
@@ -1240,6 +1373,15 @@ async function pickTwo(room, list, deadline) {
   const asked = new Set(picks.flatMap((p) => ((pool.find((x) => x.id === p.id) || {}).vibes || []).slice(0, 1)));
   const wc = rank.wildcard(list.slice(2, 60).filter((e) => e.type !== "place" && !picks.some((p) => p.id === e.id)), { avoid: [...asked], rand: rank.rng(room.createdAt % 100000), scoreOf: (e) => -list.indexOf(e) });
   room.wildcard = wc ? { id: wc.event.id, title: wc.event.title, when: wc.event.startsAt ? `${startDay(wc.event.startsAt)} · starts ${startTime(wc.event.startsAt)}` : wc.event.date, price: wc.event.price === 0 ? "Free" : wc.event.price != null ? `$${wc.event.price} ticket` : "Price not listed", where: [wc.event.venue && wc.event.venue.name, wc.event.neighbourhood].filter(Boolean).join(", "), why: wc.why.replace("your usual", "what the crew asked for"), url: wc.event.sourceUrl || null } : null;
+  // After a confirmation, the steps stay up a moment (they read as the work being done, not a flash)
+  if (room.think && room.think.minUntil > now()) await new Promise((r) => setTimeout(r, room.think.minUntil - now()));
+  if (room.status !== "live") return;
+  if (cand) picks.forEach((p) => { if (p.id === cand.id) p.candidate = true; });
+  else if (room.candidate != null) {
+    // It doesn't fit everything the crew said: shown in the Wildcard's place, for a look
+    const e = upcoming().find((x) => x.id === room.candidate);
+    if (e) room.wildcard = { id: e.id, title: e.title, when: e.startsAt ? `${startDay(e.startsAt)} · starts ${startTime(e.startsAt)}` : e.date, price: e.price === 0 ? "Free" : e.price != null ? `$${e.price} ticket` : "Price not listed", where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), why: "The event you saved. It doesn't fit everything the crew said, so it's here for a look.", url: e.sourceUrl || null, candidate: true };
+  }
   room.picks = picks;
   room.card = null;
   broadcast(room); // the cards replace the steps now, even when a tool started this and stopped waiting
@@ -1281,6 +1423,9 @@ function endRoom(room, why) {
   } catch (err) {
     console.error("Couldn't save the Sidekick summary:", err.message);
   }
+  clearTimeout(room.deadlineTimer);
+  clearTimeout(room.confirmTimer);
+  try { callside.saveRecap(room); } catch (err) { console.error("Couldn't save call recaps:", err.message); }
   track("sk_call_ended", { sessionId: room.id, persona: room.persona, why, secs: summary.secs, locked: Boolean(room.locked) });
   broadcast(room);
   setTimeout(() => { for (const res of room.streams.values()) res.end(); rooms.delete(room.id); }, 30 * 60 * 1000).unref();
@@ -1324,7 +1469,7 @@ function slotOptions(room, person, slot) {
 }
 function cardFor(room, person) {
   const mine = room.answers[person.id] || {};
-  if (room.status !== "live" || room.picks || room.think) return null; // no question while the picks are found
+  if (room.status !== "live" || room.picks || room.think || room.confirm) return null; // no question while the picks are found
   if (room.mode === "voting") {
     const votes = {};
     for (const [pid, v] of Object.entries(room.modeVotes)) { const who = room.people.find((x) => x.id === pid); if (who) votes[v] = [...(votes[v] || []), initial(who.name)]; }
@@ -1341,7 +1486,8 @@ function cardFor(room, person) {
   }
   // Private: budget, when it's the open question and this person hasn't answered
   if (room.card && room.card.slot === "budget") {
-    if (mine.budget) return { slot: "budget", private: true, waiting: true, prompt: "Thanks. Waiting on the others", options: [] };
+    const reopened = room.reopened && room.reopened.slot === "budget" && !(mine.budget && mine.budget.at > room.reopened.at);
+    if (mine.budget && !reopened) return { slot: "budget", private: true, waiting: true, prompt: "Thanks. Waiting on the others", options: [] };
     return { slot: "budget", private: true, prompt: PROMPTS.budget, multi: false, options: P.optionsFor("budget", room).map(([value, label]) => ({ value, label, voters: [] })) };
   }
   if (!room.card) return null;
@@ -1370,7 +1516,7 @@ function viewFor(room, pid) {
     nights: room.nights.map((d) => P.nightLabel(d)),
     form: Boolean(room.form),
     expected: expectedView(room),
-    me: me && { id: me.id, name: me.name, mode: me.mode, planner: me.role === "planner", answers: ownAnswers(room.answers[me.id]), sharedLocation: Boolean((room.answers[me.id] || {}).location) },
+    me: me && { id: me.id, name: me.name, mode: me.mode, planner: me.role === "planner", noLearn: Boolean(me.noLearn), signedIn: Boolean(me.user), answers: ownAnswers(room.answers[me.id]), sharedLocation: Boolean((room.answers[me.id] || {}).location) },
     people: P.crew(room).map((p) => ({ id: p.id, name: p.name, initial: initial(p.name), mode: p.mode, talking: now() - p.lastSpokeAt < 3000, spokeAt: p.lastSpokeAt || 0, planner: p.role === "planner", online: room.streams.has(p.id), audio: Boolean(p.audio), muted: Boolean(p.muted) })),
     audioRoom: room.people.some((p) => p.audio),
     boot: BOOT,
@@ -1391,6 +1537,12 @@ function viewFor(room, pid) {
     picks: room.picks && room.picks.length ? room.picks : null, // [] while they're being found
     wildcard: room.picks && room.picks.length ? room.wildcard : null,
     thinking: thinkingView(room), // "Finding your two picks": { steps: [{ label, state }], startedAt }, or null
+    // "I've got everything": the persona's line and the plan in public words (no names, no private answers)
+    confirm: room.confirm ? { line: CONFIRM_HEAD[personas.resolve(room.persona)] || CONFIRM_HEAD.concierge, facts: room.confirm.facts.map(({ slot, text, join }) => ({ slot, text, join: join || null })), until: room.confirm.until, editing: room.confirm.editing } : null,
+    reopened: room.reopened ? room.reopened.slot : null,
+    deadline: room.deadline,
+    closed: room.closed,
+    candidate: room.candidate,
     votes,
     myVote: me ? room.votes[me.id] || null : null,
     locked: room.locked,
@@ -1466,9 +1618,15 @@ async function handle(req, res, url, { readBody, sendJSON }) {
   try {
     if (req.method === "GET" && parts[2] === "nights") return sendJSON(res, 200, { nights: suggestNights(), ai: claude.available(), places: places.configured() && (await places.available()), voiceAgent: await agentReady() });
     if (parts[2] === "agent") return agentTool(req, res, parts[3], { readBody, sendJSON });
+    // The person's saved call recaps (none from before "Delete call history"), and the event behind "Plan it"
+    if (req.method === "GET" && parts[2] === "calls") return sendJSON(res, 200, { calls: callside.recaps(url.searchParams.get("user")) });
+    if (req.method === "GET" && parts[2] === "pick") {
+      const info = callside.pickInfo(url.searchParams.get("id"));
+      return info ? sendJSON(res, 200, info) : sendJSON(res, 404, { error: "That event isn't listed any more." });
+    }
     if (req.method === "POST" && parts[2] === "rooms" && !parts[3]) {
       const body = await readBody(req);
-      return sendJSON(res, 200, createRoom({ crew: body.crew, planner: body.name, nights: body.nights, persona: body.persona, members: body.members, form: Boolean(body.form), path: body.path, squad: body.squad }));
+      return sendJSON(res, 200, createRoom({ crew: body.crew, planner: body.name, nights: body.nights, persona: body.persona, members: body.members, form: Boolean(body.form), path: body.path, squad: body.squad, user: body.user, noLearn: Boolean(body.noLearn), deadline: body.form ? body.deadline : null, pick: body.pick, invite: body.invite }));
     }
     const room = rooms.get(parts[3]);
     if (!room) return sendJSON(res, 404, { error: "This call has ended or the link is wrong.", gone: true, boot: BOOT });
@@ -1494,12 +1652,13 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       });
       return;
     }
-    if (req.method === "GET" && action === "info") return sendJSON(res, 200, { boot: BOOT, crew: room.crew, status: room.status, form: Boolean(room.form), nights: room.nights.map((d) => P.nightLabel(d)), people: P.crew(room).map((p) => p.name), member: room.people.some((p) => p.id === url.searchParams.get("p")) });
+    if (req.method === "GET" && action === "info") return sendJSON(res, 200, { boot: BOOT, crew: room.crew, status: room.status, form: Boolean(room.form), deadline: room.deadline, closed: room.closed, nights: room.nights.map((d) => P.nightLabel(d)), people: P.crew(room).map((p) => p.name), member: room.people.some((p) => p.id === url.searchParams.get("p")) });
     if (req.method !== "POST") return sendJSON(res, 404, { error: "Not found" });
     const body = await readBody(req);
     if (action === "join") {
       if (room.status !== "live") return sendJSON(res, 400, { error: "This call has ended." });
-      const person = addPerson(room, { name: body.name, mode: body.mode });
+      if (room.closed) return sendJSON(res, 400, { error: "This form has closed. Ask whoever planned it for the plan.", closed: true });
+      const person = addPerson(room, { name: body.name, mode: body.mode, user: body.user });
       const answers = { ...(body.answers || {}) };
       if (Array.isArray(answers.nightIdx)) answers.night = answers.nightIdx.map((i) => room.nights[i]).filter(Boolean); // the form sends night positions
       delete answers.nightIdx;
@@ -1525,9 +1684,29 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       if (Array.isArray(body.members)) room.expected = cleanMembers(body.members);
       if (body.crew) room.crew = String(body.crew).slice(0, 40);
       if (body.form) asForm(room);
+      if (body.noLearn != null) person.noLearn = Boolean(body.noLearn);
+      if (body.pick != null) { const c = callside.pickInfo(body.pick); room.candidate = c && !c.past ? c.id : null; }
+      if (room.form && body.deadline) setDeadline(room, body.deadline);
+      if (body.invite) callside.invite(room, person, body.invite);
       broadcast(room);
       schedule(room, 300);
       return sendJSON(res, 200, { ok: true });
+    }
+    // The confirmation card: "Looks good", "Change something", or a fact tapped to reopen its question
+    if (action === "confirm") {
+      if (!room.confirm) return sendJSON(res, 409, { error: "Sidekick has already moved on." });
+      if (body.how === "change") changeConfirm(room);
+      else if (body.how === "reopen") { if (!reopenFact(room, String(body.slot || ""))) return sendJSON(res, 400, { error: "That can't be changed here." }); }
+      else { finishConfirm(room, "ok").catch((err) => console.error(err)); return sendJSON(res, 200, { ok: true }); }
+      broadcast(room);
+      schedule(room, 400);
+      return sendJSON(res, 200, { ok: true });
+    }
+    // "Don't learn from this plan": this call's picks, votes and accepts leave this person's taste alone
+    if (action === "learn") {
+      person.noLearn = Boolean(body.off);
+      broadcast(room);
+      return sendJSON(res, 200, { ok: true, noLearn: person.noLearn });
     }
     if (action === "answer" && body.slot === "mode") {
       const ok = voteMode(room, person, body.value, "tap");
@@ -1693,6 +1872,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     if (action === "vote") {
       if (!room.picks || room.locked || !room.picks.some((p) => p.id === Number(body.eventId))) return sendJSON(res, 400, { error: "Nothing to vote on yet." });
       room.votes[person.id] = Number(body.eventId);
+      callside.learn(room, person, "pick", Number(body.eventId));
       track("sk_vote", { sessionId: room.id, persona: room.persona, eventId: Number(body.eventId) });
       broadcast(room);
       return sendJSON(res, 200, { ok: true });
@@ -1704,6 +1884,8 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       for (const ev of Object.values(room.votes)) tally[ev] = (tally[ev] || 0) + 1;
       const chosen = Number(body.eventId) || Number(Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0]) || room.picks[0].id;
       room.locked = room.picks.find((p) => p.id === chosen) || room.picks[0];
+      for (const p of P.crew(room)) callside.learn(room, p, "accept", room.locked.id);
+      try { callside.saveRecap(room); } catch (err) { console.error("Couldn't save call recaps:", err.message); }
       speak(room, "locked", { pick: talk.spokenTitle(room.locked.title, String(room.locked.where || "").split(",")[0]) }).then(() => {
         broadcast(room);
         setTimeout(() => speak(room, "wrap", {}).then(() => broadcast(room)), 6000).unref();
@@ -1805,7 +1987,8 @@ async function nextMove(room) {
   const fresh = room.nextMove && !room.nextMove.read ? room.nextMove : null;
   if (fresh) fresh.read = true;
   let move;
-  if (room.picking || (room.think && !(room.picks && room.picks.length))) move = findingPicks(room);
+  if (room.confirm) move = { next_move: "confirm", what_to_do: `You have everything you need; the confirmation card is on everyone's screens. Say it in one short line with the recap (${recapText(room.confirm.facts, ", ")}), then wait: the steps and picks follow on their own, unless someone wants to change something.`, example_line: fresh && fresh.move === "confirm" ? fresh.example : personas.fallbackLine(room.persona, "confirm", { recap: recapText(room.confirm.facts, ", ") }) };
+  else if (room.picking || (room.think && !(room.picks && room.picks.length))) move = findingPicks(room);
   else if (room.locked) move = { next_move: "locked", what_to_do: `The plan is locked: ${cleanTitle(room.locked.title)}. If you haven't yet, confirm it in one sentence and point to the two quick survey questions on screen. Otherwise stay quiet (skip_turn).` };
   else if (room.picks) move = { next_move: "present_picks", what_to_do: fresh && fresh.move === "picks" ? fresh.todo : "The two picks are on everyone's screens. If you haven't presented them, do it now with one reason each and ask everyone to vote in the app. Otherwise answer questions about them, using only the pick details.", example_line: fresh && fresh.move === "picks" ? fresh.example : undefined };
   else if (room.mode === "sidelines") move = { next_move: "stay_quiet", what_to_do: "The crew asked you to sit back. Stay quiet (skip_turn) unless someone says Sidekick." };
