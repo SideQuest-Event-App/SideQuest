@@ -668,7 +668,6 @@
       const list = kind === "events" ? items.filter((x) => x.kind === "event") : kind === "places" ? items.filter((x) => x.kind === "place") : items;
       const shown = list.slice(0, s.shown);
       const done = !s.loadingMore && s.shown >= list.length && (kind === "places" || !s.more);
-      const l = r.limits;
       const hit = (m) => {
         const e = ev(m.id);
         return `<div class="search-hit">
@@ -683,13 +682,17 @@
       const gaps = r.unmet.map((x) => x.interest);
       const gapText = gaps.length < 2 ? gaps.join("") : `${gaps.slice(0, -1).join(", ")} or ${gaps[gaps.length - 1]}`;
       const nE = hits.length, nP = pls.length;
+      // What the list actually holds, for the filter that's on (never the size of the pool searched)
+      const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+      const shownE = kind === "places" ? null : nE, shownP = kind === "events" || s.places == null ? null : nP;
+      const statusLine = [shownP != null ? plural(shownP, "place") : null, shownE != null ? plural(shownE, "event") : null].filter(Boolean).join(", ") + (r.mode === "keywords" ? " · keyword matching (no AI)" : ` · ranked with ${SQ.aiLabel(r.mode)}`);
       const seg = `<div class="seg search-kind" role="group" aria-label="Show">${[["all", `All${nE + nP ? ` ${nE + nP}` : ""}`], ["events", `Events${nE ? ` ${nE}` : ""}`], ["places", `Places${s.places == null ? "" : nP ? ` ${nP}` : ""}`]].map(([k, label]) => `<button data-act="searchKind" data-arg="${k}" aria-pressed="${kind === k}">${esc(label)}</button>`).join("")}</div>`;
       // Never a blank screen: say what we found instead, or that the day's place searches ran out
       const note = s.placesNote && kind !== "events" ? `<p class="search-note">${icon("pin", "xs")}<span>${esc(s.placesNote)}</span></p>` : "";
       const placesWait = s.places == null && kind !== "events" ? `<div class="search-note">${icon("pin", "xs")}<span>Looking for places too…</span></div>` : "";
       const emptyKind = !list.length && s.places != null ? (kind === "places" ? (s.placesReason === "capped" ? "" : `<p class="t-body-m c-secondary">No places for “${esc(s.ran)}” nearby. Try other words, or see events.</p>`) : kind === "events" ? `<p class="t-body-m c-secondary">No events for “${esc(s.ran)}” yet.${nP ? " There are places, under Places." : ""}</p>` : "") : "";
       body = `
-        <span class="t-caption c-tertiary">${r.mode === "keywords" ? `${l.fit} keyword matches (no AI)` : `${l.fit} matches with ${esc(SQ.aiLabel(r.mode))}`}</span>
+        <span class="t-caption c-tertiary search-status">${esc(statusLine)}</span>
         ${seg}
         ${r.error ? `<div class="notice">${icon("sparkle")}<span>The AI didn't answer, so these are keyword matches.</span></div>` : ""}
         ${note}${emptyKind}

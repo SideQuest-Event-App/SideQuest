@@ -589,7 +589,7 @@ async function speak(room, move, c = {}) {
     const list = (c.events || []).slice(0, 4).map((e) => `- ${eventBrief(e, origins)}`).join("\n");
     const opts = c.slot ? P.optionsFor(c.slot, room).map(([, l]) => l).join(", ") : "";
     const moves = {
-      welcome: `This is the first time you speak on this call. Open with the room (the crew name, who's here, the nights), then ask one open question: what kind of night are they after? They can answer with anything: night, time, vibe.`,
+      welcome: `This is the first time you speak on this call. Open with the room (the crew name, who's here, the nights), then ask one open question: what are they in the mood for (food, a show, anything)? They can answer with anything: night, time, vibe.`,
       ask: c.slot === "budget" ? `Ask everyone to tap their max spend on their own screen, and say only you see it.` : `Say back what you just heard (below) in a few words, with names, then ask${c.to ? ` ${c.to}` : " the group"}: ${PROMPTS[c.slot]} (options on screen: ${opts}).`,
       conflict: `Name this split without taking sides, with who's on each side, and offer a way forward: ${c.a} vs ${c.b}.`,
       clarify: `${c.person} gave two options and it's not clear which they meant. Ask just them, just that: ${c.aLabel} or ${c.bLabel}? One short question.`,
@@ -597,8 +597,8 @@ async function speak(room, move, c = {}) {
       picks: `Present these two picks like a DJ, not a list: a hook, why it fits named people, one vivid detail (venue, start time, or that it's free), then invite the vote. Say which kind each one is (${c.kinds || "both fit the plan"}): a show has a start time and tickets, a place they can drop into any time it's open. Clean names and reasons to use: 1) ${(c.story || [])[0] || ""} 2) ${(c.story || [])[1] || ""}\n1) ${(c.picks || [])[0]}\n2) ${(c.picks || [])[1]}`,
       none: c.relax ? `Nothing fits everything they've said. Say that ${c.relax} would open up ${c.n} options, and ask if they want to see them. Don't say whose answer is the tight one.` : `Nothing fits everything they've said. Ask whether anyone could be flexible on the time or the night.`,
       checkin: `This is the first time you speak. Welcome ${room.crew} to SideQuest by name (who's here: ${ctx.names}), and ask whether they want you to lead the planning or sit back while they fill in the plan on their screens. Keep it to two short sentences.`,
-      mode_lead: `The crew wants you to lead. Say you've got it, then ask one open question: what kind of night are they after, and what day works best for everyone?`,
-      mode_default: `Nobody answered, so you're taking the lead. Say so lightly (they can tell you to step back anytime), then ask one open question: what kind of night are they after (${ctx.nights})?`,
+      mode_lead: `The crew wants you to lead. Say you've got it, then ask one open question: what are they in the mood for (food, a show, anything), and what day works best for everyone?`,
+      mode_default: `Nobody answered, so you're taking the lead. Say so lightly (they can tell you to step back anytime), then ask one open question: what are they in the mood for (food, a show, anything) (${ctx.nights})?`,
       mode_sidelines: `The crew wants you to sit back. Say you'll stay quiet, the plan is on their screens, and they can say "Sidekick" if they need you.`,
       mode_stalled: `You're sitting back and things have gone quiet with the plan half done. Gently ask if they'd like you to jump in.`,
       switch_lead: `Someone asked you to take over. Say you're on it and ask: ${c.slot ? QUESTION_SPOKEN[c.slot] : "what's left to decide?"}`,

@@ -338,7 +338,39 @@
   const pfNightOf = (date) => flow.data.nights.find((n) => n.date === date);
   const shortNight = (date) => { const n = pfNightOf(date); return n ? `${n.dow} ${n.day}` : date; };
 
+  // A call that's still live in this tab (minimized, or this page opened again): the Plan tab says so, with Return,
+  // and doesn't offer to start a second call
+  const onCall = () => { try { return JSON.parse(ss.get("sk:onCall") || "null"); } catch { return null; } };
+  async function liveCall() {
+    const oc = onCall();
+    if (!oc || !oc.rid) return null;
+    try {
+      const info = await api(`/api/sk/rooms/${encodeURIComponent(oc.rid)}/info`);
+      if (info.status === "live") return { ...oc, crew: info.crew || oc.crew };
+    } catch {}
+    ss.set("sk:onCall", "");
+    return null;
+  }
+  function pfOnCall(oc) {
+    flow.step = "oncall";
+    pfShell("oncall", `<div class="pf-intro pf-oncall">
+      <div class="pf-top"><span class="tag pri">Sidekick</span></div>
+      <div class="pf-hero"><span class="orb pf-orb live" aria-hidden="true"></span>
+        <div class="pf-words"><h1 class="pf-hello" id="pfTitle">You're on a call with ${esc(oc.crew)}</h1>
+          <p class="pf-line oc-note">Sidekick is still listening. Head back to finish the plan; you can start a new one once this call ends.</p>
+          <div class="pf-acts"><button class="btn pri" id="pfReturn">Return to the call</button></div></div></div></div>`);
+  }
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#pfReturn")) return;
+    const oc = onCall();
+    // Inside the minimized call's frame: reopen the call underneath; otherwise go to it
+    try { const r = window.parent !== window && window.parent.document.getElementById("returnCall"); if (r) return void r.click(); } catch {}
+    if (oc && oc.rid) location.assign(`/sk/${oc.rid}`);
+  });
+
   async function flowStart() {
+    const live = await liveCall();
+    if (live) { pfOn(true); return pfOnCall(live); }
     const sq = params.get("squad");
     const free = store.get("sk:free");
     let persona = params.get("persona") || ss.get("sk:persona");
@@ -1001,6 +1033,7 @@
     }
   }
   function leaveQuietly() {
+    if (ss.get("sk:onCall")) ss.set("sk:onCall", "");
     clearTimeout(retryTimer);
     if (es) es.close();
     es = null;
@@ -1054,6 +1087,8 @@
       // A live call is full screen (the app's tabs come back when it ends); the voice study keeps its own layout
       const live = phase === "call" || phase === "picks";
       callNav(!live);
+      // This tab is on a live call until it ends (the Plan tab shows "You're on a call" meanwhile)
+      ss.set("sk:onCall", phase === "ended" ? "" : JSON.stringify({ rid: roomId, crew: view.crew }));
       document.body.classList.toggle("sk-live", live && !STUDY);
       if (!live && chatOpen) closeChat(false);
       if (!live && sheetOpen) closeSheet(false);
@@ -1162,7 +1197,10 @@
   const avStack = (vs) => (vs.length ? `<span class="stk">${vs.map((v) => `<span class="av xs c${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(v) % 6}">${esc(v)}</span>`).join("")}</span>` : "");
 
   function cardHTML(card, label) {
-    const opts = card.options.map((o) => `<button class="ans" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="grow">${esc(o.label)}</span>${avStack(o.voters)}</button>`).join("") + (card.slot === "vibe" ? `<div class="chips">${otherHTML(true)}</div>` : "");
+    // The vibe: the same suggested chips as the form (wrapping pills), plus "+ Something else…" into want
+    const opts = card.slot === "vibe"
+      ? `<div class="chips vibe-chips" role="group" aria-label="${esc(card.prompt)}">${card.options.map((o) => `<button class="chip" data-slot="vibe" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}">${esc(o.label)}${o.voters.length ? ` <span class="vn">${esc(o.voters.join(""))}</span>` : ""}</button>`).join("")}${otherHTML(true)}</div>`
+      : card.options.map((o) => `<button class="ans" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="grow">${esc(o.label)}</span>${avStack(o.voters)}</button>`).join("");
     const hint = label || `Sidekick is asking · ${view.me.mode === "voice" ? "say it or tap it" : "tap to answer"}${card.multi ? " · pick any that work" : ""}`;
     return `<div class="q"><span class="small">${esc(hint)}</span><h2>${esc(card.prompt)}</h2>${opts}${card.note ? `<span class="small">${esc(card.note)}</span>` : ""}</div>`;
   }
@@ -1472,7 +1510,12 @@
     const full = form ? rows : `<button class="plan-toggle" id="planToggle" aria-expanded="${open}" aria-controls="planRows">${open ? "Hide the full plan" : "See the full plan"}</button><div id="planRows" ${open ? "" : "hidden"}>${rows}</div>`;
     const around = view.candidate && view.me.planner ? `<p class="small cand-note">Planning around the event you saved. It goes in as a pick if it fits.</p>` : "";
     const typingOther = document.activeElement && document.activeElement.id === "vibeOtherIn";
-    body.innerHTML = `${invite}<div class="board ${form ? "as-form" : ""}">${boardHead()}${heardHTML()}${ask}${full}</div>${around}${formNote}${priv}`;
+    const html = `${invite}<div class="board ${form ? "as-form" : ""}">${boardHead()}${heardHTML()}${ask}${full}</div>${around}${formNote}${priv}`;
+    // Nothing changed: leave the card alone, so a chip isn't redrawn under someone's finger (or a text box mid-word)
+    if (body.__cardHTML === html && body.__cardNode && body.firstElementChild === body.__cardNode) { renderTicks(); return; }
+    body.innerHTML = html;
+    body.__cardHTML = html;
+    body.__cardNode = body.firstElementChild;
     if (typingOther) { const i = document.getElementById("vibeOtherIn"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
     stageIn(body, "card");
     renderTicks();

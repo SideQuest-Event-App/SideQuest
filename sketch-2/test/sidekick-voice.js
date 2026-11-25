@@ -398,6 +398,12 @@ const INIT = () => {
         assert.deepStrictEqual(rec.properties.updates.items.properties.slot.enum, ["night", "time", "origin", "vibe", "kind", "want"], "record_facts takes public slots only");
         assert(!["budget", "nos"].some((s) => rec.properties.updates.items.properties.slot.enum.includes(s)), "record_facts can't take private slots");
         assert(p.built_in_tools.skip_turn && p.ignore_default_personality === true);
+        assert(!/what kind of (night|evening)/i.test(p.prompt), "the agent prompt never asks the old closed vibe question");
+        // ...and no built-in line of either persona does (spoken, typed chat, or the style examples)
+        const personas = require(path.join(ROOT, "lib", "sidekick", "personas"));
+        const strings = JSON.stringify([personas.LINES, personas.CHAT, personas.PERSONAS, ["friend", "concierge"].map((x) => personas.systemPrompt(x))]);
+        assert(!/what kind of (night|evening)/i.test(strings), "no persona line asks \"what kind of night\"");
+        assert(/in the mood for/.test(JSON.stringify(personas.LINES.friend.mode_lead)) && /in the mood for/.test(JSON.stringify(personas.LINES.concierge.mode_lead)), "the opening question is the open one, for both personas");
         // The vibe is an open question; anything off the list is recorded as want and said back
         assert(/What are you in the mood for\? Could be food, a show, anything/.test(p.prompt) && /record it as want in their words and say it back/.test(p.prompt), "open vibe question in the agent prompt");
         assert.strictEqual(c.conversation_config.tts.model_id, "eleven_flash_v2");

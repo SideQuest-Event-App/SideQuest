@@ -882,6 +882,21 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       f = await search("comedy");
       assert(f.every((x) => x.sk < 0.05), "a fast search never shows a skeleton");
       assert(await page.$(".search-hit, .search-end"), "the results came");
+      // The status line says what the list holds (events and places found), never the size of the pool searched
+      await page.waitForFunction(() => Array.isArray(SQ.u.search.places), null, { timeout: 8000 });
+      await wait(200);
+      const st = await page.evaluate(() => {
+        const s = SQ.u.search, u = SQ.d.user;
+        const nE = s.matches.filter((m) => SQ.d.events.some((e) => e.id === m.id) && !u.notForMe.includes(m.id)).length;
+        return { text: document.querySelector(".search-status").textContent, nE, nP: s.places.length };
+      });
+      const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+      assert(st.text.startsWith(`${plural(st.nP, "place")}, ${plural(st.nE, "event")}`), `status "${st.text}" vs ${st.nP} places, ${st.nE} events`);
+      assert(!/keyword matches/.test(st.text), "no pool count");
+      await page.click('.search-kind button[data-arg="events"]');
+      assert((await page.textContent(".search-status")).startsWith(plural(st.nE, "event")), "Events: only the events count");
+      await page.click('.search-kind button[data-arg="places"]');
+      assert((await page.textContent(".search-status")).startsWith(plural(st.nP, "place")), "Places: only the places count");
       await ctx.close();
     });
 

@@ -649,16 +649,60 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
       const frame = page.frameLocator("#appFrame");
       await frame.locator(".pf-nav").first().waitFor({ timeout: 10000 }); // the app's Plan tab, with its tabs
       assert(await page.evaluate(() => document.getElementById("app").hasAttribute("inert")), "the call stays mounted underneath");
+      // The Plan tab knows: "You're on a call", no way to start a second one
+      await frame.locator("#pfReturn").waitFor({ timeout: 10000 });
+      assert.strictEqual((await frame.locator("#pfTitle").textContent()).trim(), "You're on a call with Test crew");
+      assert.strictEqual(await frame.locator("#pfGo").count(), 0, "no Let's plan while a call is live");
+      assert.strictEqual(await page.$eval("#minWrap .oncall", (e) => getComputedStyle(e).backgroundColor), "rgb(69, 40, 113)", "the On call bar is the design's purple");
+      // Content clears the tab bar and its raised orb
+      const clear = await frame.locator("body").evaluate(() => {
+        const nav = document.querySelector(".pf-nav"), orb = document.querySelector(".pf-tab-orb");
+        const top = Math.min(nav.getBoundingClientRect().top, orb ? orb.getBoundingClientRect().top : Infinity);
+        const els = [...document.querySelectorAll(".pf-card *")].filter((e) => e.offsetParent && e.children.length === 0 && e.textContent.trim());
+        return { top, bottom: Math.max(...els.map((e) => e.getBoundingClientRect().bottom)) };
+      });
+      assert(clear.bottom <= clear.top, `content clears the tab bar (${clear.bottom} vs ${clear.top})`);
       await wait(300);
-      await shot(page, "375-minimized-on-call.png");
+      await shot(page, "375-minimized-on-call-v2.png");
       // The call carries on while minimized
       await post(`/api/sk/rooms/${call.rid}/line`, { p: call.R, text: "still here", kind: "typed" });
+      // Return from the Plan tab's own button works too
+      await frame.locator("#pfReturn").click();
+      await page.waitForFunction(() => !document.getElementById("minWrap"));
+      await page.click("#minBtn");
+      await page.waitForSelector("#minWrap #returnCall");
       await page.click("#returnCall");
       assert.strictEqual(await page.locator("#minWrap").count(), 0);
       assert.strictEqual(await page.evaluate(() => document.activeElement.id), "minBtn");
       const v = await viewOf(call.rid, call.A);
       assert(v.status === "live" && v.people.some((p) => p.id === call.A), "the same call, still live, still in it");
       await page.waitForSelector("#chatBtn .udot");
+      await ctx.close();
+    });
+
+    await test("13e. The in-call vibe card: suggested chips plus Something else, all in view at 375×667; typed words land in want", async () => {
+      const call = await newCall();
+      await toLead(call);
+      // No budgets yet, so Sidekick stays on the vibe question instead of going ahead to picks
+      for (const p of [call.A, call.R]) {
+        await post(`/api/sk/rooms/${call.rid}/answer`, { p, slot: "origin", value: "union" });
+        await post(`/api/sk/rooms/${call.rid}/answer`, { p, slot: "time", value: ["late"] });
+      }
+      await until(async () => { const v = await viewOf(call.rid, call.A); return v.card && v.card.slot === "vibe"; }, 10000, "the vibe question");
+      const { ctx, page } = await callPage(call, { width: 375, height: 667 });
+      await page.waitForSelector("#body .q .vibe-chips");
+      const m = await page.evaluate(() => ({ chips: document.querySelectorAll(".q .vibe-chips .chip:not(.other)").length, rows: document.querySelectorAll(".q .ans").length, other: !!document.querySelector(".q #vibeOther"), small: [...document.querySelectorAll(".q .vibe-chips .chip")].filter((c) => c.getBoundingClientRect().height < 43.5).length }));
+      assert(m.chips >= 3 && m.chips <= 6 && m.rows === 0 && m.other && !m.small, `chips, not rows: ${JSON.stringify(m)}`);
+      await wait(300);
+      await shot(page, "375-call-at-rest-v2.png");
+      await page.click("#vibeOther");
+      await page.fill("#vibeOtherIn", "Chinese skewers");
+      const fit = await page.evaluate(() => { const b = document.getElementById("body"); return { sh: b.scrollHeight, ch: b.clientHeight, page: document.scrollingElement.scrollHeight - innerHeight }; });
+      assert(fit.sh <= fit.ch + 1 && fit.page <= 0, `the card fits without scrolling, text box open (${JSON.stringify(fit)})`);
+      await page.click("#vibeOtherAdd");
+      await until(async () => (await viewOf(call.rid, call.A)).rows.some((r) => r.slot === "want" && /Chinese skewers/.test(r.value || "")), 6000, "Looking for: Chinese skewers");
+      await page.click('.q .vibe-chips .chip[data-answer]');
+      await until(async () => { const a = (await viewOf(call.rid, call.A)).me.answers.vibe; return a && [].concat(a.value).length >= 1; }, 6000, "a chip tap answers the vibe");
       await ctx.close();
     });
 
@@ -672,7 +716,6 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
         const m = await page.evaluate(() => ({ sh: document.scrollingElement.scrollHeight, ih: innerHeight, plan: document.getElementById("planRows") ? document.getElementById("planRows").hidden : true }));
         assert(m.sh <= m.ih, `${width}×${height}: no page scroll (${m.sh} > ${m.ih})`);
         assert(m.plan, "the full plan is folded by default");
-        if (width === 375) await shot(page, "375-call-at-rest.png");
         await ctx.close();
       }
     });
