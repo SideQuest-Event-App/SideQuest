@@ -16,6 +16,9 @@
 // 10. Friends picked in the app get an in-app invite linking to the room, held during their quiet hours.
 // 11. No app tab bar during a live call or after it; the ended screen has "Back to Discover" (the red ✕ asks first).
 // 12. 375 and 1280 px: no sideways scroll, 44 px targets, text 12 px or larger, weights 400/500/600.
+// 14. "Wait for everyone, or show me now?": alone with invited friends, the two buttons fit 375×667 (44 px, no page
+//     scroll); Wait shows "Waiting on…" with the pink Decide by, invites the friends, and ends on Form sent;
+//     Show me now goes to the confirmation and the picks.
 // 13. The People sheet (from the stage, dashed circles for invited people), the chat sheet (unread dot, typing),
 //     minimize ("On call · Return" over the app, the same call still live) and no page scroll at 375×667 and 390×844.
 //
@@ -63,6 +66,7 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
     env: {
       ...process.env, PORT: String(port), SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), AI: "off", ANTHROPIC_API_KEY: "", SUPABASE_URL: "", SUPABASE_SECRET_KEY: "",
       SIDEKICK_PLACES_OFF: "1", SIDEKICK_STUN_URL: "off", SIDEKICK_THINK_REVEAL_MS: "0", SIDEKICK_NOTIFY_TICK_MS: "500",
+      SIDEKICK_WAIT_MS: "60000", SIDEKICK_WAIT_CARD_MS: "1000", // test 14 taps its answer; "Waiting on…" goes soon after the line
       // The natural-voice switch shows when an agent is set up; the session itself is never reached (the test answers for it)
       ELEVENLABS_API_KEY: "test-key", ELEVENLABS_AGENT_FRIEND: "agent_friend", ELEVENLABS_AGENT_CONCIERGE: "agent_concierge",
       ELEVENLABS_MINUTES_PER_MONTH: "100", ELEVENLABS_STOP_AT: "1", ELEVENLABS_DAILY_MINUTES: "100", SIDEKICK_ELEVENLABS_OFF: "",
@@ -126,8 +130,8 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
     const onSat = list.filter((e) => e.startsAt && torontoDay(e.startsAt) === SAT && Date.parse(e.startsAt) > Date.now() && (e.vibes || []).length);
 
     browser = await chromium.launch({ args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
-    const phone = async ({ width = 375, height = 812, user = asia, rooms = {} } = {}) => {
-      const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: width < 500 ? 2 : 1 });
+    const phone = async ({ width = 375, height = 812, user = asia, rooms = {}, tz } = {}) => {
+      const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: width < 500 ? 2 : 1, ...(tz ? { timezoneId: tz } : {}) });
       await ctx.route("**/*", (rt) => (new URL(rt.request().url()).hostname === "localhost" ? rt.continue() : rt.abort()));
       await ctx.addInitScript(([u, r]) => {
         try {
@@ -730,6 +734,79 @@ const torontoHM = (t) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/T
         assert(m.plan, "the full plan is folded by default");
         await ctx.close();
       }
+    });
+
+    await test("14. Wait for everyone, or show me now: the buttons, Waiting on with Decide by, Form sent; or the confirmation and picks", async () => {
+      await act(ravi, "saveSettings", { change: { notifications: { quiet: false } } });
+      await act(tess, "saveSettings", { change: { notifications: { quiet: false } } });
+      const solo = async (persona) => {
+        const made = await post("/api/sk/rooms", { name: "Asia", crew: "Test crew", nights: [SAT], persona, user: asia, members: ["Ravi", "Tess"], invite: [`u:${ravi}`, `u:${tess}`] });
+        assert.strictEqual(made.status, 200, JSON.stringify(made.body));
+        return { rid: made.body.room, A: made.body.person };
+      };
+      const answerSolo = async ({ rid, A }) => {
+        for (const [slot, value] of [["time", ["late"]], ["vibe", ["music", "comedy"]], ["origin", "union"], ["budget", "30"]]) await post(`/api/sk/rooms/${rid}/answer`, { p: A, slot, value });
+      };
+      // Wait for everyone
+      const c1 = await solo("friend");
+      const { ctx, page } = await callPage(c1, { width: 375, height: 667, tz: "America/Toronto" });
+      await answerSolo(c1);
+      await page.waitForSelector("#waitAll", { timeout: 15000 });
+      assert(await page.locator("#waitNow").isVisible(), "Show me now too");
+      assert.strictEqual((await page.textContent("#waitAll")).trim(), "Wait for everyone");
+      assert.strictEqual((await page.textContent("#waitNow")).trim(), "Show me now");
+      await page.waitForFunction(() => /wait until Ravi and Tess add theirs\?/.test(document.getElementById("say").textContent), null, { timeout: 8000 });
+      await wait(400);
+      await basics(page, "375×667 wait question");
+      const m1 = await page.evaluate(() => ({ sh: document.scrollingElement.scrollHeight, ih: innerHeight, b: ["waitAll", "waitNow"].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.height, r.bottom]; }), dock: document.getElementById("dock").getBoundingClientRect().top }));
+      assert(m1.sh <= m1.ih, `no page scroll (${m1.sh} > ${m1.ih})`);
+      assert(m1.b.every(([h, bottom]) => h >= 44 && bottom <= m1.dock), `44 px buttons above the bar (${JSON.stringify(m1)})`);
+      await shot(page, "wait-question-375.png");
+      await page.click("#waitAll");
+      await page.waitForSelector("#wtTitle");
+      assert.strictEqual((await page.textContent("#wtTitle")).trim(), "Waiting on Ravi and Tess");
+      assert.match(await page.textContent("#decideTag"), /^Decide by /, "the pink Decide by tag");
+      await page.waitForFunction(() => /I'll send Ravi and Tess a quick form/.test(document.getElementById("say").textContent));
+      const said = await page.textContent("#say");
+      const tag = (await page.textContent("#decideTag")).replace(/^Decide by /, "");
+      assert(said.includes(`by ${tag.replace(/^(\w{3}) /, (m, d) => ({ Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" })[d] + " at ")}`), `the line says the same time as the tag (${tag})`);
+      assert(await page.locator("#waitShare").isVisible() && (await page.locator("#waitDeadline").isVisible()), "Share the link / Change the deadline");
+      await page.waitForFunction(() => /I'll send Ravi and Tess a quick form/.test(document.getElementById("say").textContent));
+      assert(!/\$|under|Scarborough/i.test(await page.textContent("#say")), "no budget or area in the line");
+      await wait(400);
+      await basics(page, "375×667 Waiting on");
+      const m2 = await page.evaluate(() => ({ sh: document.scrollingElement.scrollHeight, ih: innerHeight }));
+      assert(m2.sh <= m2.ih, `no page scroll (${m2.sh} > ${m2.ih})`);
+      await shot(page, "wait-waiting-375.png");
+      // Change the deadline: the other times, as chips; one moves the form's close time
+      await page.click("#waitDeadline");
+      await page.waitForSelector("[data-waitdeadline]");
+      const pickAt = await page.$$eval("[data-waitdeadline]", (bs) => (bs.find((b) => b.getAttribute("aria-checked") !== "true") || bs[0]).dataset.waitdeadline);
+      await page.click(`[data-waitdeadline="${pickAt}"]`);
+      await until(async () => (await viewOf(c1.rid, c1.A)).deadline === Number(pickAt), 5000, "the new deadline");
+      const v1 = await viewOf(c1.rid, c1.A);
+      assert(v1.form && v1.mode === "sidelines", "the call is now the form");
+      // The friends get the quick form in the app
+      for (const u of [ravi, tess]) assert((await state(u)).notifications.some((n) => n.room === c1.rid && n.kind === "plan_form"), "an in-app form invite");
+      // Then the call ends on Form sent, with See it in Sidequests
+      await page.waitForSelector(".pf-card.formsent", { timeout: 25000 });
+      assert(await page.locator("#seeQuest").isVisible(), "See it in Sidequests");
+      assert.match(await page.textContent(".formsent"), /1 of 3 answered/);
+      assert.strictEqual(await page.evaluate(() => document.body.classList.contains("sk-live")), false, "the live call is over on this phone");
+      await ctx.close();
+
+      // Show me now
+      const c2 = await solo("concierge");
+      const ph2 = await callPage(c2, { width: 375, height: 667 });
+      await answerSolo(c2);
+      await ph2.page.waitForSelector("#waitNow", { timeout: 15000 });
+      await ph2.page.click("#waitNow");
+      await ph2.page.waitForFunction(() => /Certainly\. Here are my two recommendations/.test(document.getElementById("say").textContent));
+      await ph2.page.waitForSelector(".board.confirm .cf-recap, .board.confirm #cfRecap", { timeout: 10000 });
+      await ph2.page.waitForFunction(() => window.__skStages.includes("picks") || document.querySelector(".pk, .picks, #picks"), null, { timeout: 25000 }).catch(() => {});
+      await until(async () => { const v = await viewOf(c2.rid, c2.A); return v.picks && v.picks.length === 2; }, 25000, "the picks");
+      assert(!(await viewOf(c2.rid, c2.A)).form, "not a form");
+      await ph2.ctx.close();
     });
 
     assert.deepStrictEqual(pageErrors, [], "page errors");

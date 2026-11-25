@@ -130,6 +130,40 @@ function invite(room, planner, keys) {
   if (sent) save();
   return sent;
 }
+// One note to one person: held in user.notifyQueue during their quiet hours, unless "Plans and tickets" is off
+function deliver(u, note) {
+  if (settings.of(u).notifications.plans === false) return false;
+  if (settings.quietNow(u)) (u.notifyQueue = Array.isArray(u.notifyQueue) ? u.notifyQueue : []).push(note);
+  else (u.notifications = Array.isArray(u.notifications) ? u.notifications : []).push(note);
+  return true;
+}
+const noteOf = (room, title, body, kind) => ({ id: crypto.randomBytes(6).toString("hex"), time: new Date().toISOString(), title, body, read: false, link: `/sk/${room.id}`, room: room.id, kind });
+// "Wait for everyone" on a call: the people invited from the app get the quick form instead (they were told about
+// the call when it started). Only people who haven't joined or answered yet.
+function formInvite(room, planner) {
+  const first = String((planner && planner.name) || "A friend").trim().split(/\s+/)[0];
+  const done = new Set((room.people || []).filter((p) => p.user && Object.keys((room.answers || {})[p.id] || {}).length).map((p) => p.user));
+  let sent = 0;
+  for (const id of room.notified || []) {
+    const u = userOf(id);
+    if (!u || done.has(id) || (planner && planner.user === id)) continue;
+    if (deliver(u, noteOf(room, `${first} sent you a quick form for ${spokenNights(room)}`, `${room.crew}: tap your answers, it takes a minute.`, "plan_form"))) sent++;
+  }
+  if (sent) save();
+  return sent;
+}
+// A form's picks are out: everyone on SideQuest who's part of it hears it's time to vote
+function picksReady(room) {
+  const ids = new Set([...(room.notified || []), ...(room.people || []).map((p) => p.user).filter(Boolean)]);
+  let sent = 0;
+  for (const id of ids) {
+    const u = userOf(id);
+    if (u && deliver(u, noteOf(room, `Sidekick picked two for ${spokenNights(room)}`, `${room.crew}: vote for your favourite.`, "plan_vote"))) sent++;
+  }
+  if (sent) save();
+  return sent;
+}
+
 // Held invites go out once the person's quiet hours are over
 function deliverQueued(t = Date.now()) {
   const d = db();
@@ -154,4 +188,4 @@ function pickInfo(id) {
   return { id: e.id, title: e.title, date: P.localDay(e.startsAt), night: P.nightLabel(P.localDay(e.startsAt)), where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), past: Date.parse(e.startsAt) < Date.now() };
 }
 
-module.exports = { tasteVibes, userTaste, learn, saveRecap, recaps, invite, deliverQueued, pickInfo, userOf };
+module.exports = { tasteVibes, userTaste, learn, saveRecap, recaps, invite, formInvite, picksReady, deliverQueued, pickInfo, userOf };

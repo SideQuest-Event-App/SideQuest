@@ -775,6 +775,68 @@
     }
   }
 
+  // ----- "Wait for everyone, or show me now?" (rooms.js askWait) -----
+  // The question: two buttons in the call's card area and a countdown (no answer means wait). Then "Waiting on…"
+  // with the pink Decide by, Share the link and Change the deadline, for a few seconds (longer while the planner
+  // uses it), and the call ends on Form sent.
+  let waitEdit = false;
+  let waitHold = 0;
+  let waitShown = false;
+  let waitTimer = null;
+  function waitingUp() {
+    const w = view && view.wait;
+    if (!w || w.state !== "wait" || !view.me || !view.me.planner) return false;
+    const until = Math.max(w.until || 0, waitHold);
+    clearTimeout(waitTimer);
+    if (waitEdit) return true;
+    if (Date.now() < until) { waitTimer = setTimeout(() => view && render(), until - Date.now() + 30); return true; }
+    return false;
+  }
+  function leaveForForm() {
+    if (micOn) stopMic();
+    if (agent) stopAgent();
+    Audio.stop();
+    if (chatOpen) closeChat(false);
+    if (sheetOpen) closeSheet(false);
+    if (orbOpen) closeOrb(false);
+    liveMark(false);
+    document.body.classList.remove("sk-live");
+    backdrop(false);
+  }
+  function waitAskHTML(w) {
+    return `<section class="board confirm waitq" aria-labelledby="wqTitle"><div class="cf-b">
+      <h2 class="wq-h" id="wqTitle">Show the picks now, or wait for ${esc(w.list)}?</h2>
+      <div class="cf-acts wq-acts"><button class="btn pri" id="waitAll">Wait for everyone</button><button class="btn quiet" id="waitNow">Show me now</button></div>
+      ${w.closeAt ? `<div class="cd"><div class="cd-bar"><i id="wqBar"></i></div><span class="small">No answer means wait</span></div>` : ""}</div></section>`;
+  }
+  let wqBar = { closeAt: 0 };
+  function runWaitBar() {
+    const bar = document.getElementById("wqBar");
+    const closeAt = view.wait && view.wait.closeAt;
+    if (!bar || !closeAt || (wqBar.closeAt === closeAt && wqBar.el === bar)) return;
+    wqBar = { closeAt, el: bar };
+    const left = Math.max(0, closeAt - Date.now());
+    bar.style.transition = "none";
+    bar.style.width = "100%";
+    void bar.offsetWidth;
+    bar.style.transition = `width ${left}ms linear`;
+    bar.style.width = "0%";
+  }
+  function waitingHTML(w) {
+    const opts = (w.options || []).map((at) => `<button class="chip" role="radio" data-waitdeadline="${at}" aria-checked="${at === w.deadline}" aria-pressed="${at === w.deadline}">${esc(closesLabel(at))}</button>`).join("");
+    return `<section class="board confirm waiting" aria-labelledby="wtTitle"><div class="cf-b">
+      <div class="wt-top"><h2 class="wq-h" id="wtTitle">Waiting on ${esc(w.list)}</h2>${w.deadline ? `<span class="tag hot" id="decideTag">Decide by ${esc(closesLabel(w.deadline))}</span>` : ""}</div>
+      <p class="small">They get a quick form. Sidekick picks the top two once everyone's in, or by then.</p>
+      ${waitEdit && opts ? `<div class="chips wt-opts" role="radiogroup" aria-label="Decide by">${opts}</div>` : ""}
+      <div class="cf-acts wq-acts"><button class="btn pri" id="waitShare">Share the link</button><button class="btn quiet" id="waitDeadline" aria-expanded="${waitEdit}">Change the deadline</button></div></div></section>`;
+  }
+  async function shareFormLink() {
+    const link = inviteLink();
+    const text = `Add what you're up for and Sidekick picks our plan: ${link}`;
+    if (navigator.share) { try { await navigator.share({ title: view.crew, text, url: link }); } catch {} return; }
+    try { await navigator.clipboard.writeText(link); toast("Link copied. Paste it in your group chat."); } catch { toast(link); }
+  }
+
   // ----- Then, the form path: who's answered, live -----
   function renderFormSent() {
     const ex = view.expected || [];
@@ -789,7 +851,8 @@
       <div class="pf-sent"><span class="pf-okc">${PF.bigcheck}</span><h1 class="pf-h" id="pfTitle" aria-live="polite">${done} of ${rows.length} answered</h1><p class="muted">${view.closed ? "The form has closed. Sidekick is picking with the answers it has." : "Sidekick picks when everyone's in."}</p><span class="row" style="gap:6px;flex-wrap:wrap;justify-content:center">${first ? `<span class="tag hot">For ${esc(first)}</span>` : ""}${view.deadline ? `<span class="tag hot" id="closesTag">${view.closed ? "Closed" : `Closes ${esc(closesLabel(view.deadline))}`}</span>` : ""}</span></div>
       <ul class="pf-ans" aria-label="Who's answered">${rows.map((x, i) => `<li><span class="av ${x.me ? "c0" : x.link && !x.answered ? "unk" : PF_COLOURS[i % PF_COLOURS.length]}" aria-hidden="true">${esc(x.me ? (view.me.name || "Y").charAt(0).toUpperCase() : x.name.charAt(0).toUpperCase())}</span><span class="grow">${esc(x.name)}${x.link ? ' <span class="small">(via link)</span>' : ""}</span><span class="tag ${x.answered ? "ok" : "pf-tn"}">${x.answered ? "Answered" : "Not yet"}</span></li>`).join("")}</ul>
       <div class="pf-acts2">${waiting.length ? `<button class="btn sm pf-v" id="pfNudge">Nudge ${esc(waiting.length === 1 ? waiting[0].name : `${waiting.length} people`)}</button>` : ""}<button class="btn out sm" id="pfPickNow" ${done >= 2 ? "" : "disabled"}>Pick now with ${done}</button></div>
-      <div class="pf-box-card"><span class="small">Send the form link to the group</span>${shareHTML()}</div>`;
+      <div class="pf-box-card"><span class="small">Send the form link to the group</span>${shareHTML()}</div>
+      ${view.wait && view.wait.state === "wait" ? '<a class="btn pri pf-see" id="seeQuest" href="/">See it in Sidequests</a>' : ""}`;
     if (!card) {
       pfFocus = false;
       pfShell("formsent", html, "formsent");
@@ -1193,8 +1256,9 @@
 
   function render() {
     // The planner of a form ("Send everyone a quick form") sees who's answered until the picks are out
-    const next = view.status === "ended" ? "ended" : view.locked ? "locked" : view.picks ? "picks" : view.form && view.me && view.me.planner ? "formsent" : "call";
+    const next = view.status === "ended" ? "ended" : view.locked ? "locked" : view.picks ? "picks" : view.form && view.me && view.me.planner && !waitingUp() ? "formsent" : "call";
     if (next === "formsent") {
+      if (phase === "call") leaveForForm(); // "Wait for everyone": the call ends on Form sent
       if (phase !== "formsent") { phase = "formsent"; app.innerHTML = ""; }
       renderFormSent();
       if (sheetOpen) renderSheet();
@@ -1203,7 +1267,7 @@
     if (phase === "formsent") pfOn(false);
     if (view.mode !== lastMode) {
       // Said or tapped: a short note confirms Sidekick's new role
-      if (lastMode && ["lead", "sidelines"].includes(lastMode) && ["lead", "sidelines"].includes(view.mode)) toast(view.mode === "lead" ? "Sidekick leads now." : "Sidekick is sitting back. Say \"Sidekick, take over\" to bring it back.");
+      if (lastMode && ["lead", "sidelines"].includes(lastMode) && ["lead", "sidelines"].includes(view.mode) && !(view.wait && view.wait.state === "wait")) toast(view.mode === "lead" ? "Sidekick leads now." : "Sidekick is sitting back. Say \"Sidekick, take over\" to bring it back.");
       lastMode = view.mode;
       if (phase === next) renderDock();
     }
@@ -1321,7 +1385,7 @@
     if (!el || !view) return;
     if (phase !== "call") { if (!el.hidden) { el.hidden = true; el.innerHTML = ""; el.dataset.html = ""; } return; }
     el.hidden = false;
-    const small = Boolean(view.confirm);
+    const small = Boolean(view.confirm) || Boolean(view.wait && view.wait.state !== "now");
     el.classList.toggle("small", small);
     const waiting = (view.expected || []).filter((x) => !x.joined && !x.link).map((x) => x.name);
     const h = el.clientHeight || 180;
@@ -1662,6 +1726,16 @@
       return;
     }
     if (lastThinking) { lastThinking = null; announceThinking(null); }
+    if (view.wait && (view.wait.state === "asked" || waitingUp())) {
+      // The question needs an answer within seconds: an open sheet gives way to it, once
+      if (view.wait.state === "asked" && !waitShown) { waitShown = true; if (sheetOpen) closeSheet(false); if (chatOpen) closeChat(false); if (orbOpen) closeOrb(false); }
+      const html = view.wait.state === "asked" ? waitAskHTML(view.wait) : waitingHTML(view.wait);
+      if (body.__cardHTML !== html || body.firstElementChild !== body.__cardNode) { body.innerHTML = html; body.__cardHTML = html; body.__cardNode = body.firstElementChild; }
+      stageIn(body, view.wait.state === "asked" ? "wait" : "waiting");
+      runWaitBar();
+      renderTicks();
+      return;
+    }
     if (voting()) {
       body.innerHTML = renderVote(view.card);
       runCountdown();
@@ -2097,7 +2171,7 @@
     const el = document.getElementById("say");
     if (!el) return;
     const last = view.sidekick.slice(-1)[0];
-    const sitting = view.mode === "sidelines" && phase === "call";
+    const sitting = view.mode === "sidelines" && phase === "call" && !(view.wait && view.wait.state === "wait"); // "Waiting on…" is Sidekick talking
     if (!STUDY) return renderCaption(el, last, sitting);
     if (!last || phase === "ended") { el.innerHTML = ""; return; }
     const fresh = !last.system && !sitting && Date.now() - last.at < 20000;
@@ -2148,6 +2222,7 @@
   let hintShownAt = 0;
   function hintText() {
     if (!view || phase !== "call" || view.me.mode !== "voice" || !["lead", "sidelines"].includes(view.mode)) return "";
+    if (view.wait && view.wait.state !== "now") return ""; // "wait for everyone?" and "Waiting on…" have the screen
     if (!hintShownAt) {
       if (store.get("sk:voiceHint")) return "";
       hintShownAt = Date.now();
@@ -2270,6 +2345,21 @@
       return void toast(off ? "This plan won't change your taste." : "This plan counts toward your taste again.");
     }
     if (t.closest("#cfOk")) { t.closest("#cfOk").disabled = true; return void send("confirm", { how: "ok" }); }
+    if (t.closest("#waitAll") || t.closest("#waitNow")) {
+      const b = t.closest("#waitAll") || t.closest("#waitNow");
+      document.querySelectorAll("#waitAll,#waitNow").forEach((x) => { x.disabled = true; });
+      return void send("wait", { choice: b.id === "waitAll" ? "wait" : "now" });
+    }
+    if (t.closest("#waitShare")) { waitHold = Date.now() + 8000; return void shareFormLink(); }
+    if (t.closest("#waitDeadline")) { waitEdit = !waitEdit; waitHold = Date.now() + 8000; return void render(); }
+    const wd = t.closest("[data-waitdeadline]");
+    if (wd) {
+      const at = Number(wd.dataset.waitdeadline);
+      waitEdit = false;
+      waitHold = Date.now() + 4000;
+      send("setup", { deadline: at }).then((r) => { if (r) toast(`Decide by ${closesLabel(at)}.`); });
+      return void render();
+    }
     if (t.closest("#cfChange")) return void send("confirm", { how: "change" });
     const ro = t.closest("[data-reopen]");
     if (ro) { ro.disabled = true; send("confirm", { how: "reopen", slot: ro.dataset.reopen }); return void toast("Okay, change it on the card."); }
@@ -2452,7 +2542,7 @@
     if (p) p.then((stream) => stream && stream.getTracks().forEach((t) => t.stop())).catch(() => {});
   }
   const toolCall = (name) => async (params) => api(`/api/sk/rooms/${roomId}/agent-tool/${name}`, { p: me.person, ...(params && typeof params === "object" ? params : {}) });
-  const AGENT_TOOLS = ["get_plan_state", "get_next_move", "record_facts", "get_picks", "show_private_card", "accept_relax"];
+  const AGENT_TOOLS = ["get_plan_state", "get_next_move", "record_facts", "get_picks", "show_private_card", "accept_relax", "choose_wait"];
   async function startAgent({ auto = false } = {}) {
     if (agent || agentStarting || agentCapped || !me || STUDY) return;
     agentStarting = true;

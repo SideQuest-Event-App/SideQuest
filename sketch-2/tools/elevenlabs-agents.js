@@ -39,6 +39,7 @@ const CALL = `How this call works
   - show_private_card: puts the private budget card on everyone's screen.
   - accept_relax: when the crew says yes to loosening something you offered.
   - get_plan_state: the board, if you need to check what's settled.
+  - choose_wait: when get_next_move says ask_wait, ask its example line word for word: show the ideas now, or wait until the people who were invited add theirs? Then call choose_wait with choice "wait" (wait for everyone) or "now" (show me now) as soon as the planner answers. "now" returns say_first: say it, then carry on with the next move. "wait" returns a line to say word for word (it sends the others a quick form with a Decide by time); after it, stay quiet. If nobody answers for about 8 seconds, the app waits for everyone by itself. Never say a budget or an area in these lines.
 - Ask, listen, record, move on. Don't ask a question the board already answers. One question per turn, then stop talking.
 - Keep every line short: one breath, two short sentences at most, and never more than one question. Speak first, then call tools if you can; don't narrate tool calls.
 
@@ -94,6 +95,7 @@ const TOOLS = [
   { name: "get_picks", description: "Get two picks from the real listings that fit what the crew said. Call it when get_next_move says the plan is ready, or when someone asks what you suggest. Present both, one reason each, and ask everyone to vote in the app.", parameters: null },
   { name: "show_private_card", description: "Put the private budget card on everyone's screen. Use it when it's time to ask about budget: tell them to tap their max there, it stays private.", parameters: obj({ slot: str("Always 'budget'", { enum: ["budget"] }) }, ["slot"]) },
   { name: "accept_relax", description: "Call when the crew agrees to loosen the one thing you offered to loosen (for example another night), so the app can widen the search.", parameters: null },
+  { name: "choose_wait", description: "Record the planner's answer to 'show the ideas now, or wait for the people invited?' (asked when get_next_move says ask_wait). choice 'wait': they want to wait for everyone (the others get a quick form). choice 'now': show the picks now. Returns what to say and the next move.", parameters: obj({ choice: str("wait (wait for everyone) or now (show me now)", { enum: ["wait", "now"] }) }, ["choice"]) },
   { name: "get_plan_state", description: "Read the plan board: who's on the call, what's settled, the open question and who hasn't answered it, the answer options, and the picks if there are any.", parameters: null },
 ].map((t) => ({
   type: "client",
@@ -166,7 +168,7 @@ function config(a) {
 
 // Settings to check by hand in the dashboard (names vary between dashboard versions)
 const MANUAL = [
-  "Tools: skip_turn and the six client tools are set by this script. end_call stays OFF.",
+  "Tools: skip_turn and the seven client tools are set by this script. end_call stays OFF.",
   "Security: authentication ON (set by this script), and add your Render web address to the allowlist.",
   "Privacy: confirm voice recording is off and retention is as short as your plan allows (zero retention is Enterprise-only).",
   "Usage limits: set a monthly limit in ElevenLabs as well. The app stops at ELEVENLABS_MINUTES_PER_MONTH × ELEVENLABS_STOP_AT.",

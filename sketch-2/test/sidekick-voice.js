@@ -168,7 +168,7 @@ const INIT = () => {
       await until(() => room.agentMode, 4000, "the server to hear the session is live");
       assert.strictEqual(taps, 1, "one tap");
       const opts = await A.page.evaluate(() => { const s = window.__el.sessions[0].opts; return { tools: Object.keys(s.clientTools || {}).sort(), vars: s.dynamicVariables, starts: window.__el.starts }; });
-      assert.deepStrictEqual(opts.tools, ["accept_relax", "get_next_move", "get_picks", "get_plan_state", "record_facts", "show_private_card"]);
+      assert.deepStrictEqual(opts.tools, ["accept_relax", "choose_wait", "get_next_move", "get_picks", "get_plan_state", "record_facts", "show_private_card"]);
       assert(opts.vars && opts.vars.opening && opts.vars.room_id === rid, "the agent gets its opening line and the room");
       assert.deepStrictEqual(opts.starts[0], { connectionType: "webrtc", token: true, signed: false }, "WebRTC first, with a conversation token");
       assert(eleven.some((u) => u.includes("/conversation/token")) && eleven.some((u) => u.includes("get-signed-url")), "both ways in were fetched");
@@ -205,7 +205,7 @@ const INIT = () => {
       await wait(400);
       const secret = (A.secret = /Etobicoke|Scarborough|\$\s?20\b|\$\s?30\b|Under \$|twenty|thirty/i);
       const results = {};
-      for (const [name, params] of [["get_plan_state", {}], ["get_next_move", {}], ["record_facts", { updates: [{ person: "Maya", slot: "night", values: ["Saturday"] }, { person: "Maya", slot: "budget", values: ["Under $20"] }] }], ["show_private_card", { slot: "budget" }], ["accept_relax", {}]]) { // get_picks: in (c), once the plan is far enough along
+      for (const [name, params] of [["get_plan_state", {}], ["get_next_move", {}], ["record_facts", { updates: [{ person: "Maya", slot: "night", values: ["Saturday"] }, { person: "Maya", slot: "budget", values: ["Under $20"] }] }], ["show_private_card", { slot: "budget" }], ["accept_relax", {}], ["choose_wait", { choice: "now" }]]) { // get_picks: in (c), once the plan is far enough along
         const before = A.requests.length;
         results[name] = await callTool(A.page, name, params);
         assert(A.requests.slice(before).includes(`/api/sk/rooms/${rid}/agent-tool/${name}`), `${name} went to its own route`);
@@ -218,6 +218,7 @@ const INIT = () => {
       assert(P.facts(room).night.supporters[SAT].includes("Maya"), "record_facts updated the board");
       assert(results.get_next_move.next_move && results.get_next_move.what_to_do, "get_next_move says what to do");
       assert.strictEqual(results.show_private_card.shown, true);
+      assert.strictEqual(results.choose_wait.chosen, null, "choose_wait with no wait-or-now question open changes nothing");
       // The same tools without the agent on are refused (no tool calls from just anyone)
       assert.strictEqual((await post(`/api/sk/rooms/${rid}/agent-tool/get_plan_state`, { p: maya })).status, 403, "only the planner's phone");
     });
@@ -406,7 +407,7 @@ const INIT = () => {
         const c = built.config(a);
         const p = c.conversation_config.agent.prompt;
         const client = p.tools.filter((t) => t.type === "client");
-        assert.deepStrictEqual(client.map((t) => t.name).sort(), ["accept_relax", "get_next_move", "get_picks", "get_plan_state", "record_facts", "show_private_card"]);
+        assert.deepStrictEqual(client.map((t) => t.name).sort(), ["accept_relax", "choose_wait", "get_next_move", "get_picks", "get_plan_state", "record_facts", "show_private_card"]);
         assert(client.every((t) => t.description && t.expects_response === true), "each tool has a description and waits for the app");
         const rec = client.find((t) => t.name === "record_facts").parameters;
         assert.deepStrictEqual(rec.properties.updates.items.properties.slot.enum, ["night", "time", "origin", "vibe", "kind", "want"], "record_facts takes public slots only");
@@ -428,6 +429,9 @@ const INIT = () => {
         assert.strictEqual(c.conversation_config.agent.first_message, "{{opening}}");
         assert.strictEqual(c.platform_settings.privacy.record_voice, false);
         assert(/get_next_move/.test(p.prompt) && /one short question at a time/i.test(p.prompt));
+        // "Wait for everyone, or show me now?": the agent asks it (ask_wait) and records the answer with choose_wait
+        assert(/choose_wait/.test(p.prompt) && /ask_wait/.test(p.prompt), "the prompt explains the wait-or-now question");
+        assert.deepStrictEqual(client.find((t) => t.name === "choose_wait").parameters.properties.choice.enum, ["wait", "now"]);
       }
       const saved = JSON.parse(fs.readFileSync(path.join(ROOT, "reference", "elevenlabs-agents.json"), "utf8"));
       assert(saved.agents.every((a) => a.conversation_config.agent.prompt.tools.some((t) => t.name === "get_next_move")), "reference/elevenlabs-agents.json is up to date");

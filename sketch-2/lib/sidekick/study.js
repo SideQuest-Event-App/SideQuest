@@ -873,6 +873,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       const out = await call("POST", "/api/sk/rooms", { name, crew: body.crew || "The crew", nights, persona });
       if (out.status !== 200) return sendJSON(res, out.status, out.data);
       const room = roomOf(out.data.room);
+      room.noWait = true; // the study's calls never ask "wait for everyone, or show me now?"
       s.calls[n] = { id: rid(5), n, arm: s.order[n - 1], persona: room.persona, startedAt: now(), short };
       const m = { sid: s.id, n, callId: s.calls[n].id, tid, room: out.data.room, plannerPid: out.data.person, bots: [], closers: [], pending: new Set(), lines: new Set() };
       attach(m);
@@ -910,6 +911,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       const out = await call("POST", "/api/sk/rooms", { name: FORM_PLANNER, crew: "Practice crew", nights, persona: ARMS[s.order[0]] });
       if (out.status !== 200) return sendJSON(res, out.status, out.data);
       const room = roomOf(out.data.room);
+      room.noWait = true;
       room.people[0].practice = true;
       const m = { sid: s.id, n: "form", tid, room: out.data.room, plannerPid: out.data.person, bots: [out.data.person], closers: [], pending: new Set(), lines: new Set() };
       m.closers.push(openStream(m.room, out.data.person));

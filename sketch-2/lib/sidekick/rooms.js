@@ -137,6 +137,7 @@ function createRoom({ crew, planner, nights, persona, members, form, path: how, 
     deadline: null, // a form's "Decide by" (ms); the form closes and Sidekick picks then
     closed: false,
     candidate: null, // "Plan it" from Saved: the event to plan around (an id), shown as a pick when it fits
+    wait: null, // "Wait for everyone, or show me now?": { state: "asked" | "wait" | "now", ... } (asked once)
   };
   weather.refresh().catch(() => {}); // fetched at most hourly; skipped when unreachable
   if (!room.nights.length) room.nights = suggestNights().slice(0, 2).map((n) => n.date);
@@ -320,6 +321,12 @@ function addLine(room, person, text, kind) {
     const v = modeFromText(text);
     if (v) { room.addressed = null; voteMode(room, person, v, kind === "typed" ? "typed" : "speech"); }
     else scheduleModeClose(room, SILENCE_MS); // still talking: wait for a pause
+    return line;
+  }
+  if (room.wait && room.wait.state === "asked") {
+    const v = waitFromText(text);
+    if (v) { room.addressed = null; chooseWait(room, v, kind === "typed" ? "typed" : "speech").then(() => broadcast(room)).catch((err) => console.error(err)); }
+    else armWait(room, WAIT_MS()); // still talking: wait for a pause
     return line;
   }
   if (room.mode && /\bside ?kick\b/i.test(text)) {
@@ -588,7 +595,7 @@ async function speak(room, move, c = {}) {
   let late = Boolean(c.late);
   // The line book's line for this move: said as is without the AI, and given to the AI as a draft
   const draft = personas.fallbackLine(room.persona, keyOf(late), ctx, recentSaid);
-  if (claude.available() && !late) {
+  if (claude.available() && !late && !EXACT_MOVES.has(move)) {
     const origins = Array.isArray(f.origin.value) && f.origin.value.length ? f.origin.value : ["union"];
     const list = (c.events || []).slice(0, 4).map((e) => `- ${eventBrief(e, origins)}`).join("\n");
     const opts = c.slot ? P.optionsFor(c.slot, room).map(([, l]) => l).join(", ") : "";
@@ -725,6 +732,8 @@ function lineContext(room, f, c) {
     a_who: c.aWho, b_who: c.bWho,
     hot: c.hot,
     recap: c.recap || null, // the confirmation's plan in public words
+    ...(c.waitNames ? { names: c.waitNames } : {}), // "wait for everyone?": the invited people still to answer
+    deadline: c.deadlineSpoken || null, // the form's close time, "Friday at 6 PM"
   };
 }
 
@@ -987,6 +996,13 @@ async function decideNow(room, { forcePicks = false } = {}) {
     track("sk_mode", { sessionId: room.id, persona: room.persona, mode: "lead", how: "solo", votes: 0 });
   }
   if (room.mode === "voting" && !forcePicks) return;
+  // "Wait for everyone, or show me now?" is open: nothing else until it's answered. Asking for picks outright is "now".
+  if (room.wait && room.wait.state === "asked") {
+    if (!forcePicks) return;
+    clearTimeout(room.waitTimer);
+    room.wait = { state: "now", at: now(), how: "ask", holdUntil: 0 };
+  }
+  if (room.wait && room.wait.state === "now" && room.wait.holdUntil > now() && !forcePicks) return schedule(room, room.wait.holdUntil - now() + 20);
   if (room.wantMode) {
     const m = room.wantMode;
     room.wantMode = null;
@@ -1070,6 +1086,7 @@ async function decideNow(room, { forcePicks = false } = {}) {
   if (r.ready && !waitingOn) {
     if (room.reopened && !reopenedAnswered(room)) return; // a fact reopened from the confirmation: wait for its answer
     room.reopened = null;
+    if (waitDue(room)) return askWait(room); // the people the planner invited haven't answered: wait, or show now?
     return wantsConfirm(room) ? startConfirm(room) : makePicks(room, r.list);
   }
   if (r.ready && waitingOn) return;
@@ -1244,6 +1261,124 @@ function reopenFact(room, slot) {
   return true;
 }
 const reopenedAnswered = (room) => room.reopened && P.answersFor(room, room.reopened.slot).some((x) => x.a && x.a.at > room.reopened.at);
+
+// ---------- "Wait for everyone, or show me now?" ----------
+// When the planner has given everything the picks need, nobody else has answered, and people they invited (a squad's
+// members or chosen friends: room.expected) haven't joined or answered, Sidekick asks once: show the picks now, or
+// wait for the others? Two buttons on the planner's screen, or say it. About 8 s with no answer (after the line) is
+// "wait". Wait: the call becomes the form (Decide by, in-app invites held in quiet hours, Sidekick picks when
+// everyone's in or at the deadline and tells everyone to vote), says so, shows "Waiting on…", then the planner's
+// phone goes to "Form sent". Show me now: today's path (the confirmation, the picks, the vote).
+// The lines are the team's exact words (personas.js wait_*), never the AI's, and never carry a budget or an area.
+// Skipped with nobody invited, once anyone else has answered, in the voice study, and for forms.
+const WAIT_MS = () => Number(process.env.SIDEKICK_WAIT_MS || 8000);
+const WAIT_CARD_MS = () => Number(process.env.SIDEKICK_WAIT_CARD_MS || 6000); // "Waiting on…" stays this long after the line
+const EXACT_MOVES = new Set(["wait_ask", "wait_yes", "wait_now"]);
+const WAIT_RE = /\b(wait|hold (off|on)|let them|for (everyone|every ?body|the others|them|the rest)|no rush|later)\b/i;
+const NOW_RE = /\b(now|show (me|us)|go ahead|let'?s see|right away|straight away|share (them|it)|go for it|yes,? show)\b/i;
+const NOT_WAIT = /\b(don'?t|do not|no need to|not) wait\b/i;
+function waitFromText(text) {
+  if (NOT_WAIT.test(text)) return "now";
+  const w = WAIT_RE.test(text);
+  const n = NOW_RE.test(text);
+  return w && !n ? "wait" : n && !w ? "now" : null;
+}
+const pendingNames = (room) => expectedView(room).filter((x) => !x.link && !x.answered).map((x) => x.name);
+// "Maya", "Maya and Kai", "Maya, Kai and Sam", "Maya, Kai and 2 others"
+function namesList(names) {
+  if (names.length > 3) return `${names.slice(0, 2).join(", ")} and ${names.length - 2} others`;
+  return talk.andList(names);
+}
+function waitDue(room) {
+  if (room.wait || room.form || room.noWait || room.mode === "sidelines" || room.mode === "voting") return false;
+  if (room.people.some((p) => p.role !== "planner" && Object.keys(room.answers[p.id] || {}).length)) return false;
+  return pendingNames(room).length > 0;
+}
+// Toronto wall-clock time on a day ("2026-11-27", 18) as a timestamp
+const TZ_PARTS = new Intl.DateTimeFormat("en-US", { timeZone: "America/Toronto", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+function torontoAt(day, hour) {
+  const [y, m, d] = day.split("-").map(Number);
+  const guess = Date.UTC(y, m - 1, d, hour);
+  const p = Object.fromEntries(TZ_PARTS.formatToParts(new Date(guess)).map((x) => [x.type, x.value]));
+  const seen = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second);
+  return guess - (seen - guess);
+}
+const dayBefore = (day) => { const x = new Date(`${day}T12:00:00Z`); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
+function firstNight(room) {
+  const f = factsOf(room);
+  return (f.night.known && f.night.value.length ? f.night.value : room.nights).slice().sort()[0];
+}
+// 6 PM the evening before the earliest chosen night; if that's past, two hours from now
+function defaultDeadline(room) {
+  const first = firstNight(room);
+  const t = first ? torontoAt(dayBefore(first), 18) : 0;
+  return t > now() + 60000 ? t : now() + 2 * 3600000;
+}
+// "Change the deadline": a few times before the first night (the phone writes the labels in its own time)
+function deadlineOptions(room) {
+  const first = firstNight(room);
+  if (!first) return [];
+  const prev = dayBefore(first);
+  const last = torontoAt(first, 18);
+  const out = [torontoAt(prev, 18), torontoAt(prev, 21), torontoAt(first, 12), now() + 2 * 3600000, room.deadline].filter((t) => t && t > now() + 10 * 60000 && t <= last);
+  return [...new Set(out)].sort((a, b) => a - b);
+}
+const longDayFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Toronto", weekday: "long" });
+const spokenDeadline = (t) => `${longDayFmt.format(new Date(t))} at ${timeFmt.format(new Date(t)).replace(":00", "")}`;
+
+async function askWait(room) {
+  const names = pendingNames(room);
+  room.card = null;
+  room.wait = { state: "asked", at: now(), names, list: namesList(names) };
+  track("sk_wait_asked", { sessionId: room.id, persona: room.persona, waiting: names.length, agent: room.agentMode || undefined });
+  const line = await speak(room, "wait_ask", { waitNames: room.wait.list });
+  room.wait.line = line.text;
+  if (room.agentMode) agentNote(room, `[app] You have everything you need from ${room.people.find((p) => p.role === "planner").name}; ${room.wait.list} haven't added theirs. Ask, word for word: "${line.text}" Two buttons are on the planner's screen. Record the answer with choose_wait ("wait" or "now").`);
+  armWait(room, speechMs(line.text) + WAIT_MS());
+}
+function armWait(room, ms) {
+  if (!room.wait || room.wait.state !== "asked") return;
+  clearTimeout(room.waitTimer);
+  room.wait.closeAt = now() + ms; // the planner's phone shows a countdown to this
+  room.waitTimer = setTimeout(() => chooseWait(room, "wait", "silence").then(() => broadcast(room)).catch((err) => console.error(err)), ms);
+  if (room.waitTimer.unref) room.waitTimer.unref();
+}
+// choice: "wait" | "now"; how: "tap" | "speech" | "typed" | "agent" | "silence"
+async function chooseWait(room, choice, how) {
+  if (!room.wait || room.wait.state !== "asked" || room.status !== "live" || room.picks) return false;
+  clearTimeout(room.waitTimer);
+  const asked = room.wait;
+  const names = pendingNames(room);
+  const list = names.length ? namesList(names) : asked.list;
+  track("sk_wait_choice", { sessionId: room.id, persona: room.persona, choice, how });
+  if (choice === "now") {
+    room.wait = { state: "now", at: now(), how, holdUntil: 0 };
+    const line = await speak(room, "wait_now", {});
+    room.wait.line = line.text;
+    // The built-in voice reads only the newest line: the confirmation follows once this one has been said
+    if (!room.agentMode && room.streams.size) { room.wait.holdUntil = now() + speechMs(line.text); schedule(room, speechMs(line.text) + 20); }
+    else await decide(room);
+    return true;
+  }
+  const planner = room.people.find((p) => p.role === "planner");
+  const plannerMode = planner && planner.mode;
+  asForm(room);
+  if (planner) planner.mode = plannerMode; // still on the call (voice or typing) until "Waiting on…" gives way to Form sent
+  if (!setDeadline(room, defaultDeadline(room))) setDeadline(room, now() + 2 * 3600000);
+  const invited = callside.formInvite(room, planner);
+  room.wait = { state: "wait", at: now(), how, names, list, invited, until: now() + WAIT_CARD_MS() };
+  const line = await speak(room, "wait_yes", { waitNames: list, deadlineSpoken: spokenDeadline(room.deadline) });
+  room.wait.line = line.text;
+  room.wait.until = now() + speechMs(line.text) + WAIT_CARD_MS();
+  return true;
+}
+// What phones see: the question (with its countdown), or "Waiting on…" with the Decide by and its other times
+function waitView(room, me) {
+  const w = room.wait;
+  if (!w || w.state === "now" || room.picks) return null;
+  if (w.state === "asked") return { state: "asked", list: w.list, closeAt: w.closeAt || null };
+  return { state: "wait", list: w.list, until: w.until, deadline: room.deadline, options: me && me.role === "planner" ? deadlineOptions(room) : [] };
+}
 
 // ---------- While Sidekick finds the picks: show the work ----------
 // Picks can take a while (places search, the AI choosing, the AI writing the line). Instead of silence,
@@ -1523,6 +1658,7 @@ async function pickTwo(room, list, deadline) {
   }
   room.picks = picks;
   room.card = null;
+  if (room.form) { try { callside.picksReady(room); } catch (err) { console.error("Couldn't send the vote notes:", err.message); } }
   broadcast(room); // the cards replace the steps now, even when a tool started this and stopped waiting
   track("call_facts_complete", { sessionId: room.id, persona: room.persona, secs: Math.round((now() - room.createdAt) / 1000), questions: room.asked.length });
   track("picks_shown", { sessionId: room.id, persona: room.persona, pool: list.length, waitMs: room.think ? now() - room.think.startedAt : 0, engine: late || undefined });
@@ -1563,6 +1699,7 @@ function endRoom(room, why) {
     console.error("Couldn't save the Sidekick summary:", err.message);
   }
   clearTimeout(room.deadlineTimer);
+  clearTimeout(room.waitTimer);
   clearTimeout(room.confirmTimer);
   try { callside.saveRecap(room); } catch (err) { console.error("Couldn't save call recaps:", err.message); }
   track("sk_call_ended", { sessionId: room.id, persona: room.persona, why, secs: summary.secs, locked: Boolean(room.locked) });
@@ -1629,6 +1766,7 @@ function slotOptions(room, person, slot) {
 function cardFor(room, person) {
   const mine = room.answers[person.id] || {};
   if (room.status !== "live" || room.picks || room.think || room.confirm) return null; // no question while the picks are found
+  if (room.wait && room.wait.state === "asked") return null; // "wait for everyone, or show me now?" has the card area
   if (room.mode === "voting") {
     const votes = {};
     for (const [pid, v] of Object.entries(room.modeVotes)) { const who = room.people.find((x) => x.id === pid); if (who) votes[v] = [...(votes[v] || []), initial(who.name)]; }
@@ -1700,6 +1838,7 @@ function viewFor(room, pid) {
     // "I've got everything": the persona's line and the plan in public words (no names, no private answers)
     confirm: room.confirm ? { line: CONFIRM_HEAD[personas.resolve(room.persona)] || CONFIRM_HEAD.concierge, facts: room.confirm.facts.map(({ slot, text, join }) => ({ slot, text, join: join || null })), until: room.confirm.until, editing: room.confirm.editing } : null,
     reopened: room.reopened ? room.reopened.slot : null,
+    wait: waitView(room, me),
     deadline: room.deadline,
     closed: room.closed,
     candidate: room.candidate,
@@ -1861,6 +2000,15 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       else { finishConfirm(room, "ok").catch((err) => console.error(err)); return sendJSON(res, 200, { ok: true }); }
       broadcast(room);
       schedule(room, 400);
+      return sendJSON(res, 200, { ok: true });
+    }
+    // "Wait for everyone" / "Show me now", tapped on the planner's screen
+    if (action === "wait") {
+      if (!["wait", "now"].includes(body.choice)) return sendJSON(res, 400, { error: "Choose wait or now." });
+      if (!room.wait || room.wait.state !== "asked") return sendJSON(res, 409, { error: "Sidekick has already moved on." });
+      agentNote(room, body.choice === "wait" ? `[app] ${person.name} tapped "Wait for everyone".` : `[app] ${person.name} tapped "Show me now".`);
+      await chooseWait(room, body.choice, "tap");
+      broadcast(room);
       return sendJSON(res, 200, { ok: true });
     }
     // "Don't learn from this plan": this call's picks, votes and accepts leave this person's taste alone
@@ -2192,6 +2340,9 @@ async function nextMove(room) {
   else if (room.picking || (room.think && !(room.picks && room.picks.length))) move = findingPicks(room);
   else if (room.locked) move = { next_move: "locked", what_to_do: `The plan is locked: ${cleanTitle(room.locked.title)}. If you haven't yet, confirm it in one sentence and point to the two quick survey questions on screen. Otherwise stay quiet (skip_turn).` };
   else if (room.picks) move = { next_move: "present_picks", what_to_do: fresh && fresh.move === "picks" ? fresh.todo : "The two picks are on everyone's screens. If you haven't presented them, do it now with one reason each and ask everyone to vote in the app. Otherwise answer questions about them, using only the pick details.", example_line: fresh && fresh.move === "picks" ? fresh.example : undefined };
+  else if (room.wait && room.wait.state === "asked") move = { next_move: "ask_wait", what_to_do: `You have everything you need from the planner, and ${room.wait.list} haven't added theirs yet. If you haven't asked yet, ask word for word with the example line. Then listen: when the planner says to wait for everyone, or to show them now, call choose_wait with choice "wait" or "now". If nobody answers for about 8 seconds, the app waits for everyone by itself. Never say a budget or an area.`, example_line: room.wait.line };
+  else if (room.wait && room.wait.state === "wait" && fresh && fresh.move === "wait_yes") move = { next_move: "wait_for_everyone", what_to_do: "The planner chose to wait. Say the example line word for word, then stop talking (skip_turn): the others get a quick form, and the call ends on its own.", example_line: room.wait.line };
+  else if (room.wait && room.wait.state === "wait") move = { next_move: "stay_quiet", what_to_do: "The others are filling in a quick form and the call is ending. Stay quiet (skip_turn)." };
   else if (room.mode === "sidelines") move = { next_move: "stay_quiet", what_to_do: "The crew asked you to sit back. Stay quiet (skip_turn) unless someone says Sidekick." };
   else if (fresh && fresh.move !== "ask" && fresh.move !== "welcome") move = { next_move: fresh.move, what_to_do: fresh.todo, example_line: fresh.example };
   else if (st.open_question) {
@@ -2244,6 +2395,16 @@ async function runTool(room, tool, body) {
     const move = await nextMove(room); // the next move comes back with it, so the agent needs one call, not two
     return ok({ recorded: updates.length, skipped: skipped.length ? skipped : undefined, ...move });
   }
+  // "Wait for everyone, or show me now?": the planner's answer, as the agent heard it
+  if (tool === "choose_wait") {
+    const choice = ["wait", "now"].includes(body.choice) ? body.choice : null;
+    if (!choice) return { status: 400, body: { error: "choice must be \"wait\" or \"now\"." } };
+    if (!room.wait || room.wait.state !== "asked") return ok({ chosen: null, note: "There's no wait-or-now question open. Carry on (get_next_move)." });
+    await chooseWait(room, choice, "agent");
+    broadcast(room);
+    const say = choice === "now" && room.wait ? room.wait.line : undefined;
+    return ok({ chosen: choice, say_first: say, ...(await nextMove(room)) });
+  }
   if (tool === "get_picks") {
     const out = () => room.picks && room.picks.length;
     if (!out() && room.status === "live") {
@@ -2277,4 +2438,4 @@ function init({ events }) {
   eventsSource = events;
 }
 
-module.exports = { init, handle, preview, liveCalls, BOOT, _test: { rooms, createRoom, vibeChips, slotOptions, expectedView, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates, armAgentWatch } };
+module.exports = { init, handle, preview, liveCalls, BOOT, _test: { rooms, createRoom, vibeChips, slotOptions, expectedView, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates, armAgentWatch, chooseWait, waitFromText, namesList, defaultDeadline, spokenDeadline, torontoAt } };

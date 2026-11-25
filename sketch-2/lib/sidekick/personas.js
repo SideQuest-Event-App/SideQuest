@@ -121,6 +121,13 @@ const LINES = {
     agent_solo: ["Hey {name}, Sidekick here, send the link to the crew. While they hop on, {question}", "Hey {name}! Share the invite, and in the meantime, {question}"],
     agent_back: ["Okay, I'm back, picking up where we left off: {question}", "Alright, I'm here. So, {question}"],
     agent_back_done: ["Hey, I'm back, your picks are on screen. Want me to run through them?"],
+    // "Wait for everyone, or show me now?": asked when the planner has answered everything and the people they
+    // invited haven't. The team's exact lines (never the AI's words): {names} are those still to answer
+    // ("Maya and Kai", "Maya, Kai and 2 others"), {deadline} the form's close time ("Friday at 6 PM").
+    // Never a budget or an avoided area.
+    wait_ask: ["Awesome, now that I know what you're after, I've already got a couple of ideas. Want me to show you now, or wait until {names} add theirs?"],
+    wait_yes: ["Love it. I'll send {names} a quick form so they can add theirs. Once everyone's in, or by {deadline}, whichever comes first, I'll pick the top two and let you all know. Talk soon!"],
+    wait_now: ["On it. Here's what I'd do…"],
     // While the picks are being found (about 3 s in, about 10 s in, and the 12 s fallback). {n} is a
     // real count from the engine; never a private answer (no amounts, no avoided areas).
     progress: ["There's like {n} things on {night}. Cutting the ones that don't work for everyone.", "Okay, {n} options on {night}. Narrowing it down to what works for all of you."],
@@ -157,6 +164,9 @@ const LINES = {
     agent_solo: ["Hello {name}, I'm Sidekick. Share the link with your crew, and while they join, {question}", "Hi {name}, I'm here whenever your crew joins. To get us started, {question}"],
     agent_back: ["I'm back with you. Let's continue: {question}", "Here again. Where were we: {question}"],
     agent_back_done: ["I'm back; your two options are on screen. Would you like me to go through them?"],
+    wait_ask: ["Thank you, I have what I need from you, and I already have some recommendations in mind. Shall I share them now, or wait until {names} have added their preferences?"],
+    wait_yes: ["Very good. I'll invite {names} to add their preferences with a short form. Once everyone has replied, or by {deadline}, I'll choose the two best options and notify you all."],
+    wait_now: ["Certainly. Here are my two recommendations…"],
     progress: ["I've found {n} options for {night}. Removing anything that doesn't suit the group.", "There are {n} options for {night}. I'm narrowing them to what suits everyone."],
     still: ["This is taking a little longer than usual. Thank you for waiting.", "Still checking the options for {night}. Thank you for your patience."],
     fallback: ["Rather than keep you waiting, here are the two strongest so far: {story1}; or {story2}. Take your time.", "So you're not kept waiting, here are the two strongest so far: {story1}; or {story2}."],
@@ -205,7 +215,7 @@ function fallbackLine(id, move, c, recent = []) {
   const fresh = pool.filter((t) => !used.has(opener(t)) && !recent.includes(t));
   return pickOne(fresh.length ? fresh : pool);
 }
-const DEFAULTS = { recap: "the plan's on your screen", kinds: "both fit the plan", question: "what works for everyone?", crew: "crew", nights: "Friday or Saturday", night: "That night", missing: "a couple more things", loosen: "loosening one thing", n: "a few", options: "a few different options", names: "everyone" };
+const DEFAULTS = { deadline: "the deadline", recap: "the plan's on your screen", kinds: "both fit the plan", question: "what works for everyone?", crew: "crew", nights: "Friday or Saturday", night: "That night", missing: "a couple more things", loosen: "loosening one thing", n: "a few", options: "a few different options", names: "everyone" };
 
 // The typed chat thread: shorter versions where the spoken line pads for the ear. Anything not here
 // goes through talk.chatText (spoken padding at the start and "take your time" dropped).
@@ -217,6 +227,7 @@ const CHAT = {
     checkin: ["Want me to run the planning, or hang back while you fill it in?"],
     wrap: ["See you {night}! Two quick taps on the survey before you go."],
     confirm: ["Okay, I think I've got it! {recap}."],
+    wait_ask: LINES.friend.wait_ask, wait_yes: LINES.friend.wait_yes, wait_now: LINES.friend.wait_now,
   },
   concierge: {
     picks: ["Two options are on your screen: {pick1} or {pick2}. Vote when you're ready."],
@@ -225,6 +236,7 @@ const CHAT = {
     checkin: ["Shall I lead the planning, or stay in the background while you fill it in?"],
     wrap: ["Enjoy {night}. Two short questions are on your screen."],
     confirm: ["Thank you, I have everything I need: {recap}."],
+    wait_ask: LINES.concierge.wait_ask, wait_yes: LINES.concierge.wait_yes, wait_now: LINES.concierge.wait_now,
   },
 };
 function chatLine(id, move, c) {
