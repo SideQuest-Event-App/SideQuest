@@ -3,7 +3,7 @@
 //  (b) the same line again comes from memory: no second request, no characters counted
 //  (c) the characters meter stops at its cap, and the route answers { fallback: true }
 //  (d) an ElevenLabs failure gives the characters back and answers { fallback: true }; no key means no request
-//  (e) in the browser: the Plan intro plays the ElevenLabs audio (mocked route), and when the route fails the
+//  (e) in the browser: a call line plays the ElevenLabs audio (mocked route), and when the route fails the
 //      phone's own voice says it instead (needs Playwright)
 //
 //   NODE_PATH=/opt/node-tools/node_modules node test/sidekick-tts.js
@@ -145,22 +145,28 @@ function wav(ms = 300) {
         await page.route("**/api/sk/tts", (rt) => { asked.push(rt.request().postDataJSON()); return route(rt); });
         return { ctx, page, asked, errors };
       };
-      await test("(e) The intro plays in the ElevenLabs voice; when that fails, the phone's voice says it", async () => {
-        const ok = await page0((rt) => rt.fulfill({ status: 200, contentType: "audio/mpeg", body: wav(400) }));
-        await ok.page.goto(`${base}/sk?persona=friend`);
-        await ok.page.waitForSelector("#pfOrb");
-        await ok.page.click("#pfOrb");
-        await ok.page.waitForFunction(() => window.__skTts >= 1, null, { timeout: 5000 });
+      // (The Plan tab's spoken intro went with the redesign; the call's lines take the same path.)
+      const post = (p, body) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+      const nights = (await (await fetch(`${base}/api/sk/nights`)).json()).nights;
+      const callPage = async (persona, route) => {
+        const made = await post("/api/sk/rooms", { name: "Asia", crew: "Tts crew", nights: [nights[2].date], persona });
+        const ph = await page0(route);
+        await ph.ctx.addInitScript(([r, p]) => { localStorage.setItem(`sk:${r}`, JSON.stringify({ person: p, mode: "text" })); localStorage.setItem("sk:agentVoice", "false"); }, [made.room, made.person]);
+        await ph.page.goto(`${base}/sk/${made.room}`);
+        await ph.page.waitForSelector("#dock .ctrls");
+        await post(`/api/sk/rooms/${made.room}/join`, { name: "Ravi", mode: "text", answers: {} }); // the call opens with a line
+        return ph;
+      };
+      await test("(e) The call's lines play in the ElevenLabs voice; when that fails, the phone's voice says them", async () => {
+        const ok = await callPage("friend", (rt) => rt.fulfill({ status: 200, contentType: "audio/mpeg", body: wav(400) }));
+        await ok.page.waitForFunction(() => window.__skTts >= 1, null, { timeout: 8000 });
         assert.strictEqual(ok.asked[0].persona, "friend", "the A/B persona's voice");
-        assert.match(ok.asked[0].text, /Wanna fix that/);
+        assert(ok.asked[0].text.length > 10, "a whole line");
         assert.deepStrictEqual(await ok.page.evaluate(() => window.__spoken.filter(Boolean)), [], "the built-in voice stayed quiet");
         assert.deepStrictEqual(ok.errors, []);
         await ok.ctx.close();
-        const bad = await page0((rt) => rt.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ error: "nope", fallback: true }) }));
-        await bad.page.goto(`${base}/sk?persona=concierge`);
-        await bad.page.waitForSelector("#pfOrb");
-        await bad.page.click("#pfOrb");
-        await bad.page.waitForFunction(() => window.__spoken.some((t) => /Welcome back/.test(t)), null, { timeout: 5000 });
+        const bad = await callPage("concierge", (rt) => rt.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ error: "nope", fallback: true }) }));
+        await bad.page.waitForFunction(() => window.__spoken.some((t) => t && t.length > 10), null, { timeout: 8000 });
         assert.strictEqual(bad.asked[0].persona, "concierge");
         assert(!(await bad.page.evaluate(() => window.__skTts)), "no ElevenLabs audio played");
         assert.deepStrictEqual(bad.errors, []);

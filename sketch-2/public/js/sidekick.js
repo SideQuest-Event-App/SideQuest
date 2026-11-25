@@ -1206,7 +1206,7 @@
 
   function render() {
     // The planner of a form ("Send everyone a quick form") sees who's answered until the picks are out
-    const next = view.locked ? "locked" : view.status === "ended" ? "ended" : view.picks ? "picks" : view.form && view.me && view.me.planner ? "formsent" : "call";
+    const next = view.status === "ended" ? "ended" : view.locked ? "locked" : view.picks ? "picks" : view.form && view.me && view.me.planner ? "formsent" : "call";
     if (next === "formsent") {
       if (phase !== "formsent") { phase = "formsent"; app.innerHTML = ""; }
       renderFormSent();
