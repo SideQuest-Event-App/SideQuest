@@ -1,13 +1,15 @@
-/* Sketch 2 — the launch map (Discover, map first; designs LD2 option L2 and DX). The screen itself is drawn in
+/* Sketch 2 — the launch map (Discover, map first; the redesign's maplist option B). The screen itself is drawn in
    screens-attendee.js (S.discover); this file runs what it needs between renders:
-   - the bottom sheet's three stops (peek: cards, half: list over the map, full: list), by drag, by the grabber
-     (Enter, or the arrow keys) and by the List and Map buttons, remembered per person in localStorage;
-   - "Use my location": asked only after a tap, rounded to 2 decimals (about 1 km) before it goes anywhere, named
-     with Sketch 1's place() helper on the server, and kept in this page's memory only (never stored, not even in
-     sessionStorage), so "you are here" shows only after the person shares it;
-   - "Your places": the events you're going to, saved and hosting, as Google Maps shows saved lists: their own pins,
-     grouped when zoomed out (map.js), and a panel with each list and its count;
-   - places: one search per map session, behind the server's usage caps. If there are none, the map shows events. */
+   - the sheet's three heights (peek: the pills over the map, half: the list over the map, full: the list), by drag
+     and by the grabber (Enter, or the arrow keys), remembered per person in localStorage. No List / Map switch;
+   - the person's live location, never stored: used at once when the browser already allows it, else only after a
+     tap on "my location"; rounded to 2 decimals (about 1 km) before it goes anywhere, named with Sketch 1's place()
+     helper on the server, and kept in this page's memory only (not even sessionStorage). Without it the map starts
+     on the person's chosen area (Getting around), else downtown Toronto;
+   - Going, Saved and Hosting pins, grouped when zoomed out (map.js);
+   - places: one search per map session behind the server's usage caps, plus "Search this area" after a pan (events
+     stay the GTA import; outside it the sheet says so). If there are none, the map shows events;
+   - For you's vibe collections, ranked on the server (lib/search/foryou.js). */
 (function () {
   const SQ = window.SQ;
   const U = () => SQ.u;
@@ -42,18 +44,50 @@
     const saved = local.get(stopKey());
     return (U().lx = {
       user: SQ.userId(),
-      stop: STOPS.includes(saved) ? saved : "peek",
+      stop: STOPS.includes(saved) ? saved : "half", // the list over the map: For you in view, with the map above it
+      tab: "foryou", // the sheet's pills: For you, Events, Places (what the list and the map show)
+      outside: false, // the places were searched outside the GTA, where there are no events
+      at: null, // where the places were searched (the map's centre at the time), so a pan can offer "Search this area"
       loc,
       locState: loc ? "on" : "unknown",
       places: L ? L.places : null, // one search per map session, even across accounts
       placesState: L ? L.placesState : "idle",
-      show: { events: true, places: true, yours: true },
-      yp: false, // the "Your places" panel is open
+      show: { yours: true },
       sel: null,
       peekH: 0,
     });
   }
   SQ.lx = { state, DOWNTOWN };
+  // Without a shared location, the person's chosen area (Profile > Getting around), else downtown Toronto
+  function homeArea() {
+    const u = SQ.d && SQ.d.user;
+    const name = u && (u.homeArea || (u.areas || [])[0]);
+    const h = name && (SQ.HOODS || []).find((x) => x[0] === name);
+    return h ? { lat: h[1], lng: h[2], label: h[0] } : DOWNTOWN;
+  }
+  SQ.lx.homeArea = homeArea;
+  SQ.lx.whereLabel = () => {
+    const L = state();
+    return L.loc ? `You · ${L.loc.label}` : L.locState === "asking" ? "Finding you…" : homeArea().label;
+  };
+  SQ.lx.startView = () => {
+    const L = state();
+    const c = L.loc || homeArea();
+    return { lat: c.lat, lng: c.lng, zoom: L.loc ? 13.6 : 12.4 };
+  };
+  // Live location by default, never stored: if the browser already lets this site use it, it's used at once (no
+  // prompt). Otherwise nothing is asked until the person taps "my location" on the map.
+  let autoTried = false;
+  function autoLocate() {
+    if (autoTried) return;
+    autoTried = true;
+    try {
+      if (!navigator.permissions || !navigator.geolocation) return;
+      navigator.permissions.query({ name: "geolocation" }).then((st) => {
+        if (st.state === "granted" && state().locState === "unknown") A.lxLocate();
+      }, () => {});
+    } catch {}
+  }
 
   // ---------- "Are you demoing SideQuest or testing it?" ----------
   // Asked on every fresh visit by someone who isn't signed in with a real account, after the loader (opening.js
@@ -86,7 +120,7 @@
     const L = state();
     if (!navigator.geolocation) {
       L.locState = "denied";
-      SQ.toast("Location isn't available in this browser, so the map shows downtown Toronto.");
+      SQ.toast(`Location isn't available in this browser, so the map shows ${homeArea().label}.`);
       return;
     }
     if (L.locState === "asking") return;
@@ -100,32 +134,32 @@
       L.loc = memLoc = { lat, lng, label: label || "your area" };
       L.locState = "on";
       SQ.mapJump("discover", { lat, lng, zoom: 13.6 });
+      hideArea();
       SQ.render();
     }, (err) => {
       L.locState = "denied";
-      SQ.toast(err && err.code === 1 ? "Location is off, so the map shows downtown Toronto. You can turn it on in your browser's settings." : "Couldn't find you just now, so the map shows downtown Toronto.");
+      const area = homeArea().label;
+      SQ.toast(err && err.code === 1 ? `Location is off, so the map shows ${area}. You can turn it on in your browser's settings.` : `Couldn't find you just now, so the map shows ${area}.`);
       SQ.render();
     }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 10 * 60000 });
   };
-  // The legend chips are the filters: ★ Events and ● Places
-  A.lxShow = (kind) => {
-    const L = state();
-    L.show[kind] = !L.show[kind];
-  };
-  // A pin (or a place card): bring its card forward and mark it on the map
+  // A pin, or a poster in the list: its card comes forward in the sheet and its pin is marked. From the list, or from "See all": the sheet drops to a peek so the map shows it, with its card in the sheet
   A.lxPin = (id) => {
     const L = state();
     L.sel = L.sel === id ? null : id;
-    if (L.sel && L.sel[0] === "p" && U().screen === "discover") {
-      const p = (L.places || []).find((x) => x.id === id);
-      if (p && L.stop !== "peek") SQ.mapJump("discover", { lat: p.lat, lng: p.lng });
-    }
-    if (L.sel && L.stop === "full") setStop("peek", false);
+    if (!L.sel) return;
+    const p = id[0] === "p" ? (L.places || []).find((x) => x.id === id) : null;
+    const e = id[0] === "e" ? SQ.d.events.find((x) => `e${x.id}` === id) : null;
+    const at = p ? p : e && e.venue && SQ.onMap(e.venue.lat, e.venue.lng) ? e.venue : null;
+    if (at && L.stop !== "peek") SQ.mapJump("discover", { lat: at.lat, lng: at.lng });
+    if (L.stop !== "peek") { L.stop = "peek"; local.set(stopKey(), "peek"); }
+    if (U().screen !== "discover") return "discover";
   };
 
-  // ---------- Your places: Going, Saved and Hosting, like Google Maps' saved lists ----------
+  // ---------- Your lists on the map: Going, Saved and Hosting pins, like Google Maps' saved lists ----------
+  // (The "Your places" pill and panel are gone: the lists themselves live in Sidequests, Saved and Your events.)
   // Each upcoming event in one list only (Hosting beats Going beats Saved). An event whose coordinates aren't on land
-  // in the GTA stays in the panel, marked "Not on the map", and gets no pin.
+  // in the GTA gets no pin.
   const LISTS = [["going", "Going", "★"], ["saved", "Saved", "♥"], ["hosting", "Hosting", "⚑"]];
   function yourPlaces() {
     const u = SQ.d && SQ.d.user;
@@ -149,76 +183,8 @@
     const lists = yourPlaces();
     return LISTS.flatMap(([k]) => lists[k].filter(onMapE).map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, kind: "event", list: k, selected: sel === `e${e.id}`, act: "lxPin", arg: `e${e.id}`, label: e.title })));
   }
-  const total = (lists) => LISTS.reduce((t, [k]) => t + lists[k].length, 0);
-  // The chip in the controls row that opens the panel
-  function ypChip() {
-    const L = state();
-    const n = total(yourPlaces());
-    return `<button class="lx-yp-chip${L.yp ? " on" : ""}" data-act="lxYours" aria-expanded="${L.yp}" aria-controls="lx-yp" aria-label="Your places: ${n} going, saved or hosting">${SQ.PIN_ICONS.HEART}<span>Your places</span><b>${n}</b></button>`;
-  }
-  const when = (e) => {
-    try {
-      return new Date(e.startsAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/Toronto" });
-    } catch { return ""; }
-  };
-  function ypPanel() {
-    const L = state();
-    if (!L.yp) return "";
-    const esc = SQ.esc;
-    const lists = yourPlaces();
-    const icon = { going: SQ.PIN_ICONS.STAR, saved: SQ.PIN_ICONS.HEART, hosting: SQ.PIN_ICONS.FLAG };
-    const sec = ([k, label]) => {
-      const list = lists[k];
-      return `<section class="yp-sec" aria-labelledby="yp-h-${k}">
-        <h3 class="yp-h" id="yp-h-${k}"><span class="yp-ico ${k}" aria-hidden="true">${icon[k]}</span>${label}<span class="yp-n">${list.length} ${list.length === 1 ? "place" : "places"}</span></h3>
-        ${list.length ? `<ul class="yp-list">${list.map((e) => `<li><button class="yp-row" data-act="lxYoursGo" data-arg="e${e.id}"><span class="yp-t">${esc(e.title)}</span><span class="yp-s">${esc([when(e), e.neighbourhood].filter(Boolean).join(" · "))}${onMapE(e) ? "" : " · Not on the map"}</span></button></li>`).join("")}</ul>`
-          : `<p class="yp-empty">${k === "saved" ? "Tap the bookmark on an event and it shows here." : k === "going" ? "Events you're going to show here." : "Sidequests you host show here."}</p>`}
-      </section>`;
-    };
-    return `<section class="lx-yp" id="lx-yp" role="dialog" aria-modal="false" aria-labelledby="lx-yp-title" tabindex="-1">
-      <div class="yp-head"><h2 class="yp-title" id="lx-yp-title">Your places</h2>
-        <button class="yp-show" data-act="lxYoursShow" aria-pressed="${L.show.yours}">${L.show.yours ? "Shown on map" : "Hidden on map"}</button>
-        <button class="icon-btn yp-close" data-act="lxYours" aria-label="Close your places">${SQ.icon ? SQ.icon("x") : "×"}</button></div>
-      <div class="yp-legend" role="list" aria-label="Map key">
-        ${LISTS.map(([k, label]) => `<span role="listitem" class="yp-key"><span class="yp-ico ${k}" aria-hidden="true">${icon[k]}</span>${label}</span>`).join("")}
-        <span role="listitem" class="yp-key"><span class="yp-ico ev" aria-hidden="true">${SQ.PIN_ICONS.STAR}</span>Events</span>
-        <span role="listitem" class="yp-key"><span class="yp-ico pl" aria-hidden="true"></span>Places</span>
-      </div>
-      <div class="yp-body">${LISTS.map(sec).join("")}</div>
-    </section>`;
-  }
   SQ.lx.yourPlaces = yourPlaces;
   SQ.lx.yourPins = yourPins;
-  SQ.lx.ypChip = ypChip;
-  SQ.lx.ypPanel = ypPanel;
-  let ypReturn = false;
-  A.lxYours = () => {
-    const L = state();
-    L.yp = !L.yp;
-    ypReturn = !L.yp; // closing: focus goes back to the chip
-    if (L.yp) setTimeout(() => { const p = document.getElementById("lx-yp"); if (p) p.focus(); });
-  };
-  A.lxYoursShow = () => {
-    const L = state();
-    L.show.yours = !L.show.yours;
-  };
-  // A row in the panel: close it, pick the pin and centre the map on it (if it has one)
-  A.lxYoursGo = (id) => {
-    const L = state();
-    L.yp = false;
-    L.sel = id;
-    const e = SQ.d.events.find((x) => `e${x.id}` === id);
-    if (onMapE(e)) SQ.mapJump("discover", { lat: e.venue.lat, lng: e.venue.lng, zoom: Math.max((SQ.mapCenter("discover") || {}).zoom || 13, 13.6) });
-    if (L.stop === "full") setStop("peek", false);
-  };
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    const L = U() && U().lx;
-    if (!L || !L.yp || U().screen !== "discover") return;
-    L.yp = false;
-    ypReturn = true;
-    SQ.render();
-  });
 
   // "Switch to demo / testing": forget this tab's answer (and the account on this device) and ask again
   A.modeSwitch = async () => {
@@ -241,7 +207,8 @@
     if (L.placesState !== "idle") return;
     L.placesState = "loading";
     L.placesSince = Date.now();
-    const at = L.loc || DOWNTOWN;
+    const at = L.loc || homeArea();
+    L.at = { lat: at.lat, lng: at.lng };
     try {
       const r = await SQ.post("/api/places", { lat: round2(at.lat), lng: round2(at.lng), vibes: (SQ.d.user && SQ.d.user.vibes) || [] });
       L.places = Array.isArray(r.places) ? r.places.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)) : [];
@@ -253,25 +220,86 @@
     if (U().screen === "discover") SQ.render();
   }
 
+  // ---------- For you: vibe collections (the server ranks them with the person's taste: lib/search/foryou.js) ----------
+  // Asked again when the places or the feed change. The place cards go to the server only to be ranked (never stored).
+  async function ensureForYou() {
+    const L = state();
+    const u = SQ.d && SQ.d.user;
+    if (!u || L.placesState === "loading") return;
+    const key = [u.id, u.feedKey || "", (u.feed && u.feed.key) || "", (L.places || []).map((p) => p.id).join(","), (u.vibes || []).join(",")].join("|");
+    const fy = U().fy;
+    if (fy && (fy.key === key || fy.loading)) return;
+    U().fy = { key, loading: true, collections: fy && fy.key && fy.key.split("|")[0] === u.id ? fy.collections : null };
+    try {
+      const r = await SQ.post("/api/foryou", { userId: u.id, places: (L.places || []).map((p) => ({ id: p.id, title: p.title, type: p.type, vibes: p.vibes })) });
+      U().fy = { key, loading: false, collections: r.collections || [] };
+    } catch {
+      U().fy = { key, loading: false, collections: null, error: true }; // the sheet falls back to the sign-up vibes
+    }
+    if (["discover", "collection"].includes(U().screen)) SQ.render();
+  }
+
+  // ---------- Search this area ----------
+  // Panning the map more than about 1.5 km from where the places were searched offers a new search there. Places load
+  // for that area; events stay the GTA import, so outside it the sheet says only places show.
+  const kmBetween = (a, b) => {
+    const r = Math.PI / 180;
+    return 6371 * Math.hypot((b.lng - a.lng) * r * Math.cos(((a.lat + b.lat) / 2) * r), (b.lat - a.lat) * r);
+  };
+  function areaBtn() { return document.querySelector("#screen .lx-area"); }
+  function hideArea() { const b = areaBtn(); if (b) b.hidden = true; }
+  function syncArea() {
+    const L = state(), b = areaBtn();
+    const c = SQ.mapCenter && SQ.mapCenter("discover");
+    if (!b || !c || !L.at || L.placesState === "loading") return;
+    b.hidden = !(kmBetween(L.at, c) > 1.5);
+  }
+  SQ.onMapMoved = (id) => { if (id === "discover" && U().screen === "discover") syncArea(); };
+  const GTA = () => (SQ.GEO && SQ.GEO.GTA) || { south: 43.35, north: 44.15, west: -80.1, east: -78.8 };
+  const inGTA = (c) => { const b = GTA(); return c.lat > b.south && c.lat < b.north && c.lng > b.west && c.lng < b.east; };
+  A.lxArea = async () => {
+    const L = state();
+    const c = SQ.mapCenter("discover");
+    if (!c) return;
+    hideArea();
+    L.placesState = "loading";
+    L.placesSince = Date.now();
+    L.at = { lat: c.lat, lng: c.lng };
+    L.outside = !inGTA(c);
+    L.sel = null;
+    SQ.render();
+    try {
+      const r = await SQ.post("/api/places", { lat: round2(c.lat), lng: round2(c.lng), area: true, vibes: (SQ.d.user && SQ.d.user.vibes) || [] });
+      L.places = Array.isArray(r.places) ? r.places.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)) : [];
+      if (r.reason === "area limit") SQ.toast("That's a lot of searching for one visit. Places will search again next time.");
+    } catch {
+      L.places = [];
+    }
+    L.placesState = "done";
+  };
+
   // ---------- The sheet ----------
   let sheetEl = null;
   function parts() {
     const sheet = sheetEl && sheetEl.isConnected ? sheetEl : null;
     if (!sheet) return null;
-    return { sheet, wrap: sheet.parentElement, head: sheet.querySelector(".lx-head"), cards: sheet.querySelector(".lx-cards"), list: sheet.querySelector(".lx-list") };
+    return { sheet, wrap: sheet.parentElement, head: sheet.querySelector(".lx-head"), list: sheet.querySelector(".lx-list") };
   }
   // How much of the sheet shows at each stop
+  // peek: the grabber, the hint and the pills (the big title shows only above a peek); full: up to the search bar
   function heights(p) {
-    const L = state();
     const H = p.wrap.clientHeight;
     const ctrls = p.wrap.querySelector(".map-ctrls .search");
     const top = ctrls ? Math.round(ctrls.getBoundingClientRect().bottom - p.wrap.getBoundingClientRect().top + 10) : 72;
     const full = Math.max(200, H - top);
-    if (p.sheet.dataset.stop === "peek" && p.cards.offsetHeight) L.peekH = p.head.offsetHeight + p.cards.offsetHeight + 14;
-    const peek = Math.min(full, L.peekH || 300);
-    return { full, peek, half: Math.min(full, Math.max(peek + 60, Math.round(H * 0.55))) };
+    const title = p.head.querySelector(".dx-big");
+    const tH = title && title.offsetHeight ? title.offsetHeight + parseFloat(getComputedStyle(title).marginBottom || 0) + parseFloat(getComputedStyle(title).marginTop || 0) : 0;
+    const peek = Math.min(full, Math.max(120, p.head.offsetHeight - tH + 10));
+    return { full, peek, half: Math.min(full, Math.max(peek + 120, Math.round(H * 0.58))) };
   }
-  function apply(p, stop, h = heights(p)) {
+  function apply(p, stop, h0) {
+    p.wrap.dataset.stop = stop; // the title shows or hides first, so the heights are measured as they'll be
+    const h = h0 || heights(p);
     const vis = h[stop];
     p.sheet.style.height = `${h.full}px`;
     p.sheet.style.transform = `translateY(${h.full - vis}px)`;
@@ -301,7 +329,7 @@
   let drag = null, draggedAt = 0;
   function onDown(e) {
     const p = parts();
-    if (!p || !e.target.closest(".lx-head") || e.target.closest(".lx-views") || (e.pointerType === "mouse" && e.button)) return;
+    if (!p || !e.target.closest(".lx-head") || e.target.closest(".dx-seg, .lx-selwrap") || (e.pointerType === "mouse" && e.button)) return;
     if (document.documentElement.dataset.layout === "desktop") return; // a side panel there, not a sheet
     const h = heights(p);
     drag = { p, h, y0: e.clientY, t0: performance.now(), vis0: h[state().stop], vis: h[state().stop], moved: false };
@@ -330,9 +358,10 @@
     const v = (d.vis0 - (e.clientY - d.y0) - d.vis0) / Math.max(1, performance.now() - d.t0); // px per ms, up is positive
     const order = STOPS.map((s) => [s, d.h[s]]);
     let next = order.reduce((a, b) => (Math.abs(b[1] - d.vis) < Math.abs(a[1] - d.vis) ? b : a))[0];
+    // A flick goes on to the next height in its direction from where it was let go (a long fast drag can cross two)
     if (Math.abs(v) > 0.6) {
-      const i = STOPS.indexOf(state().stop) + (v > 0 ? 1 : -1);
-      next = STOPS[Math.max(0, Math.min(2, i))];
+      const ahead = v > 0 ? order.filter(([, h]) => h > d.vis + 1) : order.filter(([, h]) => h < d.vis - 1).reverse();
+      next = ahead.length ? ahead[0][0] : v > 0 ? "full" : "peek";
     }
     setStop(next);
   }
@@ -374,9 +403,7 @@
     requestAnimationFrame(() => p.sheet.classList.remove("still"));
     // Streets first, then each pin fades in as it arrives (the opening flies them in itself)
     SQ.pinsArrive(root, SQ.opening.active());
-    if (ypReturn) { ypReturn = false; const c = root.querySelector(".lx-yp-chip"); if (c) c.focus(); }
-    const card = L.sel && p.cards.querySelector(`[data-id="${CSS.escape(L.sel)}"]`);
-    if (card) p.cards.scrollLeft = Math.max(0, card.offsetLeft - 16);
-    if (SQ.d && SQ.d.user) ensurePlaces();
+    if (SQ.d && SQ.d.user) { autoLocate(); ensurePlaces(); ensureForYou(); }
+    syncArea(root);
   };
 })();

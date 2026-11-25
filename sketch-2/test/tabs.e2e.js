@@ -3,7 +3,7 @@
 //  a. tab names: Discover · Squads · Plan · Sidequests · Profile, for real and demo accounts;
 //  b. Squads: the list, one squad's space (members, open vote with its pink deadline, fair blend, chat), creating a
 //     squad, and "Start a plan with this squad" linking to /sk?squad=<id>;
-//  c. Sidequests: Your events · Saved · Requests; going (violet event, teal place) and hosting (amber, ★ Hosting,
+//  c. Sidequests: Your events · Saved · Invites (was Requests); going (violet event, teal place) and hosting (amber, ★ Hosting,
 //     guests, Manage) look different; Add to calendar downloads a valid .ics file;
 //  d. Profile: settings save and survive a reload, Download your data, and Delete account (real accounts only)
 //     behind its type-DELETE step;
@@ -162,21 +162,23 @@ function restore() {
       await go(page, "squads");
       await page.waitForSelector(".sq-card");
       assert((await text(page)).includes("Friday Crew"), "the first squad is listed");
-      assert(await page.$('.sq-card .tb-pill.pink:has-text("Vote closes")'), "the open vote's deadline shows in pink on the card");
+      assert(/Vote open · closes (Mon|Tue|Wed|Thu|Fri|Sat|Sun) /.test(await page.textContent(".sq-card .sq-line")), "the open vote and its deadline are the card's one status line");
+      assert(!/Fair blend/.test(await text(page)), "no Fair blend on the list");
       await shot(page, "squads-375");
       await page.click(`.sq-open[data-arg="${main.id}"]`);
       await page.waitForSelector(".sq-next, .sq-opt");
       const t = await text(page);
       assert(/You, Maya, Kai/.test(t), "members");
-      assert(/Fair blend \d+%/.test(t), "fair blend %");
+      assert(!/Fair blend/.test(t), "no fair blend % (one status, one button)");
       assert.strictEqual(await page.$$eval(".sq-opt", (xs) => xs.length), 2, "two picks in the vote");
       assert(await page.$('.tb-pill.pink:has-text("Closes")'), "pink deadline in the space");
       const bg = await page.$eval('.tb-pill.pink', (el) => getComputedStyle(el).backgroundColor);
       assert.strictEqual(bg, "rgb(117, 41, 82)", "pink means the deadline (hot tint)");
       await page.click(`.sq-opt button[data-act="squadVote"]`);
       await page.waitForSelector('.sq-opt button[aria-pressed="true"]');
+      assert.strictEqual(await page.$$eval("a.tb-btn.grad", (as) => as.filter((a) => !a.closest(".nav-ghost")).length), 1, "one main button");
       assert.strictEqual(await page.getAttribute('a.tb-btn.grad', "href"), `/sk?squad=${encodeURIComponent(main.id)}`);
-      assert((await page.textContent("a.tb-btn.grad")).includes("Start a plan with Friday Crew"));
+      assert((await page.textContent("a.tb-btn.grad")).includes("Plan a night with Friday Crew"));
       await page.fill('.sq-compose input', "Sat works if we eat first");
       await page.click('.sq-compose button[type="submit"]');
       await page.waitForFunction(() => document.querySelector("#screen").innerText.includes("Sat works if we eat first"));
@@ -196,9 +198,12 @@ function restore() {
       const made = after.squads.find((s) => s.name === "Thursday climbers");
       assert(made && made.members.join() === "Leila,Sam", "saved on the server with its members");
       assert.strictEqual(await page.getAttribute('a.tb-btn.grad', "href"), `/sk?squad=${encodeURIComponent(made.id)}`);
-      // Friends stay reachable from Squads
+      // Friends moved to Profile: Your Sidequesters (no Friends section on Squads, one + in the header)
       await go(page, "squads");
-      await page.click('.tb-head button[data-act="openFriends"]');
+      assert(!/Friends ·/.test(await text(page)) && !(await page.$('.tb-head button[data-act="openFriends"]')), "no Friends on Squads");
+      assert.strictEqual(await page.locator(".tb-head .icon-btn").count(), 1, "one + in the header");
+      await go(page, "profile");
+      await page.click('.pf-menu button[data-act="openFriends"]');
       await page.waitForFunction(() => SQ.u.screen === "friends");
       await ctx.close();
     });
@@ -209,7 +214,7 @@ function restore() {
       await go(page, "questlog");
       await page.waitForSelector(".tb-seg");
       const segs = await page.$$eval(".tb-seg button", (bs) => bs.map((b) => b.textContent.trim()));
-      assert.deepStrictEqual(segs.map((s) => s.replace(/\s*\d+$/, "")), ["Your events", "Saved", "Requests"]);
+      assert.deepStrictEqual(segs.map((s) => s.replace(/\s*\d+$/, "")), ["Your events", "Saved", "Invites"]);
       assert(await page.$('.tb-head button:has-text("Add event")'), "Add event is a labelled button");
       // The going ticket is violet; the hosted one is amber with ★ Hosting, a guest count and Manage
       const going = await page.$(`.tk-big.violet, .tk-stub.violet`);
@@ -245,7 +250,7 @@ function restore() {
       await page.waitForSelector(`a[href="/sk?pick=${savedOne.id}"]`);
       assert((await text(page)).includes(savedOne.title));
       await shot(page, "sidequests-saved-375");
-      await page.click('.tb-seg button:has-text("Requests")');
+      await page.click('.tb-seg button:has-text("Invites")');
       await page.waitForFunction(() => document.querySelector("#screen").innerText.includes("Ask for something"));
       await shot(page, "sidequests-requests-375");
       // Manage the hosted event
@@ -261,11 +266,19 @@ function restore() {
       const { ctx, page } = await phone();
       await go(page, "profile");
       await page.waitForSelector(".pf-strip");
+      const menu = await page.$$eval(".pf-menu .pf-mi > .grow", (xs) => xs.map((x) => x.textContent.trim()));
+      for (const m of ["Your Sidequesters", "Your taste", "Night passport", "Settings"]) assert(menu.includes(m), `Profile menu has ${m}`);
+      assert(await page.$(".pf-aura"), "the taste aura behind the avatar");
+      assert.strictEqual(await page.$$eval(".pf-stat3 > div", (xs) => new Set(xs.map((x) => Math.round(x.getBoundingClientRect().top))).size), 1, "stats in one row");
+      await page.click('.pf-menu button[data-go="settings-home"]');
+      await page.waitForFunction(() => SQ.u.screen === "settings-home");
       const pt = await text(page);
       for (const g of ["Notifications", "Privacy and data", "Calendar", "Display and accessibility", "Help, feedback and terms"]) assert(pt.includes(g), `settings group ${g}`);
       assert(!pt.includes("Language"), "Language is hidden for now (features.e2e.js checks it)");
+      await go(page, "profile");
       assert(await page.$('.pf-bottom button:has-text("Log out")') && await page.$('.pf-bottom button:has-text("Edit profile")') && await page.$('.pf-bottom [aria-label="Delete account"]'), "bottom row");
       await shot(page, "profile-375");
+      await go(page, "settings-home");
       await page.click('button[data-act="openSettings"][data-arg="notifications"]');
       await page.click('button[data-arg^="notifications.hosts="]');
       await page.waitForFunction(() => SQ.d.user.settings.notifications.hosts === true);
@@ -285,7 +298,7 @@ function restore() {
       assert(json.account.log && !json.account.feed, "your log, not the app's caches");
       await page.reload();
       await page.waitForFunction(() => window.SQ && SQ.d && SQ.d.user);
-      await go(page, "profile");
+      await go(page, "settings-home");
       assert((await text(page)).includes("Your squads see your plans"), "the card shows the saved value");
       await ctx.close();
       assert.strictEqual(dbm.data.users[userId].settings.privacy.seeGoing, "squads", "stored on the account");
@@ -472,9 +485,9 @@ function restore() {
     });
 
     // ---------- h ----------
-    const SCREENS = [["squads"], ["squad", { squad: null }], ["questlog", { sqTab: "events" }], ["questlog", { sqTab: "saved" }, "saved"], ["questlog", { sqTab: "requests" }, "requests"], ["profile"], ["settings", { setGroup: "privacy" }], ["stats"], ["badges"], ["taste"], ["taste-edit"], ["retune"], ["rewind", { rewindStep: 0 }], ["squad-new"]];
+    const SCREENS = [["squads"], ["squad", { squad: null }], ["questlog", { sqTab: "events" }], ["questlog", { sqTab: "saved" }, "saved"], ["questlog", { sqTab: "invites" }, "invites"], ["profile"], ["friends"], ["settings-home"], ["night-passport"], ["settings", { setGroup: "privacy" }], ["stats"], ["badges"], ["taste"], ["taste-edit"], ["retune"], ["rewind", { rewindStep: 0 }], ["squad-new"]];
     for (const [w, h] of [[375, 812], [1280, 800]]) {
-      await test(`h. ${w} px: no sideways overflow, nothing under the tab bar, 44 px targets, weights 400/500/600, 12 px text`, async () => {
+      await test(`h. ${w} px: no sideways overflow, nothing under the tab bar, 44 px targets, weights from the type scale, 12 px text`, async () => {
         const { ctx, page } = await phone({ width: w, height: h });
         const main = (await state(userId)).squads[0].id;
         const bad = [];
@@ -517,7 +530,7 @@ function restore() {
           if (r.overflow > 0 || r.inner > 0) bad.push(`${name}: ${Math.max(r.overflow, r.inner)}px sideways scroll`);
           if (r.under.length) bad.push(`${name}: under the tab bar ${r.under.join(", ")}`);
           if (r.small.length) bad.push(`${name}: small targets ${r.small.join("; ")}`);
-          if (!r.weights.every((x) => ["400", "500", "600"].includes(x))) bad.push(`${name}: weights ${r.weights.join(", ")}`);
+          if (!r.weights.every((x) => ["400", "500", "600", "700", "800"].includes(x))) bad.push(`${name}: weights ${r.weights.join(", ")}`); // 700/800: the redesign's titles
           if (r.tiny.length) bad.push(`${name}: tiny text ${r.tiny.join("; ")}`);
         }
         await ctx.close();
@@ -531,7 +544,7 @@ function restore() {
       const page = await ctx.newPage();
       await page.goto(base);
       await page.waitForFunction(() => window.SQ && SQ.d && !document.getElementById("boot"));
-      await go(page, "profile");
+      await go(page, "settings-home");
       await page.click('button[data-act="openSettings"][data-arg="privacy"]');
       const moving = await page.evaluate(() => document.getAnimations().some((a) => a.effect && a.effect.getKeyframes().some((k) => k.transform && k.transform !== "none" && k.transform !== "translateX(0)")));
       assert(!moving, "no transform animations with reduced motion");

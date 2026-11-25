@@ -2,11 +2,11 @@
 // request blocked so the light map stands in), at 375 and 1280 px:
 //  a. pins styled by list: Going (deep violet star), Saved (rose heart), Hosting (amber flag), Places (teal), each a
 //     44 px target, with their list in the label;
-//  b. the "Your places" panel: Going, Saved and Hosting with counts, a map key, rows that pick the pin, Escape closes
-//     it and focus goes back; no sideways overflow, AA contrast, weights 400/500/600 only;
+//  b. saved places live in Sidequests now (the redesign took the "Your places" pill off Discover): Saved lists the saved
+//     one, Your events the one you're going to, each row a 44 px target with AA contrast, and no sideways overflow;
 //  c. pins grouped when zoomed out (a numbered 44 px button that zooms in), single pins again when zoomed in;
 //  d. no pin in the lake: an event with lake (or outside-the-GTA) coordinates gets no pin but stays in the list;
-//  e. "you are here" only after the person shares their location, and the location is never stored.
+//  e. "you are here" only once the browser shares the location (live, by default once allowed), and it's never stored.
 //
 //   NODE_PATH=/opt/node-tools/node_modules node test/map-places.e2e.js
 //   MAP_SHOTS=/some/folder ... to keep screenshots
@@ -161,52 +161,19 @@ function contrast(a, b) {
         await ctx.close();
       });
 
-      await test(`b. ${width}px: the Your places panel lists Going, Saved and Hosting with counts, a key, and works by keyboard`, async () => {
+      await test(`b. ${width}px: no Your places pill on Discover; saved places are in Sidequests (Saved, and Your events for Going)`, async () => {
         const { ctx, page } = await phone({ width, height });
-        const chip = page.locator(".lx-yp-chip");
-        assert.match(await chip.getAttribute("aria-label"), /Your places: 3 going, saved or hosting/);
-        assert.strictEqual(await chip.getAttribute("aria-expanded"), "false");
-        await chip.click();
-        await page.waitForSelector("#lx-yp");
-        assert.strictEqual(await page.evaluate(() => document.activeElement && document.activeElement.id), "lx-yp", "focus moves into the panel");
-        const heads = await page.$$eval(".yp-h", (hs) => hs.map((h) => h.textContent.replace(/\s+/g, " ").trim()));
-        assert.deepStrictEqual(heads, ["Going1 place", "Saved1 place", "Hosting1 place"]);
-        const rows = await page.$$eval(".yp-row", (rs) => rs.map((r) => ({ t: r.querySelector(".yp-t").textContent, h: r.getBoundingClientRect().height })));
-        assert.deepStrictEqual(rows.map((r) => r.t), [GO.title, SV.title, HO.title]);
-        assert(rows.every((r) => r.h >= 44), "rows are 44 px targets");
-        const keys = await page.$$eval(".yp-key", (ks) => ks.map((k) => k.textContent.trim()));
-        assert.deepStrictEqual(keys, ["Going", "Saved", "Hosting", "Events", "Places"], "a clear map key");
-        // Inside the viewport, no sideways scroll, AA contrast, weights 400/500/600
-        const box = await page.$eval("#lx-yp", (p) => { const r = p.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; });
-        assert(box.l >= 0 && box.r <= width && box.t >= 0 && box.b <= height, JSON.stringify(box));
+        assert(!(await page.$(".lx-yp-chip, #lx-yp, .lx-loc")), "no Your places or location pill on Discover");
+        await page.click('nav.tabs .tab:has-text("Sidequests")');
+        await page.waitForSelector(".tb-seg");
+        assert(await page.isVisible(`.sq-wallet [data-arg="${GO.id}"]`), "Going is in Your events");
+        await page.click('.tb-seg button:has-text("Saved")');
+        await page.waitForFunction((t) => document.querySelector(".sq-wallet").textContent.includes(t), SV.title);
+        const row = await page.$eval(`.sq-wallet button[data-act="openQuest"][data-arg="${SV.id}"]`, (b) => { const r = b.getBoundingClientRect(); const card = b.closest(".tb-card"); return { h: r.height, fg: getComputedStyle(b.querySelector(".tb-t14")).color, bg: getComputedStyle(card).backgroundColor }; });
+        assert(row.h >= 44, `the saved row is a 44 px target (${row.h})`);
+        assert(contrast(row.fg, row.bg) >= 4.5, `text contrast ${contrast(row.fg, row.bg).toFixed(2)}`);
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "no sideways overflow");
-        const colours = await page.$$eval("#lx-yp .yp-t, #lx-yp .yp-s, #lx-yp .yp-title, #lx-yp .yp-key, #lx-yp .yp-n", (els) => els.map((el) => ({ fg: getComputedStyle(el).color, w: getComputedStyle(el).fontWeight })));
-        const panelBg = await page.$eval("#lx-yp", (p) => getComputedStyle(p).backgroundColor);
-        for (const c of colours) {
-          assert(contrast(c.fg, panelBg) >= 4.5, `text contrast ${contrast(c.fg, panelBg).toFixed(2)} (${c.fg} on ${panelBg})`);
-          assert(["400", "500", "600"].includes(c.w), `weight ${c.w}`);
-        }
-        for (const sel of [".yp-close", ".yp-show", ".lx-yp-chip"]) {
-          const r = await page.$eval(sel, (b) => b.getBoundingClientRect());
-          assert(r.width >= 44 && r.height >= 44, `${sel} is ${r.width}x${r.height}`);
-        }
-        await page.screenshot({ path: path.join(SHOTS, `your-places-${width}.png`) });
-        // "Hidden on map" hides the list pins; showing them again brings them back
-        await page.click(".yp-show");
-        assert.strictEqual(await page.locator(".map-pin2.yp").count(), 0);
-        await page.click(".yp-show");
-        assert.strictEqual(await page.locator(".map-pin2.yp").count(), 3);
-        // Escape closes it and focus goes back to the chip
-        await page.focus("#lx-yp");
-        await page.keyboard.press("Escape");
-        await page.waitForSelector("#lx-yp", { state: "detached" });
-        assert(await page.evaluate(() => document.activeElement && document.activeElement.classList.contains("lx-yp-chip")), "focus back on the chip");
-        // A row picks its pin
-        await page.click(".lx-yp-chip");
-        await page.waitForSelector("#lx-yp");
-        await page.click(`.yp-row[data-arg="e${SV.id}"]`);
-        await page.waitForSelector(`.map-pin2.yp.saved.on`);
-        assert(!(await page.$("#lx-yp")), "the panel closed");
+        await page.screenshot({ path: path.join(SHOTS, `saved-${width}.png`) });
         await ctx.close();
       });
     }
@@ -214,6 +181,8 @@ function contrast(a, b) {
     await test("c. Pins are grouped when zoomed out, and single again when zoomed in", async () => {
       const { ctx, page } = await phone();
       await page.waitForSelector(".map-pin2.pl", { timeout: 10000 });
+      await page.evaluate(() => SQ.lx.setStop("peek")); // drag the sheet down for the map
+      await page.waitForTimeout(400);
       assert.strictEqual(await page.locator(".map-cluster").count(), 0, "no groups at the default zoom");
       await page.evaluate(() => SQ.mapJump("discover", { lat: 43.66, lng: -79.39, zoom: 10 }));
       await page.waitForSelector(".map-cluster");
@@ -239,6 +208,7 @@ function contrast(a, b) {
         const mk = (id, title, lat, lng) => ({ id, title, startsAt: soon, date: "Today", neighbourhood: "Harbourfront", area: "Downtown", venue: { name: "Somewhere", address: "N/A", lat, lng }, price: 0, priceNote: "Free", vibes: ["Live music"], tags: [], description: "", going: 0, friends: [], reviews: [], travel: { from: {} } });
         SQ.d.events.unshift(mk(990001, "Wet Gig", 43.6, -79.38), mk(990002, "Plus Code Picnic", 43.5747, -79.3498), mk(990003, "Buffalo Show", 42.88, -78.87), mk(990004, "No Pin Night", null, null));
         SQ.d.user.feed = null; // this week's list, soonest first, so the new ones are at the top
+        SQ.lx.state().tab = "events"; // the sheet's Events pill: every event, not just the For you collections
         SQ.render();
         const pins = [...document.querySelectorAll("#screen .map-pin2, #screen .map-cluster")].map((b) => [+b.dataset.lat, +b.dataset.lng, b.getAttribute("aria-label")]);
         const list = document.querySelector("#lx-sheet .lx-list").textContent;
@@ -252,18 +222,27 @@ function contrast(a, b) {
       await ctx.close();
     });
 
-    await test("e. 'You are here' only after sharing, and the location isn't stored (gone after a reload)", async () => {
+    await test("e. 'You are here' only once the browser shares the location (live once allowed), and it isn't stored", async () => {
       const { ctx, page } = await phone({ permissions: [], geolocation: { latitude: 43.65468, longitude: -79.40061 } });
       assert(!(await page.$(".map-you")), "no 'you' mark before sharing");
       await ctx.grantPermissions(["geolocation"]);
-      await page.click(".lx-loc");
+      await page.click(".lx-me");
       await page.waitForSelector(".map-you", { timeout: 8000 });
       const stored = await page.evaluate(() => JSON.stringify({ s: { ...sessionStorage }, l: { ...localStorage } }));
       assert(!/43\.65|79\.4/.test(stored), `no location in storage: ${stored.slice(0, 200)}`);
+      // Allowed in the browser: the next visit uses the live location again, with no prompt, and still stores nothing
       await page.reload();
       await page.waitForFunction(() => document.querySelectorAll("#lx-sheet .lx-card").length > 0 && !document.getElementById("boot"), null, { timeout: 20000 });
-      assert(!(await page.$(".map-you")), "after a reload there's no 'you' mark until they share again");
-      assert.match(await page.textContent(".lx-loc"), /Downtown Toronto/);
+      await page.waitForSelector(".map-you", { timeout: 8000 });
+      const again = await page.evaluate(() => JSON.stringify({ s: { ...sessionStorage }, l: { ...localStorage } }));
+      assert(!/43\.65|79\.4/.test(again), "still nothing stored");
+      // Not allowed any more: no mark, and the chosen area (downtown here) instead
+      await ctx.clearPermissions();
+      await page.reload();
+      await page.waitForFunction(() => document.querySelectorAll("#lx-sheet .lx-card").length > 0 && !document.getElementById("boot"), null, { timeout: 20000 });
+      await page.waitForTimeout(600);
+      assert(!(await page.$(".map-you")), "without permission there's no 'you' mark until they share again");
+      assert.match(await page.textContent(".lx-where"), /Downtown Toronto/);
       await ctx.close();
     });
   } finally {

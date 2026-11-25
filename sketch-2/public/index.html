@@ -14,6 +14,8 @@
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" media="print" onload="this.media='all'" />
   <link rel="stylesheet" href="./styles.css" />
   <link rel="stylesheet" href="./tabs.css" />
+  <!-- The redesign's look: duotone photos, ticket and place posters, match rings, the tabs' new layouts -->
+  <link rel="stylesheet" href="./redesign.css" />
   <!-- Start downloading the listings straight away, alongside the scripts -->
   <link rel="preload" href="/api/events" as="fetch" crossorigin="anonymous" />
   <style>
@@ -101,6 +103,10 @@
       };
     })();
   </script>
+  <!-- Every photo is shown in violet duotone (styles.css --duo): greys mapped from the base #13101b to the accent #c2a5f6 -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <filter id="duoViolet" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncR type="table" tableValues="0.075 0.761"/><feFuncG type="table" tableValues="0.063 0.647"/><feFuncB type="table" tableValues="0.106 0.965"/></feComponentTransfer></filter>
+  </svg>
   <div class="shell">
     <!-- Demo controls: a floating panel on a tablet or desktop, opened from its button. Hidden on a phone. -->
     <button type="button" class="side-toggle" id="side-toggle" aria-expanded="false" aria-controls="side" aria-label="Sketch controls"><span>Sketch controls</span></button>

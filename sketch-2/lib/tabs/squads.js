@@ -11,6 +11,7 @@ const discover = require("../search/discover");
 const DAY = 86400000;
 const MAX_SQUADS = 12;
 const MAX_MEMBERS = 11;
+const ONLINE_MS = 30 * 60000;
 
 const store = (db) => (db.data.squads = db.data.squads || {});
 // Every squad this person is in: their first party, then the ones they made or were added to
@@ -103,6 +104,10 @@ function view(db, user, { people, findEvent, isOver, now = Date.now(), calls = [
     const chat = (s.chat || []).map((m) => ({ from: m.from === myName ? "You" : String(m.from).startsWith("u:") ? nameOf(m.from) : m.from, text: m.text, time: m.time }));
     const mineAt = [...(s.chat || [])].reverse().find((m) => m.from === myName);
     const fresh = (s.chat || []).filter((m) => m.from !== myName && m.from !== "Sidequest" && (!mineAt || m.time > mineAt.time)).length;
+    // Who's around: on the squad's live call, or wrote in its chat in the last ONLINE_MS (activity only, no tracking)
+    const live = liveFor(s, user, others, calls);
+    const online = [...new Set([...(live ? live.names : []), ...(s.chat || []).filter((m) => m.from !== myName && m.from !== "Sidequest" && now - Date.parse(m.time) < ONLINE_MS).map((m) => (String(m.from).startsWith("u:") ? nameOf(m.from) : m.from))])].filter((n) => names.includes(n));
+    const lastAt = (s.chat || []).reduce((t, m) => Math.max(t, Date.parse(m.time) || 0), 0);
     return {
       id: s.id,
       main: s === db.data.parties[user.id],
@@ -121,7 +126,9 @@ function view(db, user, { people, findEvent, isOver, now = Date.now(), calls = [
       chat: chat.slice(-4),
       fresh,
       createdAt: s.createdAt || null,
-      live: liveFor(s, user, others, calls), // { id, on, names, startedAt } while a call is going
+      live, // { id, on, names, startedAt } while a call is going
+      online,
+      lastAt: lastAt ? new Date(lastAt).toISOString() : null,
     };
   });
 }

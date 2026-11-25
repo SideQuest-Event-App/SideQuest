@@ -141,6 +141,16 @@
     U().friendsPage = { q: "", found: null, searched: "" };
     return "friends";
   };
+  // "+ Add Sidequesters": searches everyone on SideQuest for what's typed, or asks for a name first
+  A.addSidequesters = async () => {
+    const f = U().friendsPage;
+    if (!f.q.trim()) {
+      const i = document.querySelector(".sqr-search input");
+      if (i) setTimeout(() => i.focus());
+      return toast("Type a name, @username, email or phone, then tap Add Sidequesters.");
+    }
+    return A.findPeople();
+  };
   A.findPeople = async () => {
     const f = U().friendsPage;
     if (!f.q.trim()) return toast("Type a name, @username, email or phone first.");
@@ -1267,5 +1277,5 @@
     if (/^https:\/\//.test(url)) window.open(url, "_blank", "noopener");
   };
 
-  SQ.actions = A;
+  SQ.actions = Object.assign(A, SQ.actions || {}); // screens defined before this file may have added their own
 })();

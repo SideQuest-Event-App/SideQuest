@@ -230,6 +230,34 @@ const stableId = (source, id) => parseInt(crypto.createHash("md5").update(`${sou
 
 const NA = "N/A"; // shown wherever a listing doesn't say
 
+// ---------- Listing cleanup (every screen reads these fields) ----------
+// A host that isn't one: ticket sites fill the field with placeholders ("PROMOTER NOT DEFINED"). Those count as no host.
+const PLACEHOLDER = /^(n\/?a|none|null|undefined|unknown|tba|tbd|tbc|-+|\.+|promoter( not defined| unknown| tbd)?|not (defined|specified|available|provided)|no (promoter|organi[sz]er|host)( (defined|listed|specified))?|organi[sz]er( not defined)?|various|default|test)$/i;
+const isPlaceholder = (s) => !String(s || "").trim() || PLACEHOLDER.test(String(s).trim().replace(/[\s_]+/g, " "));
+const hostOf = (s) => (isPlaceholder(decode(s)) ? NA : decode(s).replace(/\s+/g, " ").trim());
+// ALL-CAPS descriptions read as shouting: written in sentence case (a few known acronyms, like DJ or TIFF, stay)
+function calmCase(s) {
+  const text = String(s || "");
+  const letters = text.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 20 || letters.replace(/[^A-Z]/g, "").length / letters.length < 0.7) return text;
+  return text.toLowerCase()
+    .replace(/(^|[.!?]\s+|\n\s*)([a-z])/g, (m, a, c) => a + c.toUpperCase())
+    .replace(/\b(dj|djs|tiff|lgbtq\+?|rnb|edm|ago|rom|uk|usa|nyc|ttc|i)\b/g, (w) => w.toUpperCase());
+}
+// Category tags from ticket sites that say nothing ("Undefined", "Miscellaneous", "Other")
+const JUNK_TAG = /^(undefined|null|none|n\/?a|other|others|misc|miscellaneous|general|group|event|events|default|unknown|tba|tbd)$/i;
+const cleanTags = (tags) => [...new Set((tags || []).map((t) => String(t).toLowerCase().trim()).filter((t) => t && !JUNK_TAG.test(t)))];
+// The same cleanup for a listing already in the database (the app runs it on every event it serves)
+function cleanListing(e) {
+  if (!e || typeof e !== "object") return e;
+  const out = { ...e };
+  if (out.organizer) out.organizer = { ...out.organizer, name: hostOf(out.organizer.name) };
+  if (out.description && out.description !== NA) out.description = calmCase(out.description);
+  if (Array.isArray(out.tags)) out.tags = cleanTags(out.tags);
+  if (out.priceNote && isPlaceholder(out.priceNote)) out.priceNote = NA;
+  return out;
+}
+
 // raw: { source, sourceId, url, ticketUrl?, title, startsAt, endsAt, runsUntil?, venue: {name, address, lat, lng, city}, price, priceHigh, priceNote, description, categories: [], organizer, image }
 // Every in-person GTA listing is kept except the off-topic ones in EXCLUDE; listings that match none
 // of our vibes get the scene "Other". Anything the listing doesn't give is "N/A", never made up.
@@ -274,14 +302,14 @@ function toEvent(raw) {
     scene: vibes.length ? SCENE_OF[vibes[0]] : "Other",
     price,
     priceNote: priceNote || (price == null ? NA : price === 0 ? "Free" : raw.priceHigh && raw.priceHigh > price ? `From $${price}` : `$${price}`),
-    description: description || NA,
-    tags: [...new Set([...(raw.categories || []).map((c) => String(c).toLowerCase()), ...vibes.map((v) => v.toLowerCase())])].slice(0, 8),
+    description: calmCase(description) || NA,
+    tags: cleanTags([...(raw.categories || []), ...vibes]).slice(0, 8),
     vibes,
     rating: null,
     reviews: [],
     going: 0,
     attendees: [],
-    organizer: { name: decode(raw.organizer || "").trim() || NA, rating: null, review: "" },
+    organizer: { name: hostOf(raw.organizer || ""), rating: null, review: "" },
     friends: [],
     travel: tr,
     ticketLink: raw.ticketUrl || raw.url,
@@ -311,4 +339,4 @@ const VIBE_NAMES = new Set(VIBE_RULES.map(([v]) => v.toLowerCase()));
 // as a category ("comedy", "jazz", "dance" and "electronic" are real Ticketmaster and Eventbrite categories, so they stay)
 const OUR_TAGS = new Set([...[...VIBE_NAMES].filter((v) => /\s/.test(v)), "photography", "outdoors", "climbing", "wellness", "markets"]);
 
-module.exports = { toEvent, stripHtml, trimText, km, travel, place, vibesOf, retag, keepListing, dropReason, VIBE_RULES, SCENE_OF, NA };
+module.exports = { cleanListing, isPlaceholder, calmCase, cleanTags, toEvent, stripHtml, trimText, km, travel, place, vibesOf, retag, keepListing, dropReason, VIBE_RULES, SCENE_OF, NA };

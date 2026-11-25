@@ -4,11 +4,12 @@
 //  a. A fast load: the loader is visible for no more than 300 ms, and the map is the first screen.
 //  b. A slow load (the API held back 3 s): after 1 s the loader says what's happening, then fades out.
 //  c. Reduced motion: a still loader.
-//  d. No location prompt on load; granting it after a tap re-centres the map and shows "You · <neighbourhood>".
-//  e. Event pins and place pins differ in shape and label; the legend chips toggle them.
-//  f. The cards: event (ticket, "Sat · starts 7:30 PM", price, See tickets) and place (hours, price,
-//     Directions, Google Maps attribution).
-//  g. The sheet's stops work by drag and by the List and Map buttons, and the last stop is remembered.
+//  d. No location prompt on load; granting it after a tap on "my location" re-centres the map and the sheet says
+//     "You · <neighbourhood>".
+//  e. Event pins and place pins differ in shape and label; the sheet's For you / Events / Places pills filter them.
+//  f. The posters: event tickets (when, match ring, area · price) and place tags (hours, area · price); a tapped place
+//     shows its card (hours, price, Directions, Google Maps attribution) with the map.
+//  g. The sheet's three heights work by drag and from the keyboard, and the last one is remembered.
 //  h. Plan opens /sk; Add event is a labelled button on Sidequests.
 //  i. At 375 and 1280 px: no sideways overflow, nothing under the tab bar, 44 px targets, weights 400/500/600 only.
 //
@@ -263,16 +264,16 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await ready(page);
       await wait(800);
       assert.strictEqual(await page.evaluate(() => window.__geoAsks), 0, "nothing asked on load");
-      assert.match(await page.textContent(".lx-loc"), /Downtown Toronto · change/);
+      assert.strictEqual((await page.textContent(".lx-where")).trim(), "Downtown Toronto", "no chosen area: downtown");
       const before = await page.evaluate(() => SQ.mapCenter("discover"));
       assert(Math.abs(before.lat - 43.6532) < 0.01 && Math.abs(before.lng + 79.3832) < 0.01, `starts downtown: ${JSON.stringify(before)}`);
       await ctx.grantPermissions(["geolocation"]);
-      await page.click(".lx-loc");
-      await page.waitForFunction(() => /You · /.test(document.querySelector(".lx-loc").textContent), null, { timeout: 8000 });
+      await page.click(".lx-me");
+      await page.waitForFunction(() => /You · /.test(document.querySelector(".lx-where").textContent), null, { timeout: 8000 });
       assert.strictEqual(await page.evaluate(() => window.__geoAsks), 1);
       const named = require(path.join(ROOT, "lib", "launch")).where(43.65, -79.4).label; // Sketch 1's place() on the rounded point
       assert(named && named !== "Outside Toronto", named);
-      assert.strictEqual((await page.textContent(".lx-loc")).trim(), `You · ${named}`);
+      assert.strictEqual((await page.textContent(".lx-where")).trim(), `You · ${named}`);
       const after = await page.evaluate(() => SQ.mapCenter("discover"));
       assert(Math.abs(after.lat - 43.65) < 0.001 && Math.abs(after.lng + 79.4) < 0.001, `re-centred on the rounded point: ${JSON.stringify(after)}`);
       assert(await page.isVisible(".map-you"), "a 'you' mark is on the map");
@@ -281,18 +282,19 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await ctx.close();
     });
 
-    await test("d. Location denied: the map stays downtown and says 'Downtown Toronto · change'", async () => {
+    await test("d. Location denied: the map stays on the chosen area (downtown with none) and says so", async () => {
       const { ctx, page } = await phone({ init: () => { navigator.geolocation.getCurrentPosition = (ok, fail) => setTimeout(() => fail({ code: 1, message: "denied" }), 100); } });
       await page.goto(base);
       await ready(page);
-      await page.click(".lx-loc");
+      await page.click(".lx-me");
       await page.waitForSelector(".toast.show");
-      assert.match(await page.textContent(".lx-loc"), /Downtown Toronto · change/);
+      assert.match(await page.textContent(".toast"), /shows Downtown Toronto/);
+      assert.strictEqual((await page.textContent(".lx-where")).trim(), "Downtown Toronto");
       await ctx.close();
     });
 
     // ---------- e ----------
-    await test("e. Event pins (violet star) and place pins (teal dot) differ in shape and label; the legend chips filter them", async () => {
+    await test("e. Event pins (violet star) and place pins (teal dot) differ in shape and label; the For you / Events / Places pills filter them", async () => {
       const { ctx, page } = await phone();
       const searches = google.length;
       await page.goto(base);
@@ -310,15 +312,14 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       const n = async () => [await page.locator(".map-pin2.ev").count(), await page.locator(".map-pin2.pl").count()];
       const [e0, p0] = await n();
       assert(e0 > 0 && p0 === 3, `pins: ${e0} events, ${p0} places`);
-      await page.click('.lx-key.ev');
-      assert.deepStrictEqual(await n(), [0, 3], "Events off");
-      assert.strictEqual(await page.getAttribute(".lx-key.ev", "aria-pressed"), "false");
-      await page.click('.lx-key.pl');
-      assert.deepStrictEqual(await n(), [0, 0], "both off");
-      await page.click('.lx-key.ev');
-      await page.click('.lx-key.pl');
-      assert.deepStrictEqual(await n(), [e0, 3], "both back");
-      await page.click('.lx-loc'); // even a new location doesn't search again this session
+      await page.click('.dx-seg [data-arg="places"]');
+      assert.deepStrictEqual(await n(), [0, 3], "Places: place pins only");
+      assert.strictEqual(await page.getAttribute('.dx-seg [data-arg="places"]', "aria-pressed"), "true");
+      await page.click('.dx-seg [data-arg="events"]');
+      assert.deepStrictEqual(await n(), [e0, 0], "Events: event pins only");
+      await page.click('.dx-seg [data-arg="foryou"]');
+      assert.deepStrictEqual(await n(), [e0, 3], "For you: both");
+      await page.click('.lx-me'); // even a new location doesn't search again this session
       await wait(300);
       await page.evaluate(() => SQ.render());
       assert.strictEqual(google.length - searches, 1, "one Places search for the map session");
@@ -363,86 +364,100 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
     });
 
     // ---------- f ----------
-    await test("f. Cards: event and place details, links, and Google Maps attribution on places; two cards in view at 375 px", async () => {
+    await test("f. Posters: event tickets and place tags with their facts; a tapped place shows its card, Directions and the Google Maps attribution; two posters in view at 375 px", async () => {
       const { ctx, page } = await phone();
       await page.goto(base);
       await ready(page);
       await placesIn(page);
-      const ev = await page.$eval(".lx-cards .lx-card.ev", (c) => ({ text: c.innerText, link: c.querySelector("a.lx-link") && c.querySelector("a.lx-link").href, tag: c.querySelector(".kt.ev").innerText, icon: !!c.querySelector(".kt.ev svg") }));
-      assert.strictEqual(ev.tag.trim(), "Event");
-      assert(ev.icon, "ticket icon");
-      assert.match(ev.text, /(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today) · starts \d{1,2}(:\d\d)? (AM|PM)/);
-      assert.match(ev.text, /(\$\d+ ticket|Free|Price on the listing)/);
-      assert.match(ev.text, /See tickets/);
-      assert(ev.link && /^https?:/.test(ev.link), "See tickets links to the listing");
-      const pl = await page.$eval(".lx-cards .lx-card.pl", (c) => ({ text: c.innerText, link: c.querySelector("a.lx-link").href, tag: c.querySelector(".kt.pl").innerText, icon: !!c.querySelector(".kt.pl svg") }));
-      assert.strictEqual(pl.tag.trim(), "Place");
-      assert(pl.icon, "pin icon");
-      assert.match(pl.text, /Open until 1 AM · drop in any time/);
-      assert.match(pl.text, /\$ · about \$15 each/);
-      assert.match(pl.text, /Directions/);
-      assert.match(pl.text, /Place info from Google Maps/);
-      assert.match(pl.link, /^https:\/\/maps\.google\.com\//);
-      // Two cards fit side by side in the row
-      const fit = await page.$$eval(".lx-cards .lx-card", (cs) => cs.filter((c) => { const r = c.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }).length);
-      assert.strictEqual(fit, 2, `${fit} cards fully in view`);
-      // Cards work from the keyboard: Tab reaches the card's button and its link
-      await page.focus(".lx-cards .lx-card.ev .lx-main");
+      await page.waitForSelector(".dx-rail .lx-card.pl", { timeout: 10000 });
+      const ev = await page.$eval(".dx-rail .lx-card.ev", (c) => ({ text: c.innerText, ticket: c.classList.contains("ticket"), mask: getComputedStyle(c).maskImage || getComputedStyle(c).webkitMaskImage, ring: c.querySelector(".mring") && c.querySelector(".mring").getAttribute("aria-label"), badge: c.querySelector(".dx-badge").innerText, title: getComputedStyle(c.querySelector(".dx-t")) }));
+      assert(ev.ticket && /radial-gradient/.test(ev.mask), "events are tickets with notched sides");
+      assert.match(ev.badge, /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today)(, (Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today))* · \d{1,2}(:\d\d)? (AM|PM)$|^\d+ dates · from /, `when: ${ev.badge}`);
+      assert(!ev.ring || /^\d+% match$/.test(ev.ring), `match ring: ${ev.ring}`);
+      assert.strictEqual(ev.title.webkitLineClamp, "2", "titles wrap to two lines");
+      assert(!/N\/A|Price not listed/.test(ev.text), "no unknown price on the poster");
+      const pl = await page.$eval(".dx-rail .lx-card.pl", (c) => ({ text: c.innerText, radius: getComputedStyle(c).borderBottomRightRadius, other: getComputedStyle(c).borderTopLeftRadius }));
+      assert(parseFloat(pl.radius) > parseFloat(pl.other) * 2, `places have one big rounded corner (${pl.radius} vs ${pl.other})`);
+      assert.match(pl.text, /Till 1 AM/);
+      assert.match(pl.text, /\$/);
+      assert(await page.isVisible(".dx-rail ~ .dx-attr"), "Place info from Google Maps under a row with places");
+      // Two posters fit side by side in a row
+      const fit = await page.$eval(".dx-rail", (row) => [...row.querySelectorAll(".lx-card")].filter((c) => { const r = c.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }).length);
+      assert(fit >= 2, `${fit} posters fully in view`);
+      // From the keyboard: Tab goes from one poster to the next
+      await page.focus(".dx-rail .lx-card .lx-main");
       await page.keyboard.press("Tab");
-      assert.strictEqual(await page.evaluate(() => document.activeElement.className), "lx-link");
+      assert(await page.evaluate(() => document.activeElement.classList.contains("lx-main")), "Tab reaches the next poster");
+      // A place: the sheet drops to a peek, the map shows it, and its card has the details and the link
+      await page.click(".dx-rail .lx-card.pl .lx-main");
+      await page.waitForSelector(".lx-selwrap .lx-card.pl");
+      assert.strictEqual(await page.$eval(".disc-map.lx", (e) => e.dataset.stop), "peek");
+      const card = await page.$eval(".lx-selwrap .lx-card.pl", (c) => ({ text: c.innerText, link: c.querySelector("a.lx-link").href }));
+      assert.match(card.text, /Open until 1 AM · drop in any time/);
+      assert.match(card.text, /\$ · about \$15 each/);
+      assert.match(card.text, /Directions/);
+      assert.match(card.text, /Place info from Google Maps/);
+      assert.match(card.link, /^https:\/\/maps\.google\.com\//);
+      assert(await page.$(".map-pin2.pl.on"), "its pin is marked");
       await page.screenshot({ path: path.join(SHOTS, "landing-peek.png") });
       await ctx.close();
     });
 
     // ---------- g ----------
-    await test("g. Sheet: drag to half and full, List and Map buttons, and the last stop is remembered", async () => {
+    await test("g. Sheet: three heights (peek, half, full) by drag and keyboard, no List / Map switch, and the last height is remembered", async () => {
       const { ctx, page } = await phone();
       await page.goto(base);
       await ready(page);
       await placesIn(page);
       const stop = () => page.$eval(".disc-map.lx", (e) => e.dataset.stop);
       const top = () => page.$eval("#lx-sheet", (e) => Math.round(e.getBoundingClientRect().top));
-      assert.strictEqual(await stop(), "peek");
-      const t0 = await top();
-      // Drag the grabber up slowly to about the middle: half
-      const g = await page.$eval(".lx-grab", (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
-      const H = await page.$eval(".disc-map.lx", (e) => e.clientHeight);
-      await page.mouse.move(g[0], g[1]);
-      await page.mouse.down();
-      for (let i = 1; i <= 12; i++) { await page.mouse.move(g[0], g[1] - (i * (H * 0.55 - (H - t0))) / 12); await wait(30); }
-      await page.mouse.up();
-      await wait(450);
-      assert.strictEqual(await stop(), "half", "dragged to half");
+      assert.strictEqual(await stop(), "half", "opens at half: the list over the map");
+      assert(!(await page.$(".lx-view, .lx-views")), "no List / Map switch");
       assert(await page.isVisible(".lx-list .lx-card"), "the list shows at half");
-      assert(await page.isVisible(".disc-map.lx .map"), "the map is still in view at half");
-      await page.screenshot({ path: path.join(SHOTS, "landing-half.png") });
-      // Drag up again to the top: full
-      const g2 = await page.$eval(".lx-grab", (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
-      await page.mouse.move(g2[0], g2[1]);
-      await page.mouse.down();
-      for (let i = 1; i <= 12; i++) { await page.mouse.move(g2[0], g2[1] - (i * g2[1]) / 12); await wait(30); }
-      await page.mouse.up();
-      await wait(450);
-      assert.strictEqual(await stop(), "full", "dragged to full");
+      assert(await page.isVisible(".disc-map.lx .map"), "the map is in view at half");
+      const tHalf = await top();
+      const drag = async (toY) => {
+        const g = await page.$eval(".lx-grab", (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
+        await page.mouse.move(g[0], g[1]);
+        await page.mouse.down();
+        for (let i = 1; i <= 12; i++) { await page.mouse.move(g[0], g[1] + ((toY - g[1]) * i) / 12); await wait(30); }
+        await page.mouse.up();
+        await wait(450);
+      };
+      // Up for the list
+      await drag(20);
+      assert.strictEqual(await stop(), "full", "dragged up to full");
+      assert((await top()) < tHalf, "higher than half");
       await page.screenshot({ path: path.join(SHOTS, "landing-full.png") });
-      // The buttons
-      await page.click('.lx-view[data-lx-stop="peek"]');
-      await wait(400);
-      assert.strictEqual(await stop(), "peek", "Map button");
-      assert(Math.abs((await top()) - t0) <= 2, "back to the same peek height");
-      await page.click('.lx-view[data-lx-stop="full"]');
-      await wait(400);
-      assert.strictEqual(await stop(), "full", "List button");
+      // Down for the map
+      const H = await page.$eval(".disc-map.lx", (e) => e.getBoundingClientRect().bottom);
+      await drag(H - 10);
+      assert.strictEqual(await stop(), "peek", "dragged down to a peek");
+      assert(!(await page.isVisible(".lx-list .lx-card")), "the list is out of the way");
+      assert(await page.isVisible(".dx-seg"), "the pills stay at a peek");
+      const tPeek = await top();
+      assert(tPeek > tHalf, "lower than half");
       // The grabber from the keyboard
       await page.focus(".lx-grab");
+      await page.keyboard.press("ArrowUp");
+      await wait(350);
+      assert.strictEqual(await stop(), "half", "arrow up from peek is half");
+      assert(Math.abs((await top()) - tHalf) <= 2, "back to the same half height");
+      await page.keyboard.press("End");
+      await wait(350);
+      assert.strictEqual(await stop(), "full");
       await page.keyboard.press("ArrowDown");
       await wait(350);
       assert.strictEqual(await stop(), "half", "arrow down from full is half");
-      assert.strictEqual(await page.evaluate((u) => localStorage.getItem(`sq2.sheet.${u}`), userId), "half");
+      await page.keyboard.press("Home");
+      await wait(350);
+      assert.strictEqual(await stop(), "peek");
+      assert.strictEqual(await page.evaluate((u) => localStorage.getItem(`sq2.sheet.${u}`), userId), "peek");
       await page.reload();
-      await ready(page);
-      assert.strictEqual(await stop(), "half", "remembered after a reload");
-      await page.click('.lx-view[data-lx-stop="peek"]');
+      await page.waitForFunction(() => document.querySelectorAll("#lx-sheet .lx-card").length > 0 && !document.getElementById("boot"), null, { timeout: 20000 });
+      assert.strictEqual(await stop(), "peek", "remembered after a reload");
+      await page.keyboard.press("Tab");
+      await page.evaluate(() => SQ.lx.setStop("half"));
       await ctx.close();
     });
 
@@ -483,7 +498,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
 
     // ---------- i ----------
     for (const [w, h] of [[375, 812], [1280, 800]]) {
-      await test(`i. ${w} px: no sideways overflow, nothing under the tab bar, 44 px targets, weights 400/500/600, 12 px text`, async () => {
+      await test(`i. ${w} px: no sideways overflow, nothing under the tab bar, 44 px targets, weights from the type scale, 12 px text`, async () => {
         for (const stopAt of ["peek", "half", "full"]) {
           const { ctx, page } = await phone({ width: w, height: h, sheet: stopAt });
           await page.goto(base);
@@ -527,7 +542,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
           assert(r.overflow <= 0, `${stopAt}: page is ${r.overflow}px wider than the window`);
           assert.deepStrictEqual(r.under, [], `${stopAt}: under the tab bar`);
           assert.deepStrictEqual(r.small, [], `${stopAt}: targets under 44px`);
-          assert(r.weights.every((x) => ["400", "500", "600"].includes(x)), `${stopAt}: weights ${r.weights.join(", ")}`);
+          assert(r.weights.every((x) => ["400", "500", "600", "700", "800"].includes(x)), `${stopAt}: weights ${r.weights.join(", ")}`); // 700/800: the redesign's titles
           assert.deepStrictEqual(r.tiny, [], `${stopAt}: text under 12px`);
         }
       });
@@ -830,9 +845,9 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await page.click('nav.tabs .tab:has-text("Discover")');
       await ready(page);
       await wait(250);
-      const id = await page.$eval(".lx-cards .lx-card.ev .lx-main", (b) => b.dataset.arg);
+      const id = await page.$eval(".dx-rail .lx-card.ev .lx-main", (b) => b.dataset.arg);
       await watch();
-      await page.click(`.lx-cards .lx-main[data-arg="${id}"]`);
+      await page.click(`.dx-rail .lx-main[data-arg="${id}"]`);
       await wait(650);
       f = await page.evaluate(() => window.__nav);
       const push = f.filter((x) => xOf(x.sT) > 1);

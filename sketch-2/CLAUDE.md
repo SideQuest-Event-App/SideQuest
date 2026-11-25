@@ -21,12 +21,14 @@ Events come from `../sketch-1` (importer + seed). Node 22.
 - `server.js`: routes, `/api/act` actions, search (`apiSearch`), feed, places proxy.
 - `lib/db.js` storage · `lib/launch.js` map places (`nearby`, `forQuery`) · `lib/ai.js` matching.
 - `lib/search/`: `taste.js` (taste weights, fit), `rank.js` (MMR, wildcard), `discover.js` (For you order), `want.js`
-  (free-text wants like "Chinese skewers", relevance), `mixed.js` (events + places in one list).
+  (free-text wants like "Chinese skewers", relevance), `mixed.js` (events + places in one list), `foryou.js` (Discover's
+  For you vibe collections, `/api/foryou`).
 - `lib/sidekick/`: `rooms.js` (live call rooms, SSE, agent tools, picks; big), `plan.js` (slots, filtering, scoring, readiness),
   `places.js` (Google Places searches), `planflow.js` (Plan tab setup), `personas.js` / `talk.js` (spoken lines),
   `tts.js` (ElevenLabs line voice), `usage.js` (spending caps), `study.js` (A/B study, consent, deletion), `callside.js`.
 - `lib/tabs/`: Squads, Profile pages, settings, notifications.
-- `public/js/`: `app.js` (router, tabs), `screens-attendee.js` (Discover, search, event pages), `screens-tabs.js`
+- `public/js/`: `app.js` (router, tabs, `SQ.liveCall()` reading `localStorage["sk:live"]`), `screens-attendee.js` (Discover,
+  search, event pages, Your Sidequesters), `launch.js` (Discover's sheet, location, places), `screens-tabs.js`
   (Squads, Sidequests, Profile), `map.js`, `sidekick.js` (Plan flow + call screen; big), `study.js`.
 - `tools/elevenlabs-agents.js --update | --check`: pushes the agent prompts to ElevenLabs (key is proxy-injected in
   Claude sessions). `reference/elevenlabs-agents.json` is its snapshot.
