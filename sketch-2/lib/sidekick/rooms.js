@@ -20,6 +20,7 @@ const { track } = require("../analytics");
 const weather = require("../search/weather"); // context for the plan engine: rain or deep cold puts indoor picks first
 const rank = require("../search/rank"); // who-it's-for, crew match and the Wildcard on the picks
 const callside = require("./callside"); // signed-in people on a call: taste learning, call history, in-app invites
+const tts = require("./tts"); // POST /api/sk/tts: Sidekick's lines in the persona's ElevenLabs voice
 
 const rooms = new Map();
 const SUMMARY_FILE = path.join(__dirname, "..", "..", "data", "sidekick-summaries.jsonl");
@@ -1655,6 +1656,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
   try {
     if (req.method === "GET" && parts[2] === "nights") return sendJSON(res, 200, { nights: suggestNights(), ai: claude.available(), places: places.configured() && (await places.available()), voiceAgent: await agentReady() });
     if (parts[2] === "agent") return agentTool(req, res, parts[3], { readBody, sendJSON });
+    if (parts[2] === "tts") return tts.handle(req, res, { readBody, sendJSON }); // Sidekick's lines in the ElevenLabs voices
     // The person's saved call recaps (none from before "Delete call history"), and the event behind "Plan it"
     if (req.method === "GET" && parts[2] === "calls") return sendJSON(res, 200, { calls: callside.recaps(url.searchParams.get("user")) });
     if (req.method === "GET" && parts[2] === "pick") {

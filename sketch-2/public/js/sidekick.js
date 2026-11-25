@@ -69,6 +69,7 @@
     if (unlocked || !("speechSynthesis" in window)) return;
     unlocked = true;
     try { const u = new SpeechSynthesisUtterance(""); u.volume = 0; speechSynthesis.speak(u); } catch {}
+    Tts.unlock(); // and the audio element that plays Sidekick's ElevenLabs voice
   }
   for (const ev of ["touchend", "click", "keydown"]) document.addEventListener(ev, unlockAudio, { capture: true, passive: true });
 
@@ -382,16 +383,14 @@
     if (!seen) pfSpeak(d.intro, false);
   }
   // Spoken when the voice is on and the browser allows it (after a tap); otherwise it's the text and the orb
+  // In the persona's ElevenLabs voice; the phone's own voice only if that can't play
   function pfSpeak(text, asked) {
     const orb = document.getElementById("pfOrbI");
-    if (!("speechSynthesis" in window) || (!asked && (!aloud || !(navigator.userActivation && navigator.userActivation.hasBeenActive)))) return;
-    try {
-      const u = Voice.say(text, flow.data.persona === "friend" ? { slot: "friend", rate: 1.02, pitch: 1.04 } : { slot: "concierge", rate: 0.95, pitch: 1 });
-      if (orb) orb.classList.add("live");
-      const tail = u.chunks[u.chunks.length - 1];
-      tail.onend = () => orb && orb.classList.remove("live");
-      setTimeout(() => orb && orb.classList.remove("live"), 1500 + text.split(/\s+/).length * 500);
-    } catch {}
+    if (!asked && (!aloud || !(navigator.userActivation && navigator.userActivation.hasBeenActive))) return;
+    const persona = flow.data.persona === "friend" ? "friend" : "concierge";
+    const live = (on) => orb && orb.classList.toggle("live", on);
+    speakLine(text, persona, persona === "friend" ? { slot: "friend", rate: 1.02, pitch: 1.04 } : { slot: "concierge", rate: 0.95, pitch: 1 }, { onstart: () => live(true), onend: () => live(false) });
+    setTimeout(() => live(false), 1500 + text.split(/\s+/).length * 500);
   }
 
   // ----- Step 1: who's coming? A squad, friends on SideQuest, or a link you send yourself -----
@@ -1732,7 +1731,7 @@
     }
     if (t.closest("#mic")) return void (agent ? setAgentMuted(!agentMuted) : micOn ? stopMic() : startMic());
     if (t.closest("#kb")) { typing = !typing; closeOrb(!typing); renderDock(); if (typing) document.getElementById("line").focus(); return; }
-    if (t.closest("#aloud")) { aloud = !aloud; store.set("sk:aloud", aloud); renderDock(); if (!aloud && "speechSynthesis" in window) speechSynthesis.cancel(); return; }
+    if (t.closest("#aloud")) { aloud = !aloud; store.set("sk:aloud", aloud); renderDock(); if (!aloud) { Tts.stop(); if ("speechSynthesis" in window) speechSynthesis.cancel(); } return; }
     if (t.closest("#leave") || t.closest("#endCall")) {
       if (agent) stopAgent();
       if (view.me.planner) {
@@ -2236,9 +2235,8 @@
   let aloud = store.get("sk:aloud") !== false;
   let lastRead = null;
   function readAloud(tries = 0) {
-    if (!("speechSynthesis" in window)) return;
     // Barge-in: if anyone else starts talking while Sidekick is speaking, stop at once
-    if (speechSynthesis.speaking && view.people.some((p) => p.talking && p.id !== view.me.id)) speechSynthesis.cancel();
+    if (view.people.some((p) => p.talking && p.id !== view.me.id)) { if (Tts.speaking()) Tts.stop(); if ("speechSynthesis" in window && speechSynthesis.speaking) speechSynthesis.cancel(); }
     // Who reads aloud: the planner's phone (unless the voice agent is speaking there), and, when the crew
     // is in in-app audio, every phone in it, so remote friends hear Sidekick too
     const plannerReads = view.me.planner && !agent && !agentStarting;
@@ -2252,14 +2250,77 @@
     const over = view.people.some((p) => p.talking && p.spokeAt > last.at) || Boolean(interim.trim());
     if (over && tries < 8) return void setTimeout(() => readAloud(tries + 1), 400);
     lastRead = last.id;
-    const u = Voice.say(last.text, view.voice);
-    const tail = u.chunks[u.chunks.length - 1];
     let ended = false;
     const resume = () => { if (ended) return; ended = true; Audio.duck(false); if (paused) { paused = false; restartRec(150); } };
-    u.onstart = () => { Audio.duck(true); if (micOn) { paused = true; stopRec(); } }; // don't caption (or send) Sidekick's own voice
-    tail.onend = resume;
-    for (const c of u.chunks) c.onerror = resume;
-    setTimeout(resume, 2000 + Voice.speakable(last.text).split(/\s+/).length * 600); // some phones never fire onend
+    const start = () => { Audio.duck(true); if (micOn) { paused = true; stopRec(); } }; // don't caption (or send) Sidekick's own voice
+    speakLine(last.text, view.voice.slot, view.voice, { onstart: start, onend: resume });
+    setTimeout(resume, 6000 + Voice.speakable(last.text).split(/\s+/).length * 600); // some phones never fire the end
+  }
+
+  // ---------- Sidekick's ElevenLabs voices (POST /api/sk/tts) ----------
+  // Every spoken line plays in the persona's ElevenLabs voice (both study arms alike). Played through one audio
+  // element that the first tap unlocks (iPhones). If the line can't come (no key, the cap, a failure, a slow
+  // answer), the phone's own voice says it instead, quietly; after a cap or a missing key it stops asking.
+  // A few milliseconds of silence (a WAV built here), played on the first tap to unlock the audio element
+  const SILENT = (() => { const n = 160; const b = new Uint8Array(44 + n * 2); const v = new DataView(b.buffer); const w = (o, t) => [...t].forEach((c, i) => b[o + i] = c.charCodeAt(0)); w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVEfmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 16000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true); let s = ""; b.forEach((x) => (s += String.fromCharCode(x))); return `data:audio/wav;base64,${btoa(s)}`; })();
+  const Tts = {
+    el: null,
+    off: false,
+    urls: new Map(), // "persona|text" -> an object URL for audio already fetched on this phone
+    audio() {
+      if (!this.el) { this.el = new window.Audio(); this.el.setAttribute("playsinline", ""); this.el.preload = "auto"; }
+      return this.el;
+    },
+    unlock() { try { const a = this.audio(); a.src = SILENT; a.muted = true; const p = a.play(); if (p) p.then(() => { a.pause(); a.muted = false; }, () => { a.muted = false; }); } catch {} },
+    speaking() { return Boolean(this.el && !this.el.paused && !this.el.ended && this.el.src !== SILENT); },
+    stop() { if (this.el) { this.el.onended = this.el.onerror = null; this.el.pause(); if (this.done) { const d = this.done; this.done = null; d(); } } },
+    // Resolves true once the ElevenLabs audio started playing, false if the phone's voice should say it
+    async play(text, persona, { onstart, onend } = {}) {
+      if (this.off) return false;
+      const line = Voice.speakable(text);
+      const key = `${persona}|${line}`;
+      try {
+        let url = this.urls.get(key);
+        if (!url) {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 4000);
+          const r = await fetch("/api/sk/tts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: line, persona }), signal: ctrl.signal }).finally(() => clearTimeout(timer));
+          if (!r.ok) { if (r.status === 429 || r.status === 503) this.off = true; return false; }
+          if (!/audio/.test(r.headers.get("content-type") || "")) return false;
+          url = URL.createObjectURL(await r.blob());
+          this.urls.set(key, url);
+        }
+        this.stop();
+        if ("speechSynthesis" in window) speechSynthesis.cancel();
+        const a = this.audio();
+        a.muted = false;
+        a.src = url;
+        let finished = false;
+        const finish = () => { if (finished) return; finished = true; this.done = null; if (onend) onend(); };
+        this.done = finish;
+        a.onended = finish;
+        a.onerror = finish;
+        await a.play();
+        window.__skTts = (window.__skTts || 0) + 1; // lines played in the ElevenLabs voice (for the tests)
+        if (onstart) onstart();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  };
+  // One line: the ElevenLabs voice, or the phone's own voice when that can't play
+  function speakLine(text, persona, builtIn, { onstart, onend } = {}) {
+    return Tts.play(text, persona, { onstart, onend }).then((ok) => {
+      if (ok || !("speechSynthesis" in window)) { if (!ok && onend) onend(); return ok; }
+      try {
+        const u = Voice.say(text, builtIn);
+        const tail = u.chunks[u.chunks.length - 1];
+        if (onstart) u.onstart = onstart;
+        if (onend) { tail.onend = onend; for (const c of u.chunks) c.onerror = onend; }
+      } catch { if (onend) onend(); }
+      return false;
+    });
   }
 
   // ---------- Start ----------

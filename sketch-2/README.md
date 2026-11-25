@@ -49,6 +49,7 @@ Open `/sk` to start a planning call. Pick your nights, share the link, and frien
 - **The switch.** The dock shows "Natural voice on · Use the built-in voice". The choice is remembered on that phone. Study calls always use the built-in voice.
 - **Falls back quietly.** If the session can't start, drops, or the minute cap is reached, the call carries on with the built-in voice (one short note if it drops mid-call, nothing otherwise) and the unused minutes are given back. Each session reserves `ELEVENLABS_MAX_CALL_MINUTES` up front.
 - **The agents' settings live in code:** `node tools/elevenlabs-agents.js --update` updates both agents (prompt, client tools, a fast model with minimal reasoning, `normal` turn eagerness, speculative turns, interruptions on, privacy settings) and reads them back. It sets `eleven_flash_v2` on a new agent but keeps a voice and voice model you've since picked in the dashboard (set `ELEVENLABS_TTS_MODEL` to force one). `--check` only reads them back. `--create` makes new ones. Details: `reference/elevenlabs-agent-spec.md`.
+- **Every other spoken line uses the same voices.** The Plan intro, the confirmation, the progress lines and read-aloud when the agent isn't running come from ElevenLabs text-to-speech (`POST /api/sk/tts`, `lib/sidekick/tts.js`): each persona's voice (`ELEVENLABS_VOICE_FRIEND` / `ELEVENLABS_VOICE_CONCIERGE` override the defaults), `eleven_flash_v2`, repeated lines served from memory. Characters are metered (`elevenlabs_tts_chars`: 10,000 a month stopping at 80%, 2,000 a day; `ELEVENLABS_TTS_CHARS_PER_MONTH`, `ELEVENLABS_TTS_DAILY_CHARS`). With no key, at the cap or on a failure, the phone's own voice says the line instead. Both study arms get the ElevenLabs voices.
 
 **The built-in voice, quicker:** when someone says "Sidekick, …", Sidekick answers after a 0.4 s pause instead of 0.9 s, and skips the 5 s gap between its lines. Anyone who keeps talking pushes the answer back, so it still never cuts in. Replies are read sentence by sentence, so the first sentence starts straight away.
 
@@ -80,6 +81,7 @@ node test/sidekick-study.js             # the voice A/B study, end to end, with 
 node test/sidekick-voice.js             # the ElevenLabs agent leading (fake SDK in Chromium), fallbacks, built-in voice timing, agent settings
 node test/sidekick-thinking.js          # "Finding your two picks": live steps, progress lines, the 12 s fallback (fake slow AI; needs Playwright)
 node test/call-ui.e2e.js                # the slim call (mic, orb, leave), the orb sheet, "I've got everything", Plan it, deadlines, invites (needs Playwright)
+node test/sidekick-tts.js               # Sidekick's lines in the ElevenLabs voices: voice per persona, cache, the characters cap, falling back (fake ElevenLabs)
 ```
 
 ### How to test with friends
