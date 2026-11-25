@@ -9,7 +9,7 @@
 //  f. The cards: event (ticket, "Sat · starts 7:30 PM", price, See tickets) and place (hours, price,
 //     Directions, Google Maps attribution).
 //  g. The sheet's stops work by drag and by the List and Map buttons, and the last stop is remembered.
-//  h. Plan opens /sk; Add Event is reachable from Sidequests.
+//  h. Plan opens /sk; Add event is a labelled button on Sidequests.
 //  i. At 375 and 1280 px: no sideways overflow, nothing under the tab bar, 44 px targets, weights 400/500/600 only.
 //
 // The opening flow (designs FL1, FL2, AN1 option C) and the loading system (AN2), the "flow" checks:
@@ -450,12 +450,12 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
     });
 
     // ---------- h ----------
-    await test("h. Tab bar: Discover, Community, Plan, Sidequests, Profile; Plan opens /sk; Add Event is the + on Sidequests", async () => {
+    await test("h. Tab bar: Discover, Squads, Plan, Sidequests, Profile; Plan opens /sk; Add event is a labelled button on Sidequests", async () => {
       const { ctx, page } = await phone();
       await page.goto(base);
       await ready(page);
       const tabs = await page.$$eval("nav.tabs .tab", (ts) => ts.map((t) => t.textContent.trim()));
-      assert.deepStrictEqual(tabs, ["Discover", "Community", "Plan", "Sidequests", "Profile"]);
+      assert.deepStrictEqual(tabs, ["Discover", "Squads", "Plan", "Sidequests", "Profile"]);
       assert(!(await page.$('button:text-is("For you")')), "the For you / Map toggle is gone");
       assert(await page.$(".lx .search input"), "search is kept");
       assert(await page.$('.lx .search [data-go="filters"]'), "filters are kept");
@@ -464,10 +464,9 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await page.goto(base);
       await ready(page);
       await page.click('nav.tabs .tab:has-text("Sidequests")');
-      await page.click('[data-go="requests"]');
-      await page.waitForSelector("text=Found an event? Add it to Sidequest");
-      assert.strictEqual(await page.evaluate(() => SQ.u.screen), "requests");
       assert.strictEqual(await page.$eval("nav.tabs .tab.on", (t) => t.textContent.trim()), "Sidequests");
+      await page.click('.tb-head button:has-text("Add event")');
+      await page.waitForFunction(() => SQ.u.screen === "add-event");
       await ctx.close();
     });
 
@@ -643,7 +642,8 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await tab.goto(base);
       await question(tab);
       // Exit the demo: the start page, with "Switch to demo / testing", which asks again
-      await page.click('nav.tabs .tab:has-text("Exit demo")');
+      await page.click('nav.tabs .tab:has-text("Profile")'); // the demo's Exit is on Profile, under the same five tabs
+      await page.click('.pf-bottom button:has-text("Exit demo")');
       await page.waitForSelector(".mode-switch");
       await page.reload();
       await page.waitForSelector(".mode-switch"); // signed out on purpose stays signed out
@@ -738,7 +738,8 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
         const maxScale = Math.max(...z.filter((f) => f.scale).map((f) => f.scale));
         const end = z.find((f) => !f.boot && f.screen === "discover");
         const flying = z.filter((f) => f.boot && f.pins.some(moved));
-        const pinPath = new Set(flying.map((f) => f.pins[0]));
+        // Pins off the screen don't fly, so look at whichever of the first eight moved the most (not just the first in the page)
+        const pinPath = { size: Math.max(0, ...[0, 1, 2, 3, 4, 5, 6, 7].map((k) => new Set(flying.map((f) => f.pins[k]).filter(Boolean)).size)) };
         console.log(`      lights to ${maxScale.toFixed(2)}x; pins moving in ${flying.length} frames; on the map at ${end ? Math.round(end.t) : "?"} ms (${took} ms by the clock)`);
         assert(maxScale > 1.5, `lights scaled ${maxScale}`);
         assert(flying.length >= 3 && pinPath.size >= 3, "the pins moved (their transforms changed frame to frame)");
@@ -805,14 +806,14 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       const watch = () => page.evaluate(() => { window.__nav = []; const t0 = performance.now(); const tick = () => { const g = document.querySelector(".nav-ghost"); const s = document.querySelector("#screen > .screen"); window.__nav.push({ t: performance.now() - t0, ghost: g ? g.className : null, gOp: g ? Number(getComputedStyle(g).opacity) : null, gT: g ? getComputedStyle(g).transform : null, sT: s ? getComputedStyle(s).transform : null }); if (performance.now() - t0 < 600) requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
       const xOf = (t) => { const m = /matrix\(([^)]+)\)/.exec(t || ""); return m ? Number(m[1].split(",")[4]) : 0; };
       await watch();
-      await page.click('nav.tabs .tab:has-text("Community")');
+      await page.click('nav.tabs .tab:has-text("Squads")');
       await wait(650);
       let f = await page.evaluate(() => window.__nav);
       const fade = f.filter((x) => x.ghost && /fade/.test(x.ghost));
       assert(fade.some((x) => x.gOp > 0.05 && x.gOp < 0.95), "the old tab fades out over the new one");
       assert(f.every((x) => !moved(x.gT) && !moved(x.sT)), "no slide between tabs");
       assert(Math.max(...fade.map((x) => x.t)) < 260, "about 150 ms");
-      assert.strictEqual(await page.evaluate(() => SQ.u.screen), "parties");
+      assert.strictEqual(await page.evaluate(() => SQ.u.screen), "squads");
       // Into a sidequest: it slides in from the right
       await page.click('nav.tabs .tab:has-text("Discover")');
       await ready(page);
@@ -1037,7 +1038,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await page.click('.mode-pick[data-pick="demo"]');
       await mapUp(page);
       assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.demo), true);
-      assert(await page.$('nav.tabs .tab:has-text("Exit demo")'), "Exit demo is kept");
+      assert(await page.evaluate(() => SQ.screens.profile.render().includes("Exit demo")), "Exit demo is kept (on Profile)");
       // A restart (the demo account forgotten), then a fresh tab: Demoing still works
       forgetDemo();
       const tab = await ctx.newPage();
