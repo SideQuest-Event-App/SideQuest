@@ -129,6 +129,11 @@ window.SQ = window.SQ || {};
     const t = matchTier(pct);
     return `<span class="match ${t} ${cls}"><svg class="ic xs" viewBox="0 0 14 14" fill="none" aria-hidden="true">${TIER[t][1]}</svg>${TIER[t][0]}</span>`;
   };
+  // The match ring (the redesign's "92" in a ring, in place of the Strong / Close words): the ring fills to the match
+  const matchRing = (pct, cls = "") => {
+    const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+    return `<span class="mring ${matchTier(p)} ${cls}" style="--p:${p}" role="img" aria-label="${p}% match"><b aria-hidden="true">${p}</b></span>`;
+  };
 
   // Each vibe gets an icon for posters and chips
   const VIBE_ICON = {
@@ -156,7 +161,7 @@ window.SQ = window.SQ || {};
 
   // ---------- Avatars ----------
   // People rotate through Lavender, Aqua and Pink (Figma: Avatar). Sizes: xs 20, s 28, (m) 40, l 64, xl 96
-  const AV_TONES = ["", "aqua", "pink"];
+  const AV_TONES = ["", "aqua", "pink", "amber", "green"];
   const AV_TONE = { Maya: "pink", Kai: "aqua", Leila: "", Sam: "aqua", Priya: "pink" }; // as the design draws them
   const avatar = (name, cls = "") => `<span class="av ${AV_TONE[name] ?? AV_TONES[hash(name) % AV_TONES.length]} ${cls}" title="${esc(name)}">${esc(String(name)[0] || "?").toUpperCase()}</span>`;
   const avatars = (names, max = 4, cls = "s") => names.length ? `<span class="avs">${names.slice(0, max).map((n) => avatar(n, cls)).join("")}${names.length > max ? `<span class="av more ${cls}">+${names.length - max}</span>` : ""}</span>` : "";
@@ -194,8 +199,9 @@ window.SQ = window.SQ || {};
   // In the desktop layout the tab bar is a sidebar, with the logo on top
   // opts.href makes the tab a link to another page (Plan opens the Sidekick call at /sk); ic "orb" draws the Sidekick orb
   const tabIcon = (ic) => (ic === "orb" ? '<span class="tab-orb" aria-hidden="true"></span>' : icon(ic));
+  // opts.live: a call is live, so the tab returns to it, with a green dot
   const tabs = (list, active, dots = {}) => `<nav class="tabs" aria-label="Sections"><span class="tabs-logo">${logo()}</span>${list.map(([id, label, ic, opts = {}]) => opts.href ? `
-    <a class="tab" href="${esc(opts.href)}">${tabIcon(ic)}${esc(label)}</a>` : `
+    <a class="tab${opts.live ? " live" : ""}" href="${esc(opts.href)}"${opts.live ? ` aria-label="${esc(label)}, back to your live call"` : ""}>${tabIcon(ic)}${esc(label)}${opts.live ? '<span class="live-dot" aria-hidden="true"></span>' : ""}</a>` : `
     <button class="tab${id === active ? " on" : ""}" ${opts.act ? `data-act="${opts.act}"` : `data-go="${id}"`} ${id === active ? 'aria-current="page"' : ""}>${tabIcon(ic)}${esc(label)}${dots[id] ? `<span class="dot">${dots[id]}</span>` : ""}</button>`).join("")}</nav>`;
   const screen = (body, { title, back = true, close = false, right = "", tabbar = "", footer = "", large = false, cls = "" } = {}) => `
     <div class="screen ${title !== undefined ? "has-bar" : ""} ${cls}">
@@ -298,6 +304,6 @@ window.SQ = window.SQ || {};
   // 19+ listings say so in the title, tags or description
   const is19 = (e) => /19\+|\b(19|21)\s*\+|19 and over|ages? 19/i.test(`${e.title} ${(e.tags || []).join(" ")} ${e.description || ""}`);
   const avTone = (name) => AV_TONE[name] ?? AV_TONES[hash(name) % AV_TONES.length];
-  Object.assign(SQ, { dayKey, avTone, is19, logo, matchTier, matchPill, iconBtn, tag, ph, photoUrl, eventPhoto, VIBE_PHOTO, SIXER_MARK, sixer, sixerMsg });
+  Object.assign(SQ, { dayKey, avTone, is19, logo, matchTier, matchPill, matchRing, iconBtn, tag, ph, photoUrl, eventPhoto, VIBE_PHOTO, SIXER_MARK, sixer, sixerMsg });
   Object.assign(SQ, { esc, attr, icon, VIBE_ICON, poster, avatar, avatars, bar, btn, chip, field, textarea, progress, meter, empty, stars, tabs, screen, thinking, aiLabel, aiTag, me, ev, req, now, whenLabel, isToday, isWeekend, priceLabel, trip, tripLabel, originShort, pick, partyNames, partyGoing, isPast, eventStatus, statusBadge, whenRow, hash });
 })();

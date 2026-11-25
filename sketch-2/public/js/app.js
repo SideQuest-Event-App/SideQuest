@@ -30,6 +30,29 @@
     }
   };
 
+  // ---------- A live Sidekick call (shared with the call screen, public/js/sidekick.js) ----------
+  // The call side writes localStorage["sk:live"] while a call is live and removes it when the call ends:
+  //   { "room": "<room id>", "href": "/sk/<room id>", "at": <ms, refreshed while live>, "crew": "<squad name>" }
+  // (a bare room id string works too). Anything older than LIVE_MS counts as ended, so a crashed tab can't leave the
+  // Plan tab pointing at a dead call. SQ.liveCall() is null when no call is live.
+  const LIVE_MS = 4 * 3600 * 1000;
+  SQ.liveCall = () => {
+    let raw = null;
+    try { raw = localStorage.getItem("sk:live") || sessionStorage.getItem("sk:live"); } catch { return null; }
+    if (!raw) return null;
+    let v;
+    try { v = JSON.parse(raw); } catch { v = raw; }
+    if (typeof v === "string") v = { room: v };
+    if (!v || typeof v !== "object") return null;
+    const room = String(v.room || "").replace(/[^\w-]/g, "").slice(0, 80);
+    const href = typeof v.href === "string" && /^\/sk(\/|\?|$)/.test(v.href) ? v.href : room ? `/sk/${room}` : null;
+    if (!href) return null;
+    if (v.at != null && !(Date.now() - Number(v.at) < LIVE_MS)) return null;
+    return { room, href, crew: typeof v.crew === "string" ? v.crew.slice(0, 60) : "" };
+  };
+  // Another tab starting or ending the call: the Plan tab follows
+  window.addEventListener("storage", (e) => { if (e.key === "sk:live" && SQ.d) render(false); });
+
   // ---------- UI state (not saved on the server) ----------
   // Discover filters. date: "" (any day) | "Today" | "Tomorrow" | "Weekend" | "Custom" (from/to, YYYY-MM-DD);
   // tod: "Anytime" | "Daytime" | "Evening" | "Custom" (todFrom/todTo, HH:MM)
