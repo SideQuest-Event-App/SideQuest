@@ -64,6 +64,17 @@ const DATA = path.join(ROOT, "data");
 const KEEP = ["db.json", "analytics.jsonl"];
 const saved = {};
 for (const f of KEEP) { const p = path.join(DATA, f); if (fs.existsSync(p)) { saved[f] = path.join(tmp, f); fs.copyFileSync(p, saved[f]); } }
+// The study's consent screen: the four required boxes (the optional one left alone)
+async function agreeStudy(page) {
+  for (const k of ["age", "gta", "phone", "agree"]) await page.check(`#c-${k}`);
+}
+// The study questionnaire after the account step: four parts, each skipped through with Continue
+async function skipQuestions(page) {
+  for (let part = 1; part <= 4; part++) {
+    await page.waitForSelector(`#qPartT:has-text("Part ${part} of 4")`);
+    await page.click("#qNext");
+  }
+}
 function restore() {
   for (const f of KEEP) {
     const p = path.join(DATA, f);
@@ -693,15 +704,16 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await question(page);
       await Promise.all([page.waitForURL(/\/study$/), page.click('.mode-pick[data-pick="test"]')]);
       assert.strictEqual(await page.evaluate(() => sessionStorage.getItem("sq2.mode")), "test");
-      await page.waitForSelector("#agree");
+      await page.waitForSelector("#c-age");
       // The start page in the same tab sends a tester back to the study
       await page.goto(base);
       await page.waitForURL(/\/study/);
-      await page.check("#agree");
+      await agreeStudy(page);
       await page.click("#start");
       await page.waitForURL(/\/study\?s=/);
       const sid = new URL(page.url()).searchParams.get("s");
       await page.click("#skipAccount"); // the account step: skipped, so the app links use the demo
+      await skipQuestions(page);
       await page.waitForSelector(".steps");
       await page.click('.step-h[data-step="discover"]').catch(() => {});
       if (!(await page.$('a:has-text("Open Discover")'))) await page.click('.step-h[data-step="discover"]');
@@ -1059,7 +1071,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await page.goto(base);
       await question(page);
       await Promise.all([page.waitForURL(/\/study$/), page.click('.mode-pick[data-pick="test"]')]);
-      await page.check("#agree");
+      await agreeStudy(page);
       await page.click("#start");
       await page.waitForSelector("text=Create your account (1 min)");
       const sid1 = new URL(page.url()).searchParams.get("s");
@@ -1084,6 +1096,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await page.click('[data-vibe="Live music"]');
       await page.click('[data-vibe="Comedy"]');
       await page.click('#acctCreate [type=submit]');
+      await skipQuestions(page);
       await page.waitForSelector(".steps");
       const own = await page.evaluate(() => localStorage.getItem("sq2.user"));
       const made = dbm.data.users[own];
@@ -1105,11 +1118,12 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       // 2. Skip: the demo
       const { ctx: c2, page: p2 } = await phone({ user: null });
       await p2.goto(`${base}/study`);
-      await p2.check("#agree");
+      await agreeStudy(p2);
       await p2.click("#start");
       await p2.waitForSelector("#skipAccount");
       const sid2 = new URL(p2.url()).searchParams.get("s");
       await p2.click("#skipAccount");
+      await skipQuestions(p2);
       await p2.waitForSelector(".steps");
       if (!(await p2.$('a:has-text("Open Discover")'))) await p2.click('.step-h[data-step="discover"]');
       assert.strictEqual(await p2.getAttribute('a:has-text("Open Discover")', "href"), `/?demo=1&study=${encodeURIComponent(sid2)}`);
@@ -1119,7 +1133,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       // 3. A returning tester signs in
       const { ctx: c3, page: p3 } = await phone({ user: null });
       await p3.goto(`${base}/study`);
-      await p3.check("#agree");
+      await agreeStudy(p3);
       await p3.click("#start");
       await p3.click("text=Already have an account? Sign in");
       await p3.fill("#a-email", tester.email);
@@ -1128,6 +1142,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       const code = await p3.$eval(".note b", (b) => b.textContent.trim());
       await p3.fill("#a-code", code);
       await p3.click("#acctCode [type=submit]");
+      await skipQuestions(p3);
       await p3.waitForSelector(".steps");
       const sid3 = new URL(p3.url()).searchParams.get("s");
       assert.strictEqual(await p3.evaluate(() => localStorage.getItem("sq2.user")), own, "signed in as their account");

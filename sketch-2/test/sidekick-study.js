@@ -35,6 +35,7 @@ const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const BOOK = Object.fromEntries(Object.entries(personas.LINES).map(([id, moves]) => [id, Object.values(moves).flat().map((tpl) => new RegExp(`^${tpl.split(/(\{\w+\})/).map((x) => (/^\{\w+\}$/.test(x) ? ".*" : escRe(norm(x)))).filter(Boolean).join("\\s*")}$`))]));
 const bookOf = (text) => { const hits = Object.keys(BOOK).filter((id) => BOOK[id].some((re) => re.test(norm(text)))); return hits.length === 1 ? hits[0] : null; };
 const ARM = { A: "concierge", B: "friend" };
+const CONSENT = { age: true, gta: true, phone: true, agree: true, synthetic: false }; // the consent screen's boxes
 // Persona names as a tester could see them
 const BLIND = [/concierge/i, /plugged-?in/i, /\bFriend\b/];
 const blindCheck = (text, where) => { for (const re of BLIND) assert(!re.test(text), `${where} shows ${re}: "${(text.match(new RegExp(`.{0,40}${re.source}.{0,40}`, re.flags)) || [""])[0]}"`); };
@@ -111,7 +112,8 @@ const blindCheck = (text, where) => { for (const re of BLIND) assert(!re.test(te
 
     await test("(a) Four study sessions get AB, BA, AB, BA, and the arms are balanced", async () => {
       assert.strictEqual((await post("/api/sk/study/sessions", {})).status, 400, "a session needs consent");
-      for (let i = 0; i < 4; i++) sessions.push((await post("/api/sk/study/sessions", { consent: true })).body);
+      assert.strictEqual((await post("/api/sk/study/sessions", { consent: true })).status, 400, "a session needs the four required boxes");
+      for (let i = 0; i < 4; i++) sessions.push((await post("/api/sk/study/sessions", { consent: CONSENT })).body);
       const saved = await until(() => { try { return JSON.parse(fs.readFileSync(STUDY_FILE, "utf8")); } catch { return null; } }, 5000, "the study file");
       const orders = sessions.map((s) => saved.sessions[s.sid].order);
       assert.deepStrictEqual(orders, ["AB", "BA", "AB", "BA"]);
@@ -176,17 +178,23 @@ const blindCheck = (text, where) => { for (const re of BLIND) assert(!re.test(te
         };
         const collectSay = async () => { for (const t of await page.locator(".say p").allInnerTexts()) if (!seen.lines.includes(t)) seen.lines.push(t); };
 
-        // 1. Consent and intro
+        // 1. Consent and intro: the four required boxes
         await page.goto(`${base}/study`);
-        await page.waitForSelector("#agree");
+        await page.waitForSelector("#c-age");
         await visible("the intro");
         await shot("1-study-hub.png");
-        await page.check("#agree");
+        for (const k of ["age", "gta", "phone", "agree"]) await page.check(`#c-${k}`);
         await page.click("#start");
         // The account step: this tester skips it and uses the shared demo account
         await page.waitForSelector("#skipAccount");
         await visible("the account step");
         await page.click("#skipAccount");
+        // The questionnaire: four parts, this tester skips through them
+        for (let part = 1; part <= 4; part++) {
+          await page.waitForSelector(`#qPartT:has-text("Part ${part} of 4")`);
+          await visible(`questionnaire part ${part}`);
+          await page.click("#qNext");
+        }
         await page.waitForSelector(".steps");
         const sid = new URL(page.url()).searchParams.get("s");
         const html = await page.content();
@@ -310,7 +318,7 @@ const blindCheck = (text, where) => { for (const re of BLIND) assert(!re.test(te
         await page.locator("#step-survey").scrollIntoViewIfNeeded();
         await shot("3-comparison-survey.png");
         await page.click("form[data-final] [type=submit]");
-        await page.waitForSelector("#step-survey.done");
+        await page.waitForSelector("#requestRemoval");
         await visible("the thank-you");
         await shot("4-done.png");
 

@@ -22,7 +22,11 @@
     const p = data.preference;
     const o = data.order_check;
     const k = encodeURIComponent(key);
+    const rem = data.removals || [];
     out.innerHTML = `
+      <section class="fact" id="removals"><h2>Removal requests</h2>${rem.length
+        ? `<div class="wrap"><table class="tbl"><thead><tr><th>Reference code</th><th>Date</th></tr></thead><tbody>${rem.map((r) => `<tr><td>#${esc(r.code)}</td><td>${esc(r.date)}</td></tr>`).join("")}</tbody></table></div><p class="small">These sessions are left out of every result and have been deleted.</p>`
+        : '<p class="muted">None so far.</p>'}</section>
       <section class="fact"><h2>Assignment</h2><p class="muted">${data.sessions} crews assigned: ${data.assigned.AB} AB (Concierge first), ${data.assigned.BA} BA (Friend first).</p></section>
       ${armTable("Call 1: the main comparison (first exposure only)", data.first_call)}
       <section class="fact"><h2>Which voice would you keep?</h2>
@@ -32,7 +36,9 @@
       ${armTable("Call 2 (short, after hearing the other voice; a check, not the main result)", data.second_call)}
       <section class="fact"><h2>Downloads</h2><div class="btns">
         <a class="btn out" href="/api/sk/study/export?key=${k}">Calls (CSV, one row per call)</a>
-        <a class="btn out" href="/api/sk/study/export?key=${k}&table=preferences">Preferences (CSV, one row per tester)</a></div></section>`;
+        <a class="btn out" href="/api/sk/study/export?key=${k}&table=preferences">Preferences (CSV, one row per tester)</a>
+        <a class="btn out" href="/api/sk/study/export?key=${k}&table=questionnaire">Questionnaire (CSV, one row per tester)</a>
+        <a class="btn out" href="/api/sk/study/aggregate?key=${k}">Questionnaire distributions for synthetic data (JSON, needs 10 or more testers)</a></div></section>`;
   }
   document.getElementById("keyForm").addEventListener("submit", (e) => { e.preventDefault(); if (keyInput.value) load(keyInput.value); });
   if (keyInput.value) load(keyInput.value);

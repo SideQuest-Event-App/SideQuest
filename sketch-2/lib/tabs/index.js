@@ -449,4 +449,4 @@ function register(A, deps) {
   };
 }
 
-module.exports = { register, view, migrate, went, rated, opened, hostedIds, retunePairs, topIds, exportData, settings, squads, notify, lists, join, authuser };
+module.exports = { register, view, migrate, went, rated, opened, hostedIds, retunePairs, topIds, exportData, settings, squads, notify, lists, join, authuser, deleteAccount };

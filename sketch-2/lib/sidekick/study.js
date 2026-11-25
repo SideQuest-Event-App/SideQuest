@@ -18,7 +18,25 @@
 // Accounts: after consent, a tester creates a quick app account or signs in (so the events they add and
 // the plans they make are theirs and stay), or skips and uses the shared demo account. Each tester keeps
 // only which kind it was ("own" or "demo") and, for their own account, its internal id: never a name
-// or an email. The export carries the kind and that id, nothing else about the account.
+// or an email. The export carries the kind and that id, nothing else about the account. An account made
+// during the study ("made") is a study test account: it's deleted with the session if the tester ends
+// and erases it or abandons it, and with everything else after the deletion date.
+//
+// Consent (public/study.html): four required boxes and one optional one, stored as yes/no flags with a
+// timestamp. Where people live is never stored (the GTA box is a yes, nothing more).
+// The questionnaire: 12 questions in 4 parts, every one skippable. Answers are fixed options only (no
+// free text), kept on the tester's record by its random id, and recorded as "skipped" when skipped.
+//
+// Deleting:
+//   End and erase      a tester ends the session: the session, its call metrics, its live calls (and their
+//                      practice friends) and any study test account made in it are deleted at once.
+//   Abandoned          not finished and no activity for 24 hours: the same, by a sweep (on start, hourly).
+//   Request removal    after finishing: the session is excluded at once from every export, summary and
+//                      the aggregate, then deleted. A short reference code is kept, with the date.
+//   The deletion date  after SIDEKICK_STUDY_DELETE_AFTER (default 2026-12-31 23:59:59 Toronto time) a sweep
+//                      deletes all study data, every study test account and any synthetic data.
+// The aggregate (/api/sk/study/aggregate): counts per answer over consenting, finished, non-removed testers,
+// never per-person rows, and nothing at all under 10 such testers. The base for synthetic test users.
 
 const crypto = require("crypto");
 const fs = require("fs");
@@ -41,7 +59,58 @@ const WAIT_FOR_HUMANS_MS = 25000; // practice friends answer anyway if the human
 
 const ACCOUNT_KINDS = ["own", "demo"];
 
-const now = () => Date.now();
+// ---------- Retention ----------
+const DEFAULT_DELETE_AFTER = "2026-12-31T23:59:59-05:00"; // the end of December 31, 2026 in Toronto (EST)
+const deleteAfter = () => { const t = Date.parse(process.env.SIDEKICK_STUDY_DELETE_AFTER || ""); return Number.isFinite(t) ? t : Date.parse(DEFAULT_DELETE_AFTER); };
+const ABANDON_MS = 24 * 3600000;
+const SWEEP_MS = 3600000;
+const SYNTH_FILE = process.env.SIDEKICK_SYNTHETIC_FILE || path.join(__dirname, "..", "..", "data", "sidekick-synthetic.json");
+const SYNTH_STORE = "sidekick-synthetic.json";
+const AGGREGATE_MIN = 10;
+const CODE_CHARS = "ACDEFHJKMNPRTUVWXY3479"; // no 0/O, 1/I/L, 2/Z, 5/S, 6/G, 8/B, Q
+
+// ---------- The questionnaire: fixed options only ----------
+const VIBE_KEYS = ["live-music", "comedy", "markets", "board-games", "dance", "art-shows", "food-pop-ups", "theatre", "jazz", "zines"];
+const SPEND = ["under-20", "20-40", "40-80", "80+", "prefer-not"];
+const TRAVEL = ["15", "30", "45", "60+"];
+const QUESTIONS = {
+  q1: { type: "one", opts: ["0", "1-2", "3-4", "5+"] },
+  q2: { type: "many", max: 5, opts: VIBE_KEYS },
+  q3: { type: "scale", min: 1, max: 5 },
+  q4: { type: "scale", min: 1, max: 5 },
+  q5: { type: "many", max: 7, opts: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] },
+  q6: { type: "one", opts: ["before-6", "6-8", "after-8", "after-10"] },
+  q7: { type: "one", opts: TRAVEL },
+  q8: { type: "one", opts: SPEND },
+  q9: { type: "one", opts: ["1", "2", "3-4", "5+"] },
+  q10: { type: "one", opts: ["me", "someone-else", "we-vote", "nobody"] },
+  q11: { type: "one", opts: ["cost", "timing", "no-one-decides", "too-far", "nothing-appeals", "something-else"] },
+  q12: { type: "parts", parts: { kind: [...VIBE_KEYS, "other"], cost: SPEND, travel: TRAVEL } },
+};
+const PARTS = [["q1", "q2", "q3"], ["q4", "q5", "q6"], ["q7", "q8", "q9"], ["q10", "q11", "q12"]];
+const SKIPPED = "skipped";
+// One answer, checked against its options: the clean value, or "skipped" for anything else
+function cleanAnswer(q, v) {
+  if (q.type === "one") return q.opts.includes(v) ? v : SKIPPED;
+  if (q.type === "scale") { const n = Math.round(Number(v)); return v !== null && v !== "" && Number.isFinite(n) && n >= q.min && n <= q.max && String(n) === String(v).trim() ? n : SKIPPED; }
+  if (q.type === "many") { const list = Array.isArray(v) ? [...new Set(v.filter((x) => q.opts.includes(x)))] : []; return list.length && list.length <= q.max ? list : SKIPPED; }
+  if (q.type === "parts") {
+    if (!v || typeof v !== "object") return SKIPPED;
+    const out = Object.fromEntries(Object.entries(q.parts).map(([k, opts]) => [k, opts.includes(v[k]) ? v[k] : SKIPPED]));
+    return Object.values(out).every((x) => x === SKIPPED) ? SKIPPED : out;
+  }
+  return SKIPPED;
+}
+// Consent: the four required boxes must all be ticked; the synthetic box is optional. Yes/no flags only.
+function consentOf(c) {
+  if (!c || typeof c !== "object") return null;
+  if (!["age", "gta", "phone", "agree"].every((k) => c[k] === true)) return null;
+  return { age: true, gta: true, phone: true, agree: true, synthetic: c.synthetic === true, at: now() };
+}
+
+let clock = () => Date.now(); // tests move time with _test.setClock
+const now = () => clock();
+let deleteAccountHook = null; // set by the server (init): deletes an app account and what's stored about it
 // The app's accounts (lib/db, the same module the server loads). An own account must exist and not be the demo.
 function realAccount(id) {
   if (typeof id !== "string" || !/^[\w-]{4,40}$/.test(id)) return null;
@@ -56,10 +125,11 @@ const pick = (list) => list[crypto.randomInt(list.length)];
 
 // ---------- Storage ----------
 
-let data = null; // { assigned: n, sessions: { id: session } }
+let data = null; // { assigned: n, sessions: { id: session }, erased: { id: { at, why } }, removals: [{ code, at }], accounts: [study test account ids] }
 let store = null;
 try { store = require("../../../sketch-1/lib/store"); } catch {}
 
+const blank = () => ({ assigned: 0, sessions: {}, erased: {}, removals: [], accounts: [], purgedAt: null });
 async function load() {
   if (data) return data;
   let fromFile = null;
@@ -67,11 +137,22 @@ async function load() {
   try { fromFile = JSON.parse(fs.readFileSync(FILE, "utf8")); } catch {}
   try { if (store && store.configured()) fromStore = await store.get(STORE_NAME); } catch (err) { console.warn("Couldn't read the study data from Supabase:", err.message); }
   // Merge the two copies: the higher assignment count, and the newer copy of each session
-  data = { assigned: 0, sessions: {} };
+  // Erased sessions stay erased: one copy's tombstone wins over the other copy's older data
+  data = blank();
   for (const src of [fromFile, fromStore]) {
     if (!src) continue;
     data.assigned = Math.max(data.assigned, Number(src.assigned) || 0);
-    for (const [id, s] of Object.entries(src.sessions || {})) if (!data.sessions[id] || (s.updatedAt || 0) > (data.sessions[id].updatedAt || 0)) data.sessions[id] = s;
+    data.purgedAt = Math.max(data.purgedAt || 0, Number(src.purgedAt) || 0) || null;
+    Object.assign(data.erased, src.erased || {});
+    for (const r of src.removals || []) if (!data.removals.some((x) => x.code === r.code)) data.removals.push({ code: r.code, at: r.at });
+    for (const id of src.accounts || []) if (!data.accounts.includes(id)) data.accounts.push(id);
+  }
+  for (const src of [fromFile, fromStore]) {
+    if (!src) continue;
+    for (const [id, s] of Object.entries(src.sessions || {})) {
+      if (data.erased[id] || (data.purgedAt && (s.createdAt || 0) <= data.purgedAt)) continue;
+      if (!data.sessions[id] || (s.updatedAt || 0) > (data.sessions[id].updatedAt || 0)) data.sessions[id] = s;
+    }
   }
   return data;
 }
@@ -341,9 +422,9 @@ function newSession() {
   data.sessions[s.id] = s;
   return s;
 }
-function addTester(s) {
+function addTester(s, consent) {
   const tid = rid(8);
-  s.testers[tid] = { n: Object.keys(s.testers).length + 1, joinedAt: now(), consent: true, steps: {}, surveys: {}, final: null };
+  s.testers[tid] = { n: Object.keys(s.testers).length + 1, joinedAt: now(), consent, steps: {}, surveys: {}, final: null, questionnaire: null };
   if (!s.creator) s.creator = tid;
   return tid;
 }
@@ -377,7 +458,95 @@ function testerView(s, tid) {
     call2: Boolean(t.surveys[2]),
     survey: Boolean(t.final),
   };
-  return { sid: s.id, you: { n: t.n, creator: s.creator === tid, account: t.account ? t.account.kind : null, steps, surveys: { 1: Boolean(t.surveys[1]), 2: Boolean(t.surveys[2]) }, final: Boolean(t.final) }, calls, practice: s.practice, testers: Object.keys(s.testers).length, steps: STEPS };
+  const q = t.questionnaire || {};
+  return { sid: s.id, you: { n: t.n, creator: s.creator === tid, account: t.account ? t.account.kind : null, madeAccount: Boolean(t.account && t.account.made), questionnaire: { parts: q.parts || 0, done: Boolean(q.doneAt) }, steps, surveys: { 1: Boolean(t.surveys[1]), 2: Boolean(t.surveys[2]) }, final: Boolean(t.final) }, calls, practice: s.practice, testers: Object.keys(s.testers).length, steps: STEPS };
+}
+
+// ---------- Erasing: End and erase, abandoned sessions, removal requests, the deletion date ----------
+
+const finished = (s) => Object.values(s.testers).some((t) => t.final);
+const pastDeleteDate = () => now() > deleteAfter();
+const madeAccounts = (s) => Object.values(s.testers).filter((t) => t.account && t.account.kind === "own" && t.account.made).map((t) => t.account.id);
+
+async function deleteAccount(id) {
+  try {
+    if (deleteAccountHook) await deleteAccountHook(id);
+  } catch (err) {
+    console.error("Couldn't delete a study test account:", err.message);
+    return false;
+  }
+  return true;
+}
+// End the session's live calls (their practice friends leave with them, and each transcript is deleted)
+function endCalls(sid) {
+  for (const meta of [...live.values()].filter((m) => m.sid === sid)) {
+    const room = roomOf(meta.room);
+    try { if (room && room.status !== "ended") R._test.endRoom(room, "study-erased"); } catch {}
+    detach(meta);
+  }
+  names.delete(sid);
+}
+// Delete one session and everything in it. withAccounts: also the study test accounts made in it.
+async function erase(s, why, { withAccounts = true } = {}) {
+  endCalls(s.id);
+  if (withAccounts) {
+    for (const id of madeAccounts(s)) {
+      if (await deleteAccount(id)) data.accounts = data.accounts.filter((x) => x !== id);
+    }
+  }
+  delete data.sessions[s.id];
+  data.erased[s.id] = { at: now(), why };
+  await flush();
+}
+function newCode() {
+  const taken = new Set(data.removals.map((r) => r.code));
+  for (let len = 4; len <= 6; len++) {
+    for (let i = 0; i < 40; i++) {
+      const code = Array.from({ length: len }, () => CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]).join("");
+      if (!taken.has(code)) return code;
+    }
+  }
+  throw new Error("Couldn't make a reference code. Try again.");
+}
+// After the deletion date: all study data, every study test account and any synthetic data
+async function purgeAll() {
+  const ids = new Set(data.accounts);
+  for (const s of Object.values(data.sessions)) { endCalls(s.id); for (const id of madeAccounts(s)) ids.add(id); }
+  for (const id of ids) await deleteAccount(id);
+  try { fs.rmSync(SYNTH_FILE, { force: true }); } catch {}
+  try { if (store && store.configured() && store.remove) await store.remove(SYNTH_STORE); else if (store && store.configured()) await store.put(SYNTH_STORE, {}); } catch {}
+  const assigned = data.assigned;
+  data = blank();
+  data.assigned = assigned;
+  data.purgedAt = now();
+  await flush();
+}
+let sweeping = null;
+// On start and hourly: the deletion date first, then abandoned sessions (and any removal not yet deleted)
+function sweep() {
+  if (sweeping) return sweeping;
+  sweeping = (async () => {
+    await load();
+    if (pastDeleteDate()) {
+      if (!data.purgedAt || Object.keys(data.sessions).length || data.accounts.length || data.removals.length || fs.existsSync(SYNTH_FILE)) await purgeAll();
+      return { purged: true };
+    }
+    let erased = 0;
+    for (const s of Object.values(data.sessions)) {
+      if (s.excluded) { await erase(s, "removed", { withAccounts: false }); erased++; continue; }
+      if (!finished(s) && now() - (s.updatedAt || s.createdAt || 0) > ABANDON_MS) { await erase(s, "abandoned"); erased++; }
+    }
+    return { purged: false, erased };
+  })().finally(() => { sweeping = null; });
+  return sweeping;
+}
+let sweepTimer = null;
+function init({ deleteAccount: del } = {}) {
+  if (del) deleteAccountHook = del;
+  clearInterval(sweepTimer);
+  sweepTimer = setInterval(() => sweep().catch((err) => console.error("Study sweep:", err.message)), SWEEP_MS);
+  sweepTimer.unref();
+  return sweep().catch((err) => console.error("Study sweep:", err.message));
 }
 
 // Free text: no names from the calls, no emails, phone numbers or amounts
@@ -394,9 +563,11 @@ function scrub(text, sid) {
 const mean = (xs) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100 : null);
 const secs = (a, b) => (a && b ? Math.round((b - a) / 1000) : null);
 
+// Every export, summary and aggregate leaves out removed sessions, even before they're deleted
+const included = () => Object.values(data.sessions).filter((s) => !s.excluded).sort((a, b) => a.index - b.index);
 function callRows() {
   const rows = [];
-  for (const s of Object.values(data.sessions).sort((a, b) => a.index - b.index)) {
+  for (const s of included()) {
     for (const n of [1, 2]) {
       const c = s.calls[n];
       if (!c) continue;
@@ -447,7 +618,7 @@ function callRows() {
 }
 function preferenceRows() {
   const rows = [];
-  for (const s of Object.values(data.sessions).sort((a, b) => a.index - b.index)) {
+  for (const s of included()) {
     for (const t of Object.values(s.testers)) {
       if (!t.final) continue;
       rows.push({ session: s.id, session_index: s.index, order: s.order, tester: t.n, ...accountCols(t), keep_voice: t.final.keep, keep_arm: t.final.keepArm, keep_persona: ARMS[t.final.keepArm], kept_first_heard: t.final.keep === 1, seq: t.final.seq, why: t.final.why || "" });
@@ -457,14 +628,60 @@ function preferenceRows() {
 }
 // Which account a tester used: the kind, and for their own account its internal id. Never a name or an email.
 const accountCols = (t) => ({ account_kind: t.account ? t.account.kind : "none", account_id: t.account && t.account.kind === "own" ? t.account.id : null });
+const yn = (v) => (v ? "yes" : "no");
+const consentCols = (t) => {
+  const c = t.consent && typeof t.consent === "object" ? t.consent : {};
+  return { consent_age: yn(c.age), consent_gta: yn(c.gta), consent_phone: yn(c.phone), consent_agree: yn(c.agree), consent_synthetic: yn(c.synthetic), consent_at: c.at ? new Date(c.at).toISOString() : null };
+};
 function testerRows() {
   const rows = [];
-  for (const s of Object.values(data.sessions).sort((a, b) => a.index - b.index)) {
+  for (const s of included()) {
     for (const t of Object.values(s.testers).sort((a, b) => a.n - b.n)) {
-      rows.push({ session: s.id, session_index: s.index, order: s.order, tester: t.n, ...accountCols(t), steps_done: Object.keys(t.steps || {}).length, surveys: [1, 2].filter((n) => t.surveys && t.surveys[n]).length, finished: Boolean(t.final), joined: new Date(t.joinedAt).toISOString() });
+      rows.push({ session: s.id, session_index: s.index, order: s.order, tester: t.n, ...accountCols(t), ...consentCols(t), steps_done: Object.keys(t.steps || {}).length, surveys: [1, 2].filter((n) => t.surveys && t.surveys[n]).length, finished: Boolean(t.final), joined: new Date(t.joinedAt).toISOString() });
     }
   }
   return rows;
+}
+// The questionnaire: one row per tester, by the session's random id and the tester's number only
+const qCell = (v) => (v == null ? null : Array.isArray(v) ? v.join("+") : v);
+function questionnaireRows() {
+  const rows = [];
+  for (const s of included()) {
+    for (const t of Object.values(s.testers).sort((a, b) => a.n - b.n)) {
+      const q = t.questionnaire || {};
+      const last = q.q12 && typeof q.q12 === "object" ? q.q12 : {};
+      const row = { session: s.id, session_index: s.index, tester: t.n, consent_synthetic: yn(t.consent && t.consent.synthetic), questionnaire_done: Boolean(q.doneAt), finished: Boolean(t.final) };
+      for (const k of Object.keys(QUESTIONS)) if (k !== "q12") row[k] = qCell(q[k]);
+      for (const k of ["kind", "cost", "travel"]) row[`q12_${k}`] = q.q12 === SKIPPED ? SKIPPED : qCell(last[k]);
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+// The base for synthetic test users: counts per answer, over testers who ticked the synthetic box, finished
+// and weren't removed. Never a per-person row, never two answers joined. Nothing under AGGREGATE_MIN testers.
+function aggregate() {
+  const pool = included().flatMap((s) => Object.values(s.testers)).filter((t) => t.final && t.consent && t.consent.synthetic === true && t.questionnaire && t.questionnaire.doneAt);
+  if (pool.length < AGGREGATE_MIN) return null;
+  const count = (opts, vals) => {
+    const out = Object.fromEntries([...opts.map((o) => [String(o), 0]), [SKIPPED, 0]]);
+    for (const v of vals) {
+      if (v == null || v === SKIPPED) out[SKIPPED]++;
+      else for (const x of Array.isArray(v) ? v : [v]) if (String(x) in out) out[String(x)]++;
+    }
+    return out;
+  };
+  const questions = {};
+  for (const [k, q] of Object.entries(QUESTIONS)) {
+    const vals = pool.map((t) => t.questionnaire[k]);
+    if (q.type === "parts") {
+      questions[k] = Object.fromEntries(Object.entries(q.parts).map(([part, opts]) => [part, count(opts, vals.map((v) => (v && typeof v === "object" ? v[part] : SKIPPED)))]));
+    } else {
+      const opts = q.type === "scale" ? Array.from({ length: q.max - q.min + 1 }, (_, i) => q.min + i) : q.opts;
+      questions[k] = { type: q.type === "many" ? "pick_many" : q.type === "scale" ? "scale" : "pick_one", counts: count(opts, vals) };
+    }
+  }
+  return { testers: pool.length, kind: "distributions", note: "Counts per answer only. No per-person rows.", questions };
 }
 function csv(rows) {
   if (!rows.length) return "";
@@ -472,6 +689,8 @@ function csv(rows) {
   const cell = (v) => (v == null ? "" : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
   return [cols.join(","), ...rows.map((r) => cols.map((k) => cell(r[k])).join(","))].join("\n") + "\n";
 }
+
+const torontoDay = (t) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t));
 
 // Exact two-sided binomial test against 50/50
 function binomial(k, n) {
@@ -493,8 +712,9 @@ function summary() {
   }));
   const keepA = prefs.filter((p) => p.keep_arm === "A").length;
   const keepFirst = prefs.filter((p) => p.kept_first_heard).length;
-  const sessions = Object.values(data.sessions);
+  const sessions = included();
   return {
+    removals: data.removals.map((r) => ({ code: r.code, date: torontoDay(r.at) })),
     sessions: sessions.length,
     assigned: { AB: sessions.filter((s) => s.order === "AB").length, BA: sessions.filter((s) => s.order === "BA").length },
     first_call: byArm(calls.filter((x) => x.call === 1)),
@@ -510,9 +730,14 @@ const int = (v, lo, hi) => { const n = Math.round(Number(v)); return Number.isFi
 
 async function handle(req, res, url, { readBody, sendJSON }) {
   await load();
-  const parts = url.pathname.split("/").filter(Boolean); // api, sk, study, :sid | export | summary, action
+  const parts = url.pathname.split("/").filter(Boolean); // api, sk, study, :sid | export | summary | aggregate, action
   try {
-    if (parts[3] === "export" || parts[3] === "summary") {
+    // After the deletion date nothing is kept or collected: the sweep deletes it all, and every route says so
+    if (pastDeleteDate()) {
+      await sweep();
+      return sendJSON(res, 410, { error: "The study has ended, and all its data has been deleted.", ended: true });
+    }
+    if (parts[3] === "export" || parts[3] === "summary" || parts[3] === "aggregate") {
       const key = process.env.SIDEKICK_STUDY_KEY;
       const given = url.searchParams.get("key") || req.headers["x-study-key"] || "";
       if (!key) return sendJSON(res, 403, { error: "Results are locked. Set SIDEKICK_STUDY_KEY on the server to open them." });
@@ -521,19 +746,27 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
       if (!ok) return sendJSON(res, 401, { error: "Wrong or missing study key." });
       if (parts[3] === "summary") return sendJSON(res, 200, summary());
-      const which = ["preferences", "testers"].includes(url.searchParams.get("table")) ? url.searchParams.get("table") : "calls";
-      const table = which === "preferences" ? preferenceRows() : which === "testers" ? testerRows() : callRows();
-      if (url.searchParams.get("format") === "json") return sendJSON(res, 200, { calls: callRows(), preferences: preferenceRows(), testers: testerRows() });
+      if (parts[3] === "aggregate") {
+        const agg = aggregate();
+        if (!agg) return sendJSON(res, 409, { error: `Not enough testers yet. The aggregate needs at least ${AGGREGATE_MIN} who agreed to synthetic data and finished.` });
+        return sendJSON(res, 200, agg);
+      }
+      const tables = { calls: callRows, preferences: preferenceRows, testers: testerRows, questionnaire: questionnaireRows };
+      const which = Object.prototype.hasOwnProperty.call(tables, url.searchParams.get("table")) ? url.searchParams.get("table") : "calls";
+      const table = tables[which]();
+      if (url.searchParams.get("format") === "json") return sendJSON(res, 200, { calls: callRows(), preferences: preferenceRows(), testers: testerRows(), questionnaire: questionnaireRows() });
       res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "cache-control": "no-store", "content-disposition": `attachment; filename="sidekick-study-${which}.csv"` });
       return res.end(csv(table));
     }
     if (req.method !== "GET" && req.method !== "POST") return sendJSON(res, 405, { error: "Not allowed." });
     const body = req.method === "POST" ? await readBody(req) : {};
 
+    const NEED_CONSENT = "Please tick the four required boxes to start. The optional one is up to you.";
     if (req.method === "POST" && parts[3] === "sessions" && !parts[4]) {
-      if (body.consent !== true) return sendJSON(res, 400, { error: "Tick the box to agree first." });
+      const consent = consentOf(body.consent);
+      if (!consent) return sendJSON(res, 400, { error: NEED_CONSENT });
       const s = newSession();
-      const tid = addTester(s);
+      const tid = addTester(s, consent);
       save(s);
       return sendJSON(res, 200, { sid: s.id, tid, view: testerView(s, tid) });
     }
@@ -541,8 +774,9 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     if (!s) return sendJSON(res, 404, { error: "This study link isn't valid anymore. Start a new one.", gone: true });
     const action = parts[4] || "";
     if (req.method === "POST" && action === "join") {
-      if (body.consent !== true) return sendJSON(res, 400, { error: "Tick the box to agree first." });
-      const tid = addTester(s);
+      const consent = consentOf(body.consent);
+      if (!consent) return sendJSON(res, 400, { error: NEED_CONSENT });
+      const tid = addTester(s, consent);
       save(s);
       return sendJSON(res, 200, { sid: s.id, tid, view: testerView(s, tid) });
     }
@@ -556,10 +790,49 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     if (action === "account") {
       const kind = ACCOUNT_KINDS.includes(body.kind) ? body.kind : null;
       if (!kind) return sendJSON(res, 400, { error: "Choose your own account or the demo." });
-      if (kind === "own" && !realAccount(body.user)) return sendJSON(res, 400, { error: "That account couldn't be found. Create one, sign in again, or use the demo." });
-      t.account = kind === "own" ? { kind, id: body.user, at: now() } : { kind, at: now() };
+      const u = kind === "own" ? realAccount(body.user) : null;
+      if (kind === "own" && !u) return sendJSON(res, 400, { error: "That account couldn't be found. Create one, sign in again, or use the demo." });
+      // A study test account: made in this session (after it started), so it's deleted with the study
+      const made = Boolean(u && body.made === true && Date.parse(u.createdAt) >= (s.createdAt || 0) - 1000);
+      t.account = kind === "own" ? { kind, id: body.user, at: now(), ...(made ? { made: true } : {}) } : { kind, at: now() };
+      if (made && !data.accounts.includes(body.user)) data.accounts.push(body.user);
       save(s);
       return sendJSON(res, 200, testerView(s, tid));
+    }
+
+    // The questionnaire, a part at a time (3 questions each). Anything not answered is recorded as skipped.
+    if (action === "questionnaire") {
+      const part = int(body.part, 1, PARTS.length);
+      if (!part) return sendJSON(res, 400, { error: "Unknown part." });
+      const answers = body.answers && typeof body.answers === "object" ? body.answers : {};
+      const q = t.questionnaire || (t.questionnaire = { parts: 0 });
+      for (const k of PARTS[part - 1]) q[k] = cleanAnswer(QUESTIONS[k], answers[k]);
+      q.parts = Math.max(q.parts || 0, part);
+      q.at = now();
+      if (q.parts === PARTS.length && !q.doneAt) q.doneAt = now();
+      save(s);
+      return sendJSON(res, 200, testerView(s, tid));
+    }
+
+    // End and erase: everything from this session, now
+    if (action === "end") {
+      if (finished(s)) return sendJSON(res, 409, { error: "This session is finished. To take your answers out, use Request removal." });
+      await erase(s, "ended");
+      return sendJSON(res, 200, { erased: true });
+    }
+
+    // Request removal, after finishing: excluded from everything at once, then deleted. The code is kept.
+    if (action === "remove") {
+      if (!t.final) return sendJSON(res, 409, { error: "Finish the study first, or end the session to erase it." });
+      const code = newCode();
+      s.excluded = true;
+      s.removal = { code, at: now() };
+      data.removals.push({ code, at: s.removal.at });
+      await flush();
+      await erase(s, "removed", { withAccounts: false });
+      data.erased[s.id].code = code;
+      await flush();
+      return sendJSON(res, 200, { code });
     }
 
     if (action === "step") {
@@ -676,4 +949,4 @@ async function handle(req, res, url, { readBody, sendJSON }) {
   }
 }
 
-module.exports = { handle, flush, ARMS, ORDERS, _test: { lineBookOf, binomial, scrub, summary, callRows, preferenceRows, testerRows, load, live } };
+module.exports = { handle, flush, init, sweep, ARMS, ORDERS, QUESTIONS, PARTS, _test: { lineBookOf, binomial, scrub, summary, callRows, preferenceRows, testerRows, questionnaireRows, aggregate, load, live, consentOf, cleanAnswer, CODE_CHARS, deleteAfter, setClock: (fn) => { clock = fn || (() => Date.now()); }, data: () => data, reset: () => { data = null; } } };

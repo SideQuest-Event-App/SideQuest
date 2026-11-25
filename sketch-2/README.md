@@ -78,6 +78,7 @@ node test/sidekick-multiphone.js        # duplicate and echo lines from several 
 node test/sidekick-share.js             # link-preview tags, the card image, signalling (starts its own server)
 node test/sidekick-audio.e2e.js         # three Chromium "phones" connect in-app audio (needs Playwright)
 node test/sidekick-study.js             # the voice A/B study, end to end, with one browser tester (needs Playwright)
+node test/study-consent.e2e.js          # the study's consent screen, questionnaire, End session, removal and deletion sweeps (needs Playwright)
 node test/sidekick-voice.js             # the ElevenLabs agent leading (fake SDK in Chromium), fallbacks, built-in voice timing, agent settings
 node test/sidekick-thinking.js          # "Finding your two picks": live steps, progress lines, the 12 s fallback (fake slow AI; needs Playwright)
 node test/call-ui.e2e.js                # the slim call (mic, orb, leave), the orb sheet, "I've got everything", Plan it, deadlines, invites (needs Playwright)
@@ -100,6 +101,12 @@ The class study (INF2573) compares Sidekick's two call voices. Testers try the a
 
 Each person who opens it and taps Start is a new crew. The page is a checklist: agree, look around Discover, open Plan, share the call link, call 1, try the form, call 2, and a last short survey. Testers can do the steps in order or jump around. The two calls and the form only open in the order that keeps the test fair. It takes about 15 minutes, and the questions take under a minute and a half.
 
+**Consent and the questionnaire:** the first screen is the consent text (design ST1). Testers tick four required boxes (18 or older, live in the GTA, have a phone, agree) and may tick a fifth, optional one (their anonymous answers can help make synthetic test users). Start stays blocked until the four are ticked. The ticks are stored as yes/no flags with a time, never where anyone lives. "Not now" leaves without saving anything. After the account step comes a 12-question questionnaire about how they go out (4 parts of 3, every question skippable; skips are recorded as skipped), then the checklist.
+
+**Leaving and removal:** every study screen has an **End session** bar. "End and erase" deletes the session at once: answers, call metrics, live calls with their practice friends, and any test account made in it. A session that isn't finished and has had no activity for 24 hours is erased the same way by a sweep (on server start and hourly). After finishing, a tester can **Request removal**: the session is left out of every export and summary straight away, then deleted, and they get a short reference code (like `#A7K2`). The results page lists removal requests by code and date only.
+
+**Automatic deletion:** after December 31, 2026 (23:59 Toronto time) a sweep deletes all study data, every test account made for the study and any synthetic data, and the study stops taking testers. Change the date with `SIDEKICK_STUDY_DELETE_AFTER` (an ISO time, default `2026-12-31T23:59:59-05:00`).
+
 **Accounts:** right after agreeing, testers make a quick account (first name, email, two or more interests) or sign in, so the events they add and the plans they make are their own and stay. The checklist's app links then open the app as that account. A tester can skip and use the shared demo account instead. The study keeps only which kind it was (`own` or `demo`) and, for their own account, its internal id: never a name or email.
 
 **Testing with friends:** one person opens `/study` and taps Start. They copy the study link from the bottom of the checklist and send it to the others, who open it, agree, and join the call when it starts. Everyone on one call hears the same voice.
@@ -110,7 +117,8 @@ Each person who opens it and taps Start is a new crew. The page is a checklist: 
 
 **Where the results are:**
 - Open `https://<your-app>.onrender.com/study/results` and enter the study key. It shows the call 1 comparison, which voice people would keep (with a significance test) and an order check, plus download links.
-- The downloads: one row per call (`/api/sk/study/export?key=<key>`), one row per tester for the voice preference (`&table=preferences`), and one row per tester with the account kind and internal id (`&table=testers`). They open in Excel or Google Sheets.
+- The downloads: one row per call (`/api/sk/study/export?key=<key>`), one row per tester for the voice preference (`&table=preferences`), and one row per tester with the account kind, internal id and consent flags (`&table=testers`), and one row per tester with their questionnaire answers (`&table=questionnaire`). They open in Excel or Google Sheets.
+- For synthetic test users (the generator isn't built yet): `/api/sk/study/aggregate?key=<key>` gives counts per answer over testers who ticked the synthetic box, finished and weren't removed. Never one person's answers, and nothing at all under 10 such testers.
 - No names, transcripts, voices or private answers (budget, places to avoid) are ever stored or exported.
 - The raw data is `data/sidekick-study.json` on the server, also copied to Supabase Storage when Supabase is set up. Render wipes its disk on every deploy, so set up Supabase before the study starts.
 
@@ -120,7 +128,7 @@ Each person who opens it and taps Start is a new crew. The page is a checklist: 
 - Optional: `SIDEKICK_STUDY_FILE` stores the data somewhere other than `data/sidekick-study.json`.
 - Don't redeploy while people are testing: a restart ends live calls. Data that's already saved is kept.
 
-**Check it works:** `node test/sidekick-study.js` runs the whole study against a local server, including one tester in a real browser.
+**Check it works:** `node test/sidekick-study.js` runs the whole study against a local server, including one tester in a real browser. `node test/study-consent.e2e.js` checks the consent screen, questionnaire, End session, removal requests and both deletion sweeps (with a fake clock).
 
 ## Put it online (Render)
 

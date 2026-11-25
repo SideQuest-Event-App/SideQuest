@@ -2016,7 +2016,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 // Load the database (from Supabase or data/db.json) before taking requests
-db.load().then(() => sidekick.init({ events: () => db.data.events })).then(() => skPlan.init({ db, friendList, person })).then(() => server.listen(PORT, () => {
+// The study's sweeps (lib/sidekick/study.js): abandoned sessions and the deletion date, on start and hourly.
+// A study test account goes the way Delete account does (lib/tabs).
+const studySweeps = () => skStudy.init({ deleteAccount: async (id) => { const u = db.data.users[id]; if (u && !u.demo) await tabs.deleteAccount(u); } });
+db.load().then(() => sidekick.init({ events: () => db.data.events })).then(() => skPlan.init({ db, friendList, person })).then(studySweeps).then(() => server.listen(PORT, () => {
   console.log(`Sketch 2 running at http://localhost:${PORT}`);
   console.log(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY ? "Database: Supabase" : "Database: data/db.json (no Supabase keys in .env)");
   const m = ai.mode();

@@ -35,50 +35,332 @@
     chev: '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
   };
 
-  // ---------- Consent and a short intro ----------
+  // ---------- Consent (design ST1): the approved text, then four required boxes and one optional ----------
+  // Nothing is sent until Start: "Not now" leaves without creating any data. The boxes go to the server as
+  // yes/no flags only. Start uses aria-disabled (it stays focusable): tapping it early shows the error and
+  // moves focus to the first unticked box.
+  const EMAIL = "asiatheperson@gmail.com";
+  const DELETE_DATE = "December 31, 2026";
+  const IQ = (p) => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+  const SI = {
+    why: IQ('<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.5"/>'),
+    todo: IQ('<path d="M9 4h6v3H9zM6 6h12v15H6z"/><path d="M9 12h6M9 16h4"/>'),
+    invited: IQ('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
+    collect: IQ('<path d="M4 6h16M4 12h16M4 18h10"/>'),
+    nope: IQ('<circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/>'),
+    choices: IQ('<path d="M5 12l5 5 9-10"/>'),
+    keep: IQ('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    use: IQ('<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>'),
+    mail: IQ('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>'),
+    phone: IQ('<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>'),
+    gta: IQ('<path d="M4 20V9l8-5 8 5v11M9 20v-6h6v6"/>'),
+    back: IQ('<path d="M15 6l-6 6 6 6"/>'),
+    ok: '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
+  };
+  const bullets = (items) => `<ul class="cbl">${items.map((x) => `<li>${x}</li>`).join("")}</ul>`;
+  const section = (icon, tone, title, body, extra = "") => `<section class="csec"${extra}><h2 class="sech"><span class="isq ${tone}">${SI[icon]}</span><span>${title}</span></h2>${body}</section>`;
+  const REQUIRED = [["age", "I am 18 or older."], ["gta", "I live in the Greater Toronto Area."], ["phone", "I'm using, or have access to, a mobile phone for this test."], ["agree", "I've read the above and agree to take part."]];
+  const SHORT = { age: "18+", gta: "GTA", phone: "Phone", agree: "I agree" };
+  const SYNTH = 'My anonymous answers can be used to create made-up "synthetic" test users that help us test the app. No synthetic user will be a copy of me.';
+  const consent = { age: false, gta: false, phone: false, agree: false, synthetic: false };
+  let peekObserver = null;
+
   function introScreen(joining) {
+    for (const k of Object.keys(consent)) consent[k] = false;
+    document.body.classList.add("on-consent");
     app.innerHTML = `
-      <div class="row sb"><span class="tag pri">Sidekick study</span><span class="orb" aria-hidden="true"></span></div>
-      <div class="lead-in">
-        <h1>${joining ? "Join your crew's study" : "Help us test Sidekick"}</h1>
-        <p class="muted">About 15 minutes on your phone. You'll look around the app, plan two nights out with Sidekick, an AI that joins your planning call, and answer a few quick taps of questions.</p>
-        <p class="muted">You'll hear two Sidekick voices, called Voice 1 and Voice 2.</p>
+      <header class="lights"><span class="tag pri">SideQuest study</span><h1 class="hero">Help us test <span class="nb">SideQuest</span></h1></header>
+      <p class="intro">SideQuest is a student project for a university course. It helps groups of friends in Toronto find and plan nights out, with a planning assistant called Sidekick.</p>
+      ${section("why", "iv", "Why we're doing this", bullets(["To learn whether SideQuest makes planning a night out with friends easier.", "To find out which of two Sidekick voices people prefer.", "To improve the app and finish our class project."]))}
+      ${section("todo", "iv", `What you'll be asked to do <span class="sub">(about 15–20 minutes)</span>`, `
+        <ol class="tl" aria-label="The four steps">${[["Questions", "2–3 min", "v"], ["Try the app", "look around", "v"], ["Call 1", "Sidekick", "t"], ["Call 2", "other voice", "t"]].map(([t, s, c], i) => `<li><i class="${c}" aria-hidden="true">${i + 1}</i><span class="tl-t">${t}</span><span class="tl-s">${s}</span></li>`).join("")}</ol>
+        ${bullets(["Answer a few short questions about how you usually go out (2–3 minutes).", "Try the app: look around, start a plan, and have a short planning call with Sidekick.", "Try a second, shorter call with a different Sidekick voice. This is an A/B test: you won't be told which voice is which.", "Answer a few quick questions about each call."])}`)}
+      ${section("invited", "it", "Why you were invited", `<p class="c14">You can take part if you:</p>
+        <ul class="elig">${[["<b>18+</b>", "are 18 or older;"], [SI.gta, "live in the Greater Toronto Area;"], [SI.phone, "have a mobile phone you can use for the test."]].map(([i, t]) => `<li><span class="isq it sm" aria-hidden="true">${i}</span><span>${t}</span></li>`).join("")}</ul>`)}
+      <div class="cards">
+        <section class="ccard"><h2 class="sech sm"><span class="isq iv sm">${SI.collect}</span><span>What we collect</span></h2>${bullets(["Your answers to the questions.", "What you do in the app during the test, such as what you tap, save, plan and pick.", "Your ratings of each call."])}</section>
+        <section class="ccard teal"><h2 class="sech sm"><span class="isq it sm">${SI.nope}</span><span>What we don't collect</span></h2>${bullets(["We don't record or keep your voice or call transcripts.", "We don't save your location.", "Your answers are stored with a random code, not your name or email.", "If you create an account to test with, your account details are kept separate from your study answers."])}</section>
       </div>
-      <div class="facts">
-        <section class="fact"><h2>What we record</h2><ul>
-          <li>Which steps you finish</li>
-          <li>How long planning takes and how many questions Sidekick asks</li>
-          <li>Whether your crew locks a plan</li>
-          <li>Your taps on our short questions</li></ul></section>
-        <section class="fact"><h2>What we don't</h2><ul>
-          <li>Your name, your voice or anything anyone says. Captions are deleted when each call ends.</li>
-          <li>Your budget and places you'd avoid. They're never shown with your name and never in our results.</li></ul></section>
-      </div>
-      <label class="agree"><input type="checkbox" id="agree"><span>I agree to take part. I can stop at any time.</span></label>
-      <button class="btn pri" id="start" disabled>${joining ? "Join the study" : "Start the study"}</button>
-      ${joining ? "" : '<p class="small">Testing with friends? One person starts, then shares the study link from the checklist.</p>'}`;
-    const agree = document.getElementById("agree");
-    const start = document.getElementById("start");
-    agree.onchange = () => { start.disabled = !agree.checked; };
-    start.onclick = async () => {
-      start.disabled = true;
-      try {
-        const out = joining ? await api(`/api/sk/study/${encodeURIComponent(sid)}/join`, { consent: true }) : await api("/api/sk/study/sessions", { consent: true });
-        sid = out.sid;
-        tid = out.tid;
-        store.set(`study:${sid}:tid`, tid);
-        store.set("study:last", sid);
-        history.replaceState(null, "", `/study?s=${encodeURIComponent(sid)}`);
-        view = out.view;
-        open = null;
-        acct = null;
-        render();
-      } catch (err) {
-        start.disabled = false;
-        toast(err.message);
-      }
-    };
+      ${section("choices", "iv", "Your choices", bullets(["Taking part is completely voluntary.", "You can skip any question you don't want to answer.", "You can leave or end the session at any time, for any reason.", "If you leave or drop the session before finishing, everything you've shared in this session will be erased.", "If you finish and later want your answers removed sooner, you can submit a request and we'll make sure they aren't included in our study."]))}
+      ${section("keep", "ia", "How long we keep it", bullets([`We will automatically delete all study data after <b>${DELETE_DATE}</b>.`, "This includes test accounts made for the study.", "You don't need to do anything."]))}
+      ${section("use", "iv", "How we use it", bullets(["Results are only reported as group totals (for example, \"6 in 10 testers preferred Voice 1\").", "We never report one person's answers."]))}
+      ${section("mail", "inn", "Questions?", `<p class="c14 contact">Contact Asia at <a href="mailto:${EMAIL}">${EMAIL}</a>.</p>`)}
+      <section class="confirm" id="confirm" aria-labelledby="confirmT">
+        <h2 id="confirmT" class="confirm-t">Please confirm</h2>
+        <div class="boxes">${REQUIRED.map(([k, t]) => `<label class="cb"><input type="checkbox" id="c-${k}" data-consent="${k}"><span>${t} <span class="req">(required)</span></span></label>`).join("")}</div>
+        <fieldset class="opt"><legend>Optional</legend><label class="cb"><input type="checkbox" id="c-synthetic" data-consent="synthetic"><span>${esc(SYNTH)} <span class="req">(optional)</span></span></label></fieldset>
+        <p class="err" id="consentErr" role="alert" hidden></p>
+        <div class="confirm-go">
+          <button class="btn pri" type="button" id="start" data-start aria-disabled="true">Start the test</button>
+          <a class="btn out" href="/?switch=1" id="notNow">Not now</a>
+          <p class="small center">Ticked boxes are stored as yes/no only; where people live is not stored.</p>
+        </div>
+      </section>
+      <div class="peek" id="peek" aria-hidden="true">
+        <p class="peek-t"><b>Please confirm</b> · <span id="peekN">0 of 4 required ticked</span></p>
+        <div class="peek-pills">${[...REQUIRED.map(([k]) => [k, SHORT[k]]), ["synthetic", "Synthetic data (optional)"]].map(([k, t]) => `<span class="pp" data-pp="${k}"><i></i>${t}</span>`).join("")}</div>
+        <div class="peek-go"><button class="btn pri sm" type="button" data-start tabindex="-1" aria-disabled="true">Start the test</button><a class="btn out sm" href="/?switch=1" tabindex="-1">Not now</a></div>
+      </div>`;
+    app.dataset.joining = joining ? "1" : "";
+    syncConsent();
+    // Desktop: the compact confirm box stays at the bottom while you read, and steps aside at the real one
+    if (peekObserver) peekObserver.disconnect();
+    if ("IntersectionObserver" in window) {
+      peekObserver = new IntersectionObserver(([e]) => document.getElementById("peek") && document.getElementById("peek").classList.toggle("away", e.isIntersecting), { threshold: 0.05 });
+      peekObserver.observe(document.getElementById("confirm"));
+    }
   }
+  const ticked = () => REQUIRED.filter(([k]) => consent[k]).length;
+  function syncConsent() {
+    const n = ticked();
+    for (const b of document.querySelectorAll("[data-start]")) b.setAttribute("aria-disabled", String(n < 4));
+    const peekN = document.getElementById("peekN");
+    if (peekN) peekN.textContent = `${n} of 4 required ticked`;
+    for (const p of document.querySelectorAll("[data-pp]")) p.classList.toggle("on", consent[p.dataset.pp]);
+    const err = document.getElementById("consentErr");
+    if (err && n === 4) { err.hidden = true; err.textContent = ""; }
+  }
+  async function startStudy(btn) {
+    if (ticked() < 4) {
+      const err = document.getElementById("consentErr");
+      err.textContent = "Please tick the four required boxes to start. The optional one is up to you.";
+      err.hidden = false;
+      const first = REQUIRED.find(([k]) => !consent[k]);
+      const box = document.getElementById(`c-${first[0]}`);
+      box.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      box.focus({ preventScroll: true });
+      return;
+    }
+    if (btn.dataset.busy) return;
+    btn.dataset.busy = "1";
+    const joining = app.dataset.joining === "1";
+    try {
+      const body = { consent: { ...consent } };
+      const out = joining ? await api(`/api/sk/study/${encodeURIComponent(sid)}/join`, body) : await api("/api/sk/study/sessions", body);
+      sid = out.sid;
+      tid = out.tid;
+      store.set(`study:${sid}:tid`, tid);
+      store.set("study:last", sid);
+      history.replaceState(null, "", `/study?s=${encodeURIComponent(sid)}`);
+      view = out.view;
+      open = null;
+      acct = null;
+      document.body.classList.remove("on-consent");
+      if (peekObserver) peekObserver.disconnect();
+      render();
+      window.scrollTo(0, 0);
+    } catch (err) {
+      delete btn.dataset.busy;
+      toast(err.message);
+    }
+  }
+  app.addEventListener("change", (e) => {
+    const k = e.target.dataset && e.target.dataset.consent;
+    if (k) { consent[k] = e.target.checked; syncConsent(); }
+  });
+
+  // ---------- The End session bar (every study screen until the tester finishes) and its sheet ----------
+  const endBar = (where) => `<div class="endbar"><span class="small">SideQuest study · ${esc(where)}</span><button class="end-btn" type="button" id="endSession">End session</button></div>`;
+  // A sheet: traps focus, starts on the safe button, closes with Escape, gives focus back
+  function sheet({ title, body, safe, danger, onDanger }) {
+    const opener = document.activeElement;
+    const wrap = document.createElement("div");
+    wrap.className = "sheet-wrap study-sheet";
+    wrap.innerHTML = `<div class="sheet-scrim" data-close></div>
+      <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheetT" aria-describedby="sheetB">
+        <span class="grab" aria-hidden="true"></span>
+        <h2 id="sheetT" class="sheet-t">${title}</h2>
+        <div id="sheetB" class="sheet-b">${body}</div>
+        <div class="sheet-btns"><button class="btn out safe" type="button" data-close>${safe}</button><button class="btn danger" type="button" data-danger>${danger}</button></div>
+      </div>`;
+    document.body.appendChild(wrap);
+    for (const el of [app, document.querySelector("body > p")]) if (el) el.setAttribute("inert", "");
+    const close = () => {
+      wrap.remove();
+      for (const el of [app, document.querySelector("body > p")]) if (el) el.removeAttribute("inert");
+      document.removeEventListener("keydown", onKey, true);
+      if (opener && document.contains(opener)) opener.focus();
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      if (e.key !== "Tab") return;
+      const items = [...wrap.querySelectorAll("button:not([disabled])")];
+      const i = items.indexOf(document.activeElement);
+      if (e.shiftKey && i <= 0) { e.preventDefault(); items[items.length - 1].focus(); }
+      else if (!e.shiftKey && i === items.length - 1) { e.preventDefault(); items[0].focus(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    wrap.addEventListener("click", async (e) => {
+      if (e.target.closest("[data-close]")) return close();
+      const d = e.target.closest("[data-danger]");
+      if (!d || d.disabled) return;
+      d.disabled = true;
+      try { await onDanger(); wrap.remove(); for (const el of [app, document.querySelector("body > p")]) if (el) el.removeAttribute("inert"); document.removeEventListener("keydown", onKey, true); }
+      catch (err) { d.disabled = false; toast(err.message); }
+    });
+    wrap.querySelector(".safe").focus();
+  }
+  function forgetLocal() {
+    if (view && view.you && view.you.madeAccount) { try { localStorage.removeItem("sq2.user"); } catch {} } // the study test account is deleted
+    if (sid) store.set(`study:${sid}:tid`, null);
+    store.set("study:last", null);
+    sid = null; tid = null; view = null; acct = null;
+    history.replaceState(null, "", "/study");
+  }
+  function endSheet() {
+    sheet({
+      title: "End the session?",
+      body: "<p>Everything you've shared in this session will be erased.</p>",
+      safe: "Keep going",
+      danger: "End and erase",
+      onDanger: async () => {
+        await post("end");
+        forgetLocal();
+        app.innerHTML = `<div class="bye"><span class="isq it big" aria-hidden="true">${SI.ok}</span><h1 tabindex="-1" id="byeT">Session ended</h1>
+          <p class="muted">Everything you shared in this session has been erased. Thanks for your time.</p>
+          <a class="btn out" href="/?switch=1">Back to the start</a></div>`;
+        document.getElementById("byeT").focus();
+      },
+    });
+  }
+
+  // ---------- Thank you, Request removal, Request received ----------
+  function thanksScreen() {
+    app.innerHTML = `
+      <header class="lights tall"><span class="isq ok-i big" aria-hidden="true">${SI.ok}</span><h1 class="hero">Thank you!</h1></header>
+      ${bullets(["Your answers are saved with a random code.", `We'll automatically delete them after <b>${DELETE_DATE}</b>.`, "Want them gone sooner? Submit a request and we'll make sure they aren't included in our study."])}
+      <button class="btn out" type="button" id="requestRemoval">Request removal</button>
+      <p class="c13 contact">Questions? <a href="mailto:${EMAIL}">${EMAIL}</a></p>`;
+  }
+  function removalSheet() {
+    sheet({
+      title: "Request removal?",
+      body: bullets(["Your answers will be taken out of our study results.", "They'll be deleted."]),
+      safe: "Cancel",
+      danger: "Send request",
+      onDanger: async () => {
+        const out = await post("remove");
+        forgetLocal();
+        store.set("study:removed", out.code);
+        receivedScreen(out.code);
+      },
+    });
+  }
+  function receivedScreen(code) {
+    app.innerHTML = `<div class="received">
+      <span class="isq it big" aria-hidden="true">${SI.ok}</span>
+      <h1 tabindex="-1" id="recvT">Request received</h1>
+      ${bullets(["Your answers won't be included in our study.", `Your reference code is #${esc(code)}, in case you contact us.`])}
+      <p class="code" id="refCode" aria-label="Reference code ${esc(code.split("").join(" "))}">#${esc(code)}</p>
+      <p class="c13 center contact"><a href="mailto:${EMAIL}">${EMAIL}</a></p>
+      <a class="btn out" href="/?switch=1" id="doneRemoved">Done</a></div>`;
+    document.getElementById("recvT").focus();
+  }
+
+  // ---------- The questionnaire: 12 questions as grouped cards, 3 per screen, 4 parts ----------
+  // Each card has Skip. Chips are toggle buttons, single answers are native radio groups, the two sliders
+  // are native ranges with text values. A part is saved on Continue; anything left blank counts as skipped.
+  const VIBE_OPTS = [["live-music", "Live music"], ["comedy", "Comedy"], ["markets", "Markets"], ["board-games", "Board games"], ["dance", "Dance"], ["art-shows", "Art shows"], ["food-pop-ups", "Food pop-ups"], ["theatre", "Theatre"], ["jazz", "Jazz"], ["zines", "Zines"]];
+  const SPEND_OPTS = [["under-20", "Under $20"], ["20-40", "$20–40"], ["40-80", "$40–80"], ["80+", "$80+"], ["prefer-not", "Prefer not to say"]];
+  const TRAVEL_OPTS = [["15", "15"], ["30", "30"], ["45", "45"], ["60+", "60+"]];
+  const Q = {
+    q1: { n: 1, text: "How often do you go out in a typical month?", type: "one", style: "seg", opts: [["0", "0"], ["1-2", "1–2"], ["3-4", "3–4"], ["5+", "5+"]] },
+    q2: { n: 2, text: "Pick up to 5 kinds of nights you enjoy.", type: "many", max: 5, opts: VIBE_OPTS },
+    q3: { n: 3, text: "What's your ideal night like?", type: "scale", lo: "Chill", hi: "Wild", words: ["Very chill", "Mostly chill", "In between", "Mostly wild", "Very wild"] },
+    q4: { n: 4, text: "Do you prefer new places or old favourites?", type: "scale", lo: "Favourites", hi: "Something new", words: ["Always favourites", "Mostly favourites", "A mix of both", "Mostly something new", "Always something new"] },
+    q5: { n: 5, text: "Which nights usually work for you?", type: "many", max: 7, opts: [["mon", "Mon", "Monday"], ["tue", "Tue", "Tuesday"], ["wed", "Wed", "Wednesday"], ["thu", "Thu", "Thursday"], ["fri", "Fri", "Friday"], ["sat", "Sat", "Saturday"], ["sun", "Sun", "Sunday"]] },
+    q6: { n: 6, text: "What time do you like to start?", type: "one", style: "pills", opts: [["before-6", "Before 6"], ["6-8", "6–8 PM"], ["after-8", "After 8"], ["after-10", "After 10"]] },
+    q7: { n: 7, text: "How far will you travel for a good night?", type: "one", style: "seg", opts: TRAVEL_OPTS, unit: "minutes" },
+    q8: { n: 8, text: "What do you usually spend on a night out?", type: "one", style: "pills", opts: SPEND_OPTS },
+    q9: { n: 9, text: "How many people do you usually go out with?", type: "one", style: "seg", opts: [["1", "Just me"], ["2", "2"], ["3-4", "3–4"], ["5+", "5+"]] },
+    q10: { n: 10, text: "In your friend group, who usually makes the plan?", type: "one", style: "pills", opts: [["me", "Me"], ["someone-else", "Someone else"], ["we-vote", "We vote"], ["nobody", "Honestly, nobody"]] },
+    q11: { n: 11, text: "What most often stops a plan from happening?", type: "one", style: "pills", opts: [["cost", "Cost"], ["timing", "Timing"], ["no-one-decides", "No one decides"], ["too-far", "Too far"], ["nothing-appeals", "Nothing appeals"], ["something-else", "Something else"]] },
+    q12: { n: 12, text: "Think about your last night out. What kind was it, roughly what did it cost, and how far did you travel?", type: "parts", hint: "(pick from the lists above)",
+      parts: [["kind", "What kind was it?", "pills", [...VIBE_OPTS, ["other", "Other"]]], ["cost", "Roughly what did it cost?", "pills", SPEND_OPTS], ["travel", "How far did you travel?", "seg", TRAVEL_OPTS, "minutes"]] },
+  };
+  const QPARTS = [["q1", "q2", "q3"], ["q4", "q5", "q6"], ["q7", "q8", "q9"], ["q10", "q11", "q12"]];
+  const qa = { answers: {}, skipped: new Set(), part: 1 };
+
+  function radios(name, label, opts, style, value, unit) {
+    return `<div class="${style === "seg" ? "segc" : "pills"}" role="radiogroup" aria-labelledby="${label}" style="${style === "seg" ? `grid-template-columns:repeat(${opts.length},minmax(0,1fr))` : ""}">${opts.map(([v, t]) => `<label class="ro"><input type="radio" name="${name}" value="${esc(v)}" ${value === v ? "checked" : ""}><span>${esc(t)}</span></label>`).join("")}</div>${unit ? `<span class="small unit">${unit}</span>` : ""}`;
+  }
+  function qCard(id) {
+    const q = Q[id];
+    const skipped = qa.skipped.has(id);
+    const v = qa.answers[id];
+    let body = "";
+    if (q.type === "one") body = radios(id, `${id}-t`, q.opts, q.style, v, q.unit);
+    else if (q.type === "many") {
+      const list = v || [];
+      const full = list.length >= q.max;
+      body = `<div class="chips qchips" role="group" aria-labelledby="${id}-t">${q.opts.map(([val, t, full_]) => `<button type="button" class="chip" data-chip="${id}" data-value="${esc(val)}" aria-pressed="${list.includes(val)}" ${full && !list.includes(val) ? 'aria-disabled="true"' : ""} ${full_ ? `aria-label="${full_}"` : ""}>${esc(t)}</button>`).join("")}</div>
+        ${q.max < 7 ? `<span class="small count" id="${id}-n" aria-live="polite">${list.length} of ${q.max} picked</span>` : ""}`;
+    } else if (q.type === "scale") {
+      const touched = typeof v === "number";
+      const val = touched ? v : 3;
+      body = `<div class="slide"><input type="range" min="1" max="5" step="1" value="${val}" id="${id}-r" data-scale="${id}" aria-labelledby="${id}-t" aria-valuetext="${touched ? q.words[val - 1] : "Not answered yet"}">
+        <div class="ends"><span>${q.lo}</span><span>${q.hi}</span></div>
+        <p class="slide-v" id="${id}-v">${touched ? esc(q.words[val - 1]) : "Not answered yet. Move the slider to choose."}</p></div>`;
+    } else if (q.type === "parts") {
+      const o = v || {};
+      body = `<p class="small hint12">${q.hint}</p>${q.parts.map(([k, label, style, opts, unit]) => `<p class="sublab" id="${id}-${k}-t">${label}</p>${radios(`${id}-${k}`, `${id}-${k}-t`, opts, style, o[k], unit)}`).join("")}`;
+    }
+    return `<section class="qc ${skipped ? "skipped" : ""}" id="card-${id}" aria-labelledby="${id}-t">
+      <div class="qtop"><span class="qn" aria-hidden="true">Q${q.n}</span><button type="button" class="skipb" data-skip="${id}" aria-pressed="${skipped}" aria-describedby="${id}-t">${skipped ? "Skipped · Undo" : "Skip"}</button></div>
+      <h2 class="qt" id="${id}-t"><span class="sr">Question ${q.n}. </span>${esc(q.text)}</h2>
+      <div class="qbody" ${skipped ? "inert" : ""}>${body}</div></section>`;
+  }
+  function questionsScreen() {
+    const part = qa.part;
+    app.innerHTML = `${endBar("questions")}
+      <div class="qhead">${part > 1 ? `<button class="icon-btn" type="button" id="qBack" aria-label="Back to part ${part - 1}">${SI.back}</button>` : '<span class="qspace"></span>'}
+        <h1 class="stepl" tabindex="-1" id="qPartT">Part ${part} of 4 · About your nights out</h1><span class="qspace"></span></div>
+      <div class="qprog" role="progressbar" aria-label="Questions" aria-valuemin="0" aria-valuemax="4" aria-valuenow="${part}">${[1, 2, 3, 4].map((i) => `<i class="${i <= part ? "on" : ""}"></i>`).join("")}</div>
+      ${QPARTS[part - 1].map(qCard).join("")}
+      <button class="btn pri" type="button" id="qNext">Continue</button>`;
+  }
+  // What a part sends: each answer, or "skipped"
+  function partAnswers(part) {
+    const out = {};
+    for (const id of QPARTS[part - 1]) {
+      const v = qa.answers[id];
+      const empty = v == null || (Array.isArray(v) && !v.length) || (Q[id].type === "parts" && !Object.keys(v).length);
+      out[id] = qa.skipped.has(id) || empty ? "skipped" : v;
+    }
+    return out;
+  }
+  async function nextPart(btn) {
+    btn.disabled = true;
+    try {
+      view = await post("questionnaire", { part: qa.part, answers: partAnswers(qa.part) });
+      if (qa.part < 4) {
+        qa.part++;
+        questionsScreen();
+        window.scrollTo(0, 0);
+        document.getElementById("qPartT").focus({ preventScroll: true });
+      } else {
+        open = null;
+        render();
+        window.scrollTo(0, 0);
+        toast("Thanks. On to the app.");
+      }
+    } catch (err) { btn.disabled = false; toast(err.message); }
+  }
+  app.addEventListener("input", (e) => {
+    const id = e.target.dataset && e.target.dataset.scale;
+    if (!id) return;
+    const n = Number(e.target.value);
+    qa.answers[id] = n;
+    e.target.setAttribute("aria-valuetext", Q[id].words[n - 1]);
+    document.getElementById(`${id}-v`).textContent = Q[id].words[n - 1];
+  });
+  app.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.type !== "radio" || !/^q\d+/.test(t.name)) return;
+    const [id, part] = t.name.split("-");
+    if (part) qa.answers[id] = { ...(qa.answers[id] || {}), [part]: t.value };
+    else qa.answers[id] = t.value;
+  });
 
   // ---------- Your account (after consent) ----------
   // A quick app account, or sign in, so the events testers add and the plans they make are their own and stay.
@@ -134,7 +416,7 @@
         <button class="linkish" type="button" data-acct="signin">Already have an account? Sign in</button>`;
     }
     app.innerHTML = `
-      <div class="row sb"><span class="tag pri">Sidekick study</span><span class="small">Step 2 · your account</span></div>
+      ${endBar("your account")}
       <div class="lead-in acct">${body}</div>
       <p class="fine">Your study answers stay anonymous. They're linked to your account only by a random id, never your name or email.</p>
       <div class="skip">
@@ -142,8 +424,8 @@
         <p class="small">The demo account is shared: anything you make there is visible to everyone using it, and is reset.</p>
       </div>`;
   }
-  async function useAccount(kind, user) {
-    view = await post("account", { kind, user });
+  async function useAccount(kind, user, made = false) {
+    view = await post("account", { kind, user, made }); // made: a study test account, deleted with the study
     acct = null;
     open = null;
     render();
@@ -163,7 +445,7 @@
         const vibes = [...new Set(a.vibes.flatMap((l) => (VIBES.find((v) => v[0] === l) || [l, [l]])[1]))];
         await act("setProfile", { vibes, registered: true }, r.userId);
         appUser.set(r.userId);
-        await useAccount("own", r.userId);
+        await useAccount("own", r.userId, true);
         toast("Account made. You're signed in to the app as you.");
         return;
       }
@@ -300,12 +582,18 @@
 
   function render() {
     if (!view) return;
+    document.body.classList.remove("on-consent");
     if (!view.you.account) return accountScreen(); // right after consent: the account step
+    if (!view.you.questionnaire.done) { // then the questionnaire, from the next part not yet saved
+      if (!document.getElementById("qNext")) { qa.part = Math.min(4, view.you.questionnaire.parts + 1); questionsScreen(); }
+      return;
+    }
+    if (view.you.final) return thanksScreen();
     const doneN = view.steps.filter((s) => view.you.steps[s]).length;
     const next = firstOpen();
     if (!open) open = location.hash.replace("#", "") in TITLES ? location.hash.replace("#", "") : next;
     const share = `${location.origin}/study?s=${encodeURIComponent(sid)}`;
-    app.innerHTML = `
+    app.innerHTML = `${endBar("checklist")}
       <div class="row sb"><span class="tag pri">Sidekick study</span><span class="small">${doneN} of ${view.steps.length} done</span></div>
       <div class="prog"><h1>${view.you.final ? "Thank you!" : "Your checklist"}</h1>
         <span class="meter" role="progressbar" aria-label="Study progress" aria-valuemin="0" aria-valuemax="${view.steps.length}" aria-valuenow="${doneN}"><i style="width:${Math.round((doneN / view.steps.length) * 100)}%"></i></span>
@@ -329,6 +617,40 @@
   // ---------- Taps ----------
   app.addEventListener("click", async (e) => {
     const t = e.target;
+    const go = t.closest("[data-start]");
+    if (go) { startStudy(go); return; }
+    if (t.closest("#endSession")) { endSheet(); return; }
+    if (t.closest("#requestRemoval")) { removalSheet(); return; }
+    if (t.closest("#doneRemoved")) { store.set("study:removed", null); return; }
+    const chip = t.closest("[data-chip]");
+    if (chip) {
+      const id = chip.dataset.chip;
+      const list = qa.answers[id] || [];
+      const v = chip.dataset.value;
+      if (list.includes(v)) qa.answers[id] = list.filter((x) => x !== v);
+      else if (list.length >= Q[id].max) { toast(`Pick up to ${Q[id].max}.`); return; }
+      else qa.answers[id] = [...list, v];
+      const now = qa.answers[id];
+      const card = document.getElementById(`card-${id}`);
+      for (const c of card.querySelectorAll("[data-chip]")) {
+        const on = now.includes(c.dataset.value);
+        c.setAttribute("aria-pressed", String(on));
+        if (!on && now.length >= Q[id].max) c.setAttribute("aria-disabled", "true"); else c.removeAttribute("aria-disabled");
+      }
+      const count = document.getElementById(`${id}-n`);
+      if (count) count.textContent = `${now.length} of ${Q[id].max} picked`;
+      return;
+    }
+    const skip = t.closest("[data-skip]");
+    if (skip) {
+      const id = skip.dataset.skip;
+      if (qa.skipped.has(id)) qa.skipped.delete(id); else qa.skipped.add(id);
+      document.getElementById(`card-${id}`).outerHTML = qCard(id);
+      document.querySelector(`[data-skip="${id}"]`).focus();
+      return;
+    }
+    if (t.closest("#qNext")) { nextPart(t.closest("#qNext")); return; }
+    if (t.closest("#qBack")) { qa.part = Math.max(1, qa.part - 1); questionsScreen(); document.getElementById("qPartT").focus(); return; }
     if (acct) {
       const v = t.closest("[data-vibe]");
       if (v) { const l = v.dataset.vibe; acct.vibes = acct.vibes.includes(l) ? acct.vibes.filter((x) => x !== l) : [...acct.vibes, l]; v.setAttribute("aria-pressed", String(acct.vibes.includes(l))); return; }
@@ -433,8 +755,9 @@
       if (JSON.stringify(next) !== JSON.stringify(view)) {
         const typing = document.activeElement && document.activeElement.id === "why";
         const onAccount = acct && !next.you.account; // the account step keeps what's typed
+        const onQuestions = !next.you.questionnaire.done; // so does the questionnaire
         view = next;
-        if (!typing && !onAccount) render();
+        if (!typing && !onAccount && !onQuestions) render();
       }
     } catch (err) {
       if (err.status === 403) { store.set(`study:${sid}:tid`, null); tid = null; acct = null; introScreen(true); }
@@ -453,7 +776,9 @@
       setTimeout(() => document.documentElement.classList.remove("arrive"), 2000);
     }
   } catch {}
-  if (!sid) introScreen(false);
+  const removed = store.get("study:removed");
+  if (removed && !params.get("s")) receivedScreen(removed);
+  else if (!sid) introScreen(false);
   else if (!tid) introScreen(true);
   else refresh().then(() => { if (!view && tid) introScreen(false); });
 })();
