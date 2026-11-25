@@ -224,10 +224,43 @@ function relevance(p, wants) {
   if (c == null) return sd;
   if (sd == null) return c;
   const mixed = Math.min(1, c * 0.8 + sd * 0.2 + (c && sd ? 0.1 : 0));
-  // Google or Foursquare returned it for this very want and its cuisine matches ("Chinese" for "Chinese skewers"):
-  // the menu may well have it, so it just clears the bar, below every place that shows the dish itself
-  return p.wantQuery && p.wantQuery === pl.query && sd === 1 ? Math.max(mixed, 0.55) : mixed;
+  // A food want whose cuisine the place shows by its type or category ("chinese_restaurant" for "Chinese skewers"):
+  // the menu may well have the dish, so it counts as relevant (NEAR), ranked below every place that shows the dish
+  // itself in its name or summary (0.75 and up)
+  const cuisineType = pl.food && scores.some((y) => y.x.group === "cuisine" && y.s === 1);
+  if (cuisineType && c < 0.75) return Math.max(mixed, NEAR);
+  // Google or Foursquare returned it for this very want and its cuisine shows in its name: it just clears the bar
+  return p.wantQuery && p.wantQuery === pl.query && sd >= 0.9 ? Math.max(mixed, 0.55) : mixed;
 }
+const NEAR = 0.6;
+const EXACT = 0.75;
+
+// How a place matches, for a results list: "exact" (it shows what was asked for: the dish or venue in its type,
+// category, name or summary), "near" (only the cuisine matches, for a food want: "Chinese restaurants" for
+// "Chinese skewers"), or null. near is the words to say what it is instead ("Chinese restaurants").
+function match(p, wants) {
+  const pl = wants && wants.terms ? wants : plan(wants);
+  const r = relevance(p, pl);
+  if (r >= EXACT) return { score: r, tier: "exact" };
+  if (r >= 0.5) return { score: r, tier: "near", near: nearLabel(pl) };
+  return { score: r, tier: null };
+}
+// "Chinese restaurants" for a want with a cuisine, else "restaurants" (food) or "places"
+function nearLabel(pl) {
+  const c = pl && pl.terms.find((x) => x.group === "cuisine");
+  if (c) return `${CUISINES[c.key].label} restaurants`;
+  return pl && pl.food ? "restaurants" : "places";
+}
+// What was asked for, said short ("skewer spots", "hot pot spots", "karaoke spots"), for "No skewer spots found"
+function askedLabel(pl) {
+  if (!pl) return "matching spots";
+  const core = pl.terms.find((x) => x.group === "dish" || x.group === "venue") || pl.terms[0];
+  if (!core) return `${pl.label} spots`;
+  const label = GROUPS[core.group][core.key].label;
+  const one = core.group === "dish" && /s$/.test(label) && !/ss$/.test(label) ? label.slice(0, -1) : label;
+  return `${one} spots`;
+}
+const isFood = (p) => [...(p.types || p.tags || []), p.primaryType].filter(Boolean).some((t) => FOOD_TYPES.test(t));
 
 // A short phrase that isn't in the lexicon ("poutine", "a jazz bar with a fireplace"), kept only when it reads like a
 // specific ask: up to 5 words and none of the vague ones ("something fun", "whatever")
@@ -237,4 +270,4 @@ function loose(text) {
   return c && c.split(" ").length <= 5 && !VAGUE.test(c) ? c : "";
 }
 
-module.exports = { find, clean, loose, plan, relevance, terms, CUISINES, DISHES, VENUES, FEATURES, MIN_RELEVANCE: 0.5 };
+module.exports = { find, clean, loose, plan, relevance, match, nearLabel, askedLabel, isFood, terms, CUISINES, DISHES, VENUES, FEATURES, MIN_RELEVANCE: 0.5, NEAR, EXACT };

@@ -395,6 +395,8 @@ const INIT = () => {
         assert.deepStrictEqual(rec.properties.updates.items.properties.slot.enum, ["night", "time", "origin", "vibe", "kind", "want"], "record_facts takes public slots only");
         assert(!["budget", "nos"].some((s) => rec.properties.updates.items.properties.slot.enum.includes(s)), "record_facts can't take private slots");
         assert(p.built_in_tools.skip_turn && p.ignore_default_personality === true);
+        // The vibe is an open question; anything off the list is recorded as want and said back
+        assert(/What are you in the mood for\? Could be food, a show, anything/.test(p.prompt) && /record it as want in their words and say it back/.test(p.prompt), "open vibe question in the agent prompt");
         assert.strictEqual(c.conversation_config.tts.model_id, "eleven_flash_v2");
         assert.strictEqual(c.conversation_config.turn.turn_eagerness, "normal");
         assert.strictEqual(c.conversation_config.turn.speculative_turn, true);

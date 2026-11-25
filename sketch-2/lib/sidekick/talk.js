@@ -14,7 +14,7 @@ const P = require("./plan");
 const PUBLIC = ["night", "time", "vibe", "origin", "kind"];
 const DAY = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
 const dayOf = (room, v) => DAY[String(P.labelOf("night", v, room)).slice(0, 3)] || P.labelOf("night", v, room);
-const VIBE_WORDS = { music: "live music", comedy: "comedy", games: "games", dance: "dancing", arts: "art and film" };
+const VIBE_WORDS = { music: "live music", comedy: "comedy", games: "games", dance: "dancing", arts: "art and film", food: "food", drinks: "drinks", karaoke: "karaoke", outdoors: "outdoors", markets: "markets" };
 const TIME_WORDS = { early: "the afternoon", evening: "after 6", late: "after 8" };
 const KIND_WORDS = { events: "a ticketed event", places: "somewhere to drop in", either: "either kind of plan" };
 
@@ -140,7 +140,7 @@ function spokenTitle(title, venue) {
 const startFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Toronto", hour: "numeric", minute: "2-digit" });
 const spokenTime = (iso) => startFmt.format(new Date(iso)).replace(":00", "").replace(/\s?[AP]M$/, "");
 function vibesOf(e) {
-  return Object.keys(P.VIBES).filter((v) => (e.vibes || []).some((t) => P.VIBES[v].includes(t)));
+  return P.kindsOf(e);
 }
 // A venue name for the ear: "Meridian Arts Centre: Lyric Theatre" -> "Meridian Arts Centre", "St." -> "St"
 function spokenVenue(v) {

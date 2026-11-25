@@ -44,7 +44,8 @@ const queryFor = (vibes) => {
     const hit = VIBE_QUERY.find(([, list]) => list.includes(v));
     if (hit) return hit[0];
   }
-  return "default";
+  return "food"; // the map with no vibe that has a search of its own: late-night food, the broadest browse
+
 };
 
 const SESSION_MS = 3 * 3600 * 1000;
@@ -79,6 +80,7 @@ function card(c, loc, now) {
     price,
     url: c.mapsUrl,
     attribution: c.attribution || "Google Maps",
+    vibes: c.vibes || [],
   };
 }
 
@@ -107,6 +109,7 @@ async function search({ lat, lng, vibes }) {
 
 // Places for a typed search, in the person's words. Returns { places, want, reason }. The words are cleaned first
 // (no numbers, amounts or areas go to Google), and only places that match them come back, best match first.
+const CAPPED_NOTE = "Today's place search limit was reached, so places will be back tomorrow. Events are still here.";
 const queries = new Map(); // cleaned query + rounded point -> { at, out }
 async function forQuery({ query, lat, lng } = {}) {
   sweep();
@@ -121,7 +124,7 @@ async function forQuery({ query, lat, lng } = {}) {
   const out = (async () => {
     // Leave the planning calls their headroom, as the map does
     const googleOk = places.configured() && (await usage.available("places_text_search", 1 + HEADROOM())) && (await usage.available("places_search_pro", 1));
-    if (!googleOk && !fsq.configured()) return { places: [], want: wants, reason: "capped" };
+    if (!googleOk && !fsq.configured()) return { places: [], want: wants, reason: "capped", note: CAPPED_NOTE };
     const res = await (googleOk ? places.searchWant(wants, { origins: [at], tier: "pro" }) : (async () => {
       const plan = want.plan(wants);
       const f = await fsq.search(plan.query, { center: { latitude: at.lat, longitude: at.lng }, radius: 8000 });
@@ -129,12 +132,18 @@ async function forQuery({ query, lat, lng } = {}) {
     })());
     const plan = res.plan || want.plan(wants);
     const now = torontoNow();
-    const list = res.places.filter((c) => c.lat != null)
-      .map((c) => ({ c, r: want.relevance(c, plan) }))
-      .filter((x) => x.r >= want.MIN_RELEVANCE)
-      .sort((a, b) => b.r - a.r)
-      .map(({ c, r }) => ({ ...card(c, { latitude: c.lat, longitude: c.lng }, now), relevance: Math.round(r * 100) / 100 }));
-    return { places: list.slice(0, 10), want: wants, reason: res.capped || null };
+    // Exact matches first (the dish or kind of place shows in its type, name or summary), then near ones (for a food
+    // want, the cuisine matches: "Chinese restaurants" for "Chinese skewers"). Never a blank list when there are
+    // near matches: the note says what we found instead.
+    const scored = res.places.filter((c) => c.lat != null).map((c) => ({ c, m: want.match(c, plan) })).filter((x) => x.m.tier);
+    const exact = scored.filter((x) => x.m.tier === "exact").sort((a, b) => b.m.score - a.m.score);
+    const near = scored.filter((x) => x.m.tier === "near").sort((a, b) => b.m.score - a.m.score);
+    const list = [...exact, ...near].slice(0, 10)
+      .map(({ c, m }) => ({ ...card(c, { latitude: c.lat, longitude: c.lng }, now), relevance: Math.round(m.score * 100) / 100, exact: m.tier === "exact" }));
+    let note = null;
+    if (!exact.length && near.length) note = `No ${want.askedLabel(plan)} found. Here are ${want.nearLabel(plan)} nearby.`;
+    else if (res.capped && res.capped !== "not configured" && !list.length) note = CAPPED_NOTE;
+    return { places: list, want: wants, reason: res.capped || null, note };
   })().catch(() => ({ places: [], want: wants, reason: "unavailable" }));
   queries.set(key, { at: Date.now(), out });
   if (queries.size > 500) queries.delete(queries.keys().next().value);

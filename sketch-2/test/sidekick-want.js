@@ -188,10 +188,12 @@ const say = async (room, person, text, kind = "spoken") => {
     const kept = P.filterEvents(cands, room, f).map((x) => x.title);
     assert(!kept.includes("Bar Maya") && !kept.includes("Bar Raval") && !kept.includes("Civil Liberties"), `bars out: ${kept}`);
     assert(kept.includes("Chuan Skewers House") && kept.includes("Silk Road Kitchen"), `skewer places in: ${kept}`);
-    assert(!kept.includes("Golden Dragon"), "a Chinese restaurant that shows no skewers (and didn't come from the skewer search) is out");
+    // A Chinese restaurant that shows no skewers still counts (its cuisine type matches), ranked below the dish
+    assert(kept.includes("Golden Dragon"), "a matching cuisine type counts as relevant for a food want");
+    assert(want.relevance(places.toCandidate(SKEWERS[2], "Food & drink"), ["Chinese skewers"]) < want.relevance(places.toCandidate(SKEWERS[1], "Food & drink"), ["Chinese skewers"]), "cuisine-only ranks below a summary hit");
     const tagged = places.toCandidate(SKEWERS[2], "Food & drink");
     tagged.wantQuery = want.plan(["Chinese skewers"]).query;
-    assert(P.filterEvents([tagged], room, f).length === 1, "...but in when the skewer search itself returned it");
+    assert(P.filterEvents([tagged], room, f).length === 1, "...and in when the skewer search itself returned it");
     const order = P.ranked(cands.concat([tagged]), room, f).filter((x) => x.type === "place").map((x) => x.title);
     assert.strictEqual(order[0], "Chuan Skewers House", order.join(", "));
     assert(order.indexOf("Golden Dragon") > order.indexOf("Silk Road Kitchen"), "shows-the-dish ranks above clears-the-bar");

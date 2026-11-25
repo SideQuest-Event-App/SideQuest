@@ -233,8 +233,10 @@
     // searches when the words name something specific, within its usage caps, and keeps nothing
     s.places = null;
     const at = (SQ.lx && SQ.lx.state().loc) || null;
-    SQ.post("/api/places", { query: q, lat: at ? at.lat : null, lng: at ? at.lng : null })
-      .then((r) => { if (run === searchRun) { s.places = Array.isArray(r.places) ? r.places : []; s.placesWant = r.want || null; if (!s.loading) SQ.render(); } }, () => { if (run === searchRun) s.places = []; });
+    s.placesNote = null;
+    s.placesReason = null;
+    SQ.post("/api/places", { query: q, userId: SQ.userId(), lat: at ? at.lat : null, lng: at ? at.lng : null })
+      .then((r) => { if (run === searchRun) { s.places = Array.isArray(r.places) ? r.places : []; s.placesWant = r.want || null; s.placesNote = r.note || null; s.placesReason = r.reason || null; if (!s.loading) SQ.render(); } }, () => { if (run === searchRun) { s.places = []; if (!s.loading) SQ.render(); } });
     SQ.post("/api/search", { userId: SQ.userId(), query: q, only: SQ.filteredIds() })
       .then((r) => {
         if (run !== searchRun) return;
@@ -249,12 +251,19 @@
         SQ.render();
       });
   };
+  // All / Events / Places on the results (All by default; kept for the next search too)
+  A.searchKind = (kind) => {
+    const s = U().search;
+    s.kind = ["all", "events", "places"].includes(kind) ? kind : "all";
+    s.shown = Math.max(s.shown || 0, REVEAL);
+    SQ.saveSearch();
+  };
   A.searchRetry = () => A.search(null, null, true); // "Try again" after a failed search: the same words and filters
   // The results page reached its end: show the next 5, fetching another page first if they've all been shown
   A.searchMore = async () => {
     const s = U().search;
     if (s.loading || s.loadingMore) return;
-    if (s.shown < s.matches.length) {
+    if (s.shown < s.matches.length + (s.places || []).length) {
       s.shown += REVEAL;
       SQ.saveSearch();
       return;

@@ -78,15 +78,16 @@
 
   // The last search's results, kept for this tab so a reload doesn't lose them (only for the account that ran it)
   SQ.saveSearch = () => {
-    const { q, ran, result, matches, shown, more, sig } = SQ.u.search;
+    const { q, ran, result, matches, shown, more, sig, kind } = SQ.u.search;
     try {
-      sessionStorage.setItem("sq2.search", JSON.stringify({ user: ids.user, q, ran, result, matches, shown, more, sig }));
+      // Places aren't kept (Google's terms: in memory only), so a restored search shows its events until searched again
+      sessionStorage.setItem("sq2.search", JSON.stringify({ user: ids.user, q, ran, result, matches, shown, more, sig, kind }));
     } catch {}
   };
   function restoreSearch() {
     try {
       const { user, ...saved } = JSON.parse(sessionStorage.getItem("sq2.search") || "null") || {};
-      if (user && user === ids.user && saved.result) Object.assign(SQ.u.search, saved);
+      if (user && user === ids.user && saved.result) Object.assign(SQ.u.search, saved, { places: SQ.u.search.places || [] });
     } catch {}
   }
 

@@ -659,27 +659,44 @@
     else if (s.error) body = SQ.errorBlock("Couldn't load your results", "Something went wrong on our side. Your search is still here.", "searchRetry");
     else if (r) {
       const hits = s.matches.filter((m) => ev(m.id) && !u.notForMe.includes(m.id));
-      const shown = hits.slice(0, s.shown);
-      const done = !s.loadingMore && s.shown >= hits.length && !s.more;
+      const pls = s.places || [];
+      const kind = s.kind || "all";
+      // One list of events and places, both ranked by the same score (how well each matches the words, plus your
+      // taste), each card labelled Event or Place. Older answers without a score fall back to the match %.
+      const items = [...hits.map((m) => ({ kind: "event", m, score: m.score != null ? m.score : (m.match || 0) * 0.8 })), ...pls.map((p) => ({ kind: "place", p, score: p.score != null ? p.score : (p.relevance || 0) * 80 }))]
+        .sort((a, b) => b.score - a.score);
+      const list = kind === "events" ? items.filter((x) => x.kind === "event") : kind === "places" ? items.filter((x) => x.kind === "place") : items;
+      const shown = list.slice(0, s.shown);
+      const done = !s.loadingMore && s.shown >= list.length && (kind === "places" || !s.more);
       const l = r.limits;
       const hit = (m) => {
         const e = ev(m.id);
         return `<div class="search-hit">
+          <span class="lx-top"><span class="kt ev">${icon("ticket", "xs")}Event</span></span>
           <button class="quest-row" data-act="openQuest" data-arg="${e.id}">${poster(e)}<span class="text"><span>${esc(e.title)}</span><span>${esc(qMeta(e))}</span></span>${SQ.matchPill(m.match)}</button>
           ${m.reason ? `<p class="hit-reason">${icon("sparkle")}<span>${esc(m.reason)}</span></p>` : ""}
           <button class="hit-not" data-act="notForMe" data-arg="${e.id}">${icon("thumbDown")}Not for me</button>
         </div>`;
       };
+      const row = (x) => (x.kind === "event" ? hit(x.m) : `<div class="search-hit">${lxPlaceCard(x.p, { row: true })}</div>`);
       // What the AI couldn't find, as "jazz or cheap eats"
       const gaps = r.unmet.map((x) => x.interest);
       const gapText = gaps.length < 2 ? gaps.join("") : `${gaps.slice(0, -1).join(", ")} or ${gaps[gaps.length - 1]}`;
+      const nE = hits.length, nP = pls.length;
+      const seg = `<div class="seg search-kind" role="group" aria-label="Show">${[["all", `All${nE + nP ? ` ${nE + nP}` : ""}`], ["events", `Events${nE ? ` ${nE}` : ""}`], ["places", `Places${s.places == null ? "" : nP ? ` ${nP}` : ""}`]].map(([k, label]) => `<button data-act="searchKind" data-arg="${k}" aria-pressed="${kind === k}">${esc(label)}</button>`).join("")}</div>`;
+      // Never a blank screen: say what we found instead, or that the day's place searches ran out
+      const note = s.placesNote && kind !== "events" ? `<p class="search-note">${icon("pin", "xs")}<span>${esc(s.placesNote)}</span></p>` : "";
+      const placesWait = s.places == null && kind !== "events" ? `<div class="search-note">${icon("pin", "xs")}<span>Looking for places too…</span></div>` : "";
+      const emptyKind = !list.length && s.places != null ? (kind === "places" ? (s.placesReason === "capped" ? "" : `<p class="t-body-m c-secondary">No places for “${esc(s.ran)}” nearby. Try other words, or see events.</p>`) : kind === "events" ? `<p class="t-body-m c-secondary">No events for “${esc(s.ran)}” yet.${nP ? " There are places, under Places." : ""}</p>` : "") : "";
       body = `
         <span class="t-caption c-tertiary">${r.mode === "keywords" ? `${l.fit} keyword matches (no AI)` : `${l.fit} matches with ${esc(SQ.aiLabel(r.mode))}`}</span>
+        ${seg}
         ${r.error ? `<div class="notice">${icon("sparkle")}<span>The AI didn't answer, so these are keyword matches.</span></div>` : ""}
-        ${(s.places || []).length ? `<section class="search-places" aria-label="Places for ${esc(s.ran)}"><h2 class="lx-h"><span class="kt pl">${icon("pin", "xs")}Places</span>${esc(`For “${(s.placesWant || [s.ran]).join(", ")}”`)}</h2>${s.places.map((p) => lxPlaceCard(p, { row: true })).join("")}</section>` : ""}
-        ${shown.length ? `<div class="stack" style="gap:16px">${shown.map(hit).join('<hr class="divider">')}</div>` : ""}
+        ${note}${emptyKind}
+        ${shown.length ? `<div class="stack search-list" style="gap:16px">${shown.map(row).join('<hr class="divider">')}</div>` : ""}
+        ${placesWait}
         ${s.loadingMore ? thinking("Finding more sidequests…") : !done ? '<div class="reveal-more" data-reveal="searchMore" aria-hidden="true"></div>' : ""}
-        ${done ? `<div class="search-end">
+        ${done && kind !== "places" ? `<div class="search-end">
             <h2 class="t-title-l">${shown.length ? "That’s everything for now" : "Nothing fit that yet"}</h2>
             <p class="t-body-m c-secondary">${gaps.length ? `We might not have found an exact fit for ${esc(gapText)}. ` : shown.length ? "Didn’t see quite the right one? " : ""}Request it and we’ll tell you first if a host puts one on.</p>
             ${me().demo ? "" : btn("Request this sidequest", { "data-act": "requestGap", "data-arg": s.ran }, "primary m")}

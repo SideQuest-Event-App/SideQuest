@@ -30,6 +30,24 @@ const spokenNights = (room) => {
 };
 
 // ---------- Taste ----------
+// The crew's taste, for suggestions and the call's spare place search: the signed-in members' strongest vibes (the
+// app's 21), strongest first. Vibe names only; nothing about who likes what leaves this function.
+function tasteVibes(room, only = null) {
+  const total = {};
+  for (const p of (room.people || []).filter((x) => !x.left && x.user && (!only || x.id === only))) {
+    const u = userOf(p.user);
+    if (!u) continue;
+    for (const [v, w] of Object.entries(taste.weights(u).vibes || {})) if (w > 0) total[v] = (total[v] || 0) + w;
+  }
+  return Object.entries(total).sort((a, b) => b[1] - a[1]).map(([v]) => v).slice(0, 5);
+}
+// One user's strongest vibes (the join form, before they're in the room)
+function userTaste(userId) {
+  const u = userOf(userId);
+  if (!u) return [];
+  return Object.entries(taste.weights(u).vibes || {}).filter(([, w]) => w > 0).sort((a, b) => b[1] - a[1]).map(([v]) => v).slice(0, 5);
+}
+
 // kind: "pick" (a vote) or "accept" (the locked plan). Places (from Google) aren't in the listings: skipped.
 function learn(room, person, kind, eventId) {
   if (!person || !person.user || person.noLearn) return false;
@@ -136,4 +154,4 @@ function pickInfo(id) {
   return { id: e.id, title: e.title, date: P.localDay(e.startsAt), night: P.nightLabel(P.localDay(e.startsAt)), where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), past: Date.parse(e.startsAt) < Date.now() };
 }
 
-module.exports = { learn, saveRecap, recaps, invite, deliverQueued, pickInfo, userOf };
+module.exports = { tasteVibes, userTaste, learn, saveRecap, recaps, invite, deliverQueued, pickInfo, userOf };

@@ -7,7 +7,8 @@ const SLOTS = {
   night: { label: "Night", multi: true, private: false },
   time: { label: "Time", multi: true, private: false, options: [["early", "Afternoon"], ["evening", "After 6"], ["late", "After 8"]] },
   origin: { label: "Starting from", multi: false, private: false, options: [["union", "Union"], ["finch", "Finch"], ["kennedy", "Kennedy"], ["kipling", "Kipling"]] },
-  vibe: { label: "Vibe", multi: true, private: false, options: [["music", "Live music"], ["comedy", "Comedy"], ["games", "Games & social"], ["dance", "Dancing"], ["arts", "Art & film"]] },
+  // Suggestions, not the full menu: anything else someone says or types goes into "want" in their words
+  vibe: { label: "Vibe", multi: true, private: false, options: [["music", "Live music"], ["comedy", "Comedy"], ["games", "Games & social"], ["dance", "Dancing"], ["arts", "Art & film"], ["food", "Food & drink"], ["drinks", "Bars"], ["karaoke", "Karaoke"], ["outdoors", "Outdoors"], ["markets", "Markets"]] },
   budget: { label: "Budget", multi: false, private: true, options: [["20", "Under $20"], ["30", "Under $30"], ["50", "Under $50"], ["any", "Doesn't matter"]] },
   nos: { label: "Avoid", multi: true, private: true, options: [["West End", "West End"], ["Downtown", "Downtown"], ["East End", "East End"], ["North York", "North York"], ["Scarborough", "Scarborough"], ["Etobicoke", "Etobicoke"]] },
   // Only asked when the call has places as well as events (Google Places on, and under its usage cap)
@@ -23,7 +24,41 @@ const want = require("../search/want");
 const BUCKET_HOUR = { early: 15, evening: 19, late: 21 };
 // Asked in this order of importance when nothing else decides it; nos is only asked on the join card
 const ASKABLE = ["night", "time", "budget", "origin", "vibe", "kind"];
-const VIBES = { music: ["Live music", "Jazz", "Indie gigs"], comedy: ["Comedy"], games: ["Games & social"], dance: ["Dance", "Electronic"], arts: ["Art & making", "Film nights", "Photography"] };
+// What shows a listing is each kind of night, from facts only: an event's vibes (tags), a place's Google types,
+// and words in a listing's name, title or summary. A place's own search ("arcade bar or board game cafe") is never
+// evidence on its own: Google can return a speakeasy for it.
+const KINDS = {
+  music: { tags: ["Live music", "Jazz", "Indie gigs"], types: ["live_music_venue", "concert_hall"], words: ["live music", "jazz", "blues", "gig", "gigs", "concert", "band", "bands", "open mic", "music hall", "music venue"] },
+  comedy: { tags: ["Comedy"], types: ["comedy_club"], words: ["comedy", "stand-up", "standup", "improv"] },
+  games: { tags: ["Games & social"], types: ["bowling_alley", "video_arcade", "amusement_center", "karaoke"], words: ["arcade", "barcade", "board game", "board games", "games", "game night", "bowling", "bowl", "pinball", "billiards", "pool hall", "snooker", "escape room", "axe throwing", "mini golf", "minigolf", "trivia", "ping pong", "karaoke", "noraebang"] },
+  dance: { tags: ["Dance", "Electronic"], types: ["night_club", "dance_hall"], words: ["dance", "dancing", "nightclub", "club night", "disco"] },
+  arts: { tags: ["Art & making", "Film nights", "Photography"], types: ["art_gallery", "museum", "movie_theater"], words: ["gallery", "museum", "cinema", "film", "films", "exhibition"] },
+  food: { tags: ["Food & drink"], food: true, words: ["restaurant", "dinner", "supper", "food", "noodle", "noodles", "dumpling", "dumplings", "bbq", "kitchen", "eatery"] },
+  drinks: { tags: [], types: ["bar", "pub", "wine_bar", "cocktail_bar", "brewery", "beer_hall", "brewpub"], words: ["bar", "pub", "brewery", "taproom", "cocktail", "cocktails", "wine bar", "speakeasy", "tavern"] },
+  karaoke: { tags: [], types: ["karaoke"], words: ["karaoke", "noraebang", "ktv"] },
+  outdoors: { tags: ["Outdoors", "Run & ride"], types: ["park", "hiking_area", "garden"], words: ["park", "trail", "outdoor", "outdoors", "garden", "beach"] },
+  markets: { tags: ["Markets"], types: ["market", "farmers_market", "flea_market"], words: ["market", "night market", "flea", "bazaar"] },
+};
+const VIBES = Object.fromEntries(Object.entries(KINDS).map(([k, d]) => [k, d.tags]));
+const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const KIND_RE = Object.fromEntries(Object.entries(KINDS).map(([k, d]) => [k, new RegExp(`(?<![\\p{L}])(${d.words.map(escRe).join("|")})(?![\\p{L}])`, "iu")]));
+// Does a listing show this kind of night? Events: their vibes, or the words in their title and tags. Places: their
+// Google types (or Foursquare categories), name or summary; never the vibe of the search that found them.
+function vibeMatch(e, v) {
+  const k = KINDS[v];
+  if (!e || !k) return false;
+  if (e.type === "place") {
+    const types = [...(e.tags || []), e.primaryType].filter(Boolean);
+    if (k.food && want.isFood({ types })) return true;
+    if (k.types && types.some((t) => k.types.includes(t))) return true;
+    const cats = (e.categories || []).map((c) => (typeof c === "string" ? c : c.name || "")).join(" | ");
+    return KIND_RE[v].test(`${e.title || ""} | ${e.summary || ""} | ${cats}`);
+  }
+  if ((e.vibes || []).some((t) => k.tags.includes(t))) return true;
+  return KIND_RE[v].test(`${e.title || ""} | ${(e.tags || []).join(" | ")}`);
+}
+// The kinds a listing shows, in option order
+const kindsOf = (e) => Object.keys(KINDS).filter((v) => vibeMatch(e, v));
 const MAX_TRIP = 60; // minutes; an event further than this from anyone's start is out
 
 const dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" });
@@ -187,7 +222,7 @@ function personFit(e, room, x) {
   const p = x.person;
   if (typeof p.fit === "function") return p.fit(e);
   const asked = [].concat(x.a.value);
-  const hit = asked.filter((v) => (VIBES[v] || []).some((tag) => (e.vibes || []).includes(tag))).length;
+  const hit = asked.filter((v) => vibeMatch(e, v)).length;
   return { fit: hit ? 0.75 + (0.25 * hit) / asked.length : 0, strongDislike: false };
 }
 // Everyone's fit for an event: { avg, fits: { personId: 0..1 }, misery }. Average without misery: anyone's strong
@@ -208,7 +243,9 @@ function score(e, room, f) {
   const origins = Array.isArray(f.origin.value) && f.origin.value.length ? f.origin.value : ["union"];
   const trips = origins.map((o) => (e.travel && e.travel.from && e.travel.from[o] ? e.travel.from[o].minutes : 30));
   s -= Math.max(...trips) / 6;
-  s += e.type === "place" ? Math.max(0, (e.rating || 0) - 3.8) * 5 + (e.hours ? 0 : -3) : (e.rating || 0) * 1.5 + Math.min(e.going || 0, 20) / 10;
+  // Ratings and popularity only break ties: together at most 2.5 points, never as much as one person's vibe match
+  // (7.5 to 10) or a want match, so a well-rated bar nobody asked for can't win on its stars
+  s += ratingTie(e) + (e.type === "place" ? (e.hours ? 0 : -1) : Math.min(e.going || 0, 20) / 20);
   if (e.price == null && f.budget.value != null && f.budget.value !== "any") s -= 4;
   if (room.context) s += rank.contextBonus(e, { ...room.context, crewSize: crew(room).length, night: f.night.known && f.night.value.length ? f.night.value[0] : room.nights[0] }).bonus;
   if (room.shown) s += rank.seenPenalty(e.id, room.shown, room.now || Date.now());
@@ -217,6 +254,38 @@ function score(e, room, f) {
   const w = wantFit(e, f);
   if (w) s += w * (e.type === "place" ? 30 : 12);
   return s;
+}
+
+// A rating as a tiebreaker: 0 at 4 stars or less, up to 1.5 at 5 stars
+const ratingTie = (e) => Math.max(0, Math.min(1, ((e.rating || 0) - 4) / 1)) * 1.5;
+
+// Does a listing fit at least one person's vibe or what someone asked for (want)? When nobody has said either yet,
+// everything fits. A pick that fits nobody is only ever shown as "Closest we found".
+function fitsSomeone(e, room, f) {
+  const asked = answersFor(room, "vibe");
+  const wanted = wantPlan(f);
+  if (!asked.length && !wanted) return true;
+  if (wanted && wantFit(e, f) >= want.MIN_RELEVANCE) return true;
+  return asked.some((x) => [].concat(x.a.value).some((v) => vibeMatch(e, v)));
+}
+// Who it fits and why, from facts only: { vibes: [{ v, names }], wants: [{ text, names }] }. Names are public
+// (vibes and wants are shown on the board with names); budgets and areas never come into it.
+function fitReasons(e, room, f) {
+  const vibes = [];
+  for (const x of answersFor(room, "vibe")) for (const v of [].concat(x.a.value)) {
+    if (!vibeMatch(e, v)) continue;
+    const hit = vibes.find((y) => y.v === v);
+    if (hit) { if (!hit.names.includes(x.person.name)) hit.names.push(x.person.name); } else vibes.push({ v, names: [x.person.name] });
+  }
+  const wants = [];
+  const wanted = wantPlan(f);
+  if (wanted && wantFit(e, f) >= want.MIN_RELEVANCE && f.want && f.want.value) {
+    for (const w of f.want.value) {
+      const fit = e.type === "place" ? want.relevance(e, want.plan([w])) : want.relevance({ title: e.title, types: [], categories: [...(e.tags || []), ...(e.vibes || [])], summary: e.description || "" }, { ...want.plan([w]), food: false });
+      if (fit >= want.MIN_RELEVANCE) wants.push({ text: w, names: f.want.supporters[w] || [] });
+    }
+  }
+  return { vibes, wants };
 }
 
 // When nothing fits: which single constraint, loosened, opens up the most events
@@ -239,10 +308,18 @@ function bestRelax(events, room, f) {
 // don't leave anyone out: pick one is the best match; pick two trades score against similarity to pick one (MMR)
 // and gets a boost for whoever pick one (and this crew's earlier picks, room.history) served least.
 const HEAD = 30;
+// Listings that fit someone's vibe or want always come before ones that don't (those are only "Closest we found").
 function ranked(events, room, f) {
   const scored = filterEvents(events, room, f)
-    .map((e) => ({ e, s: score(e, room, f) }))
+    .map((e) => ({ e, s: score(e, room, f), fit: fitsSomeone(e, room, f) }))
     .sort((a, b) => b.s - a.s || a.e.id - b.e.id);
+  const fitting = scored.filter((x) => x.fit);
+  const rest = scored.filter((x) => !x.fit);
+  if (fitting.length >= 2) return [...order(fitting, room), ...rest.map((x) => x.e)];
+  if (fitting.length === 1) return [fitting[0].e, ...order(rest, room)];
+  return order(rest, room);
+}
+function order(scored, room) {
   if (scored.length < 3) return scored.map((x) => x.e);
   const head = scored.slice(0, HEAD);
   const sOf = new Map(head.map((x) => [x.e, x.s]));
@@ -290,7 +367,7 @@ function nextQuestion(events, room, f = facts(room)) {
     const opts = optionsFor(slot, room);
     const sizes = opts.map(([v]) => {
       const g = simulate(room, f, slot, v);
-      if (slot === "vibe") return filterEvents(events, room, g).filter((e) => (VIBES[v] || []).some((t) => (e.vibes || []).includes(t))).length;
+      if (slot === "vibe") return filterEvents(events, room, g).filter((e) => vibeMatch(e, v)).length;
       return filterEvents(events, room, g).length;
     });
     const expected = sizes.reduce((a, b) => a + b, 0) / sizes.length;
@@ -333,4 +410,4 @@ function budgetLabel(f, room) {
 // How Sidekick may describe a loosened constraint out loud: never names a private answer
 const RELAX_WORDS = { time: "a different start time", night: "another night", area: "a wider range of areas", budget: "stretching the spend a little" };
 
-module.exports = { SLOTS, VIBES, ASKABLE, optionsFor, labelOf, nightLabel, facts, groupFact, filterEvents, ranked, nextQuestion, readiness, budgetLabel, bestRelax, RELAX_WORDS, answersFor, crew, need, localDay, crewFits, score, wantPlan, wantFit };
+module.exports = { SLOTS, VIBES, KINDS, vibeMatch, kindsOf, fitsSomeone, fitReasons, ASKABLE, optionsFor, labelOf, nightLabel, facts, groupFact, filterEvents, ranked, nextQuestion, readiness, budgetLabel, bestRelax, RELAX_WORDS, answersFor, crew, need, localDay, crewFits, score, wantPlan, wantFit };

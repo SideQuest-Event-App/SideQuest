@@ -1278,6 +1278,10 @@ a.tab { text-decoration: none; }
 .yp-empty { margin: 0; padding: 4px var(--sp-lg) 8px 46px; color: var(--text-secondary); font-size: 13px; line-height: 18px; }
 [data-layout="desktop"] .lx-yp { top: 20px; left: calc(var(--lx-panel) + var(--sp-xl)); right: auto; width: 360px; max-height: calc(100% - 120px); }
 .search-places { display: flex; flex-direction: column; gap: var(--sp-sm); }
+.search-note { display: flex; gap: var(--sp-sm); align-items: flex-start; font-size: 14px; line-height: 20px; color: var(--text-secondary); }
+.search-note svg { flex: none; margin-top: 3px; }
+.search-hit > .lx-top { display: flex; }
+.search-hit > .lx-card.row { margin: 0; }
 
 /* The sheet */
 .lx-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; flex-direction: column; background: var(--bg-surface); border-top: 1px solid var(--border-subtle); border-radius: var(--r-3xl) var(--r-3xl) 0 0; box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35); transition: transform 0.3s cubic-bezier(0.23, 1, 0.32, 1); will-change: transform; }

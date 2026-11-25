@@ -93,11 +93,30 @@
   // Chip groups: data-multi on the container makes them toggle; otherwise one at a time
   app.addEventListener("click", (e) => {
     const c = e.target.closest(".chips .chip");
-    if (!c) return;
+    if (!c || c.classList.contains("other")) return;
     const g = c.closest(".chips");
     if (g.hasAttribute("data-multi")) c.setAttribute("aria-pressed", c.getAttribute("aria-pressed") !== "true");
     else g.querySelectorAll(".chip").forEach((x) => x.setAttribute("aria-pressed", x === c));
   });
+  // "+ Something else…": the vibe chips are suggestions; this opens a text box whose words go into "want", the same
+  // as saying it on the call ("Chinese skewers", "rooftop patio"). send: an Add button that sends it straight away
+  // (the call's cards); without it the words go with the form.
+  const other = { open: false, draft: "" };
+  function otherHTML(send = false) {
+    return `<button type="button" class="chip other" id="vibeOther" aria-expanded="${other.open}" aria-controls="vibeOtherBox">+ Something else…</button>
+      <div class="vibe-other-wrap stack" id="vibeOtherBox" ${other.open ? "" : "hidden"} style="width:100%;gap:6px"><label class="small" for="vibeOtherIn">What are you in the mood for?</label>
+      <div class="vibe-other"><input class="in" id="vibeOtherIn" maxlength="60" autocomplete="off" enterkeyhint="${send ? "send" : "done"}" placeholder="e.g. Chinese skewers" value="${esc(other.draft)}">${send ? '<button type="button" class="btn sm pri" id="vibeOtherAdd">Add</button>' : ""}</div></div>`;
+  }
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("#vibeOther");
+    if (!b) return;
+    other.open = !other.open;
+    b.setAttribute("aria-expanded", other.open);
+    const box = document.getElementById("vibeOtherBox");
+    if (box) box.hidden = !other.open;
+    if (other.open) { const i = document.getElementById("vibeOtherIn"); if (i) i.focus(); }
+  });
+  document.addEventListener("input", (e) => { if (e.target.id === "vibeOtherIn") other.draft = e.target.value; });
   const picked = (name) => [...app.querySelectorAll(`.chips[data-name="${name}"] .chip[aria-pressed=true]`)].map((c) => c.dataset.value);
 
   // ---------- Starting from: my location by default ----------
@@ -820,7 +839,7 @@
   // ---------- 2. Join ----------
   async function joinScreen() {
     let info;
-    try { info = await api(`/api/sk/rooms/${roomId}/info`); } catch (err) {
+    try { info = await api(`/api/sk/rooms/${roomId}/info${userId() ? `?user=${encodeURIComponent(userId())}` : ""}`); } catch (err) {
       if (err.status === 404) return goneScreen(err.data);
       app.innerHTML = `<h1>Can't reach the call</h1><p class="muted">Check your connection and try again.</p><button class="btn out" onclick="location.reload()">Try again</button>`;
       return;
@@ -851,7 +870,7 @@
       <div class="stack" id="formExtra" hidden>
         <p style="font-weight:600">Which nights work?</p><div class="chips" data-name="night" data-multi>${info.nights.map((l, i) => chip("night", i, l, false)).join("")}</div>
         <p style="font-weight:600">What time?</p><div class="chips" data-name="time" data-multi>${PRIVATE_OPTS.time.map(([v, l]) => chip("time", v, l, false)).join("")}</div>
-        <p style="font-weight:600">Feeling like</p><div class="chips" data-name="vibe" data-multi>${PRIVATE_OPTS.vibe.map(([v, l]) => chip("vibe", v, l, false)).join("")}</div>
+        <p style="font-weight:600">Feeling like</p><div class="chips" data-name="vibe" data-multi>${(info.vibes ? info.vibes.map((o) => [o.value, o.label]) : PRIVATE_OPTS.vibe).map(([v, l]) => chip("vibe", v, l, false)).join("")}${otherHTML()}</div>
       </div>
       <div class="stack" id="joinBtns">
         <button class="btn pri" data-mode="voice">Join with voice</button>
@@ -887,6 +906,9 @@
         if (nightIdx.length) answers.nightIdx = nightIdx;
         if (picked("time").length) answers.time = picked("time");
         if (picked("vibe").length) answers.vibe = picked("vibe");
+        const own = other.open ? other.draft.trim() : "";
+        if (own) answers.want = [own]; // their own words, like saying it on the call
+        if (!answers.vibe && !own && other.open) return toast("Type what you're in the mood for, or close Something else.");
       }
       unlockAudio();
       if (one("origin")) {
@@ -1114,7 +1136,7 @@
   const avStack = (vs) => (vs.length ? `<span class="stk">${vs.map((v) => `<span class="av xs c${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(v) % 6}">${esc(v)}</span>`).join("")}</span>` : "");
 
   function cardHTML(card, label) {
-    const opts = card.options.map((o) => `<button class="ans" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="grow">${esc(o.label)}</span>${avStack(o.voters)}</button>`).join("");
+    const opts = card.options.map((o) => `<button class="ans" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="grow">${esc(o.label)}</span>${avStack(o.voters)}</button>`).join("") + (card.slot === "vibe" ? `<div class="chips">${otherHTML(true)}</div>` : "");
     const hint = label || `Sidekick is asking · ${view.me.mode === "voice" ? "say it or tap it" : "tap to answer"}${card.multi ? " · pick any that work" : ""}`;
     return `<div class="q"><span class="small">${esc(hint)}</span><h2>${esc(card.prompt)}</h2>${opts}${card.note ? `<span class="small">${esc(card.note)}</span>` : ""}</div>`;
   }
@@ -1196,7 +1218,7 @@
   });
 
   function chipsRow(card) {
-    return `<div class="chips" role="group" aria-label="${esc(card.prompt)}">${card.options.map((o) => `<button class="chip" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}">${esc(o.label)}${o.voters.length ? ` <span class="vn">${esc(o.voters.join(""))}</span>` : ""}</button>`).join("")}</div>`;
+    return `<div class="chips" role="group" aria-label="${esc(card.prompt)}">${card.options.map((o) => `<button class="chip" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}">${esc(o.label)}${o.voters.length ? ` <span class="vn">${esc(o.voters.join(""))}</span>` : ""}</button>`).join("")}${card.slot === "vibe" ? otherHTML(true) : ""}</div>`;
   }
 
   let budgetOpen = false;
@@ -1286,7 +1308,9 @@
     const open = form || boardOpen;
     const full = form ? rows : `<button class="plan-toggle" id="planToggle" aria-expanded="${open}" aria-controls="planRows">${open ? "Hide the full plan" : "See the full plan"}</button><div id="planRows" ${open ? "" : "hidden"}>${rows}</div>`;
     const around = view.candidate && view.me.planner ? `<p class="small cand-note">Planning around the event you saved. It goes in as a pick if it fits.</p>` : "";
+    const typingOther = document.activeElement && document.activeElement.id === "vibeOtherIn";
     body.innerHTML = `${invite}<div class="board ${form ? "as-form" : ""}">${boardHead()}${heardHTML()}${ask}${full}</div>${around}${formNote}${priv}`;
+    if (typingOther) { const i = document.getElementById("vibeOtherIn"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
     stageIn(body, "card");
     renderTicks();
   }
@@ -1410,8 +1434,9 @@
         : [[p.price, p.where].filter(Boolean).join(" · "), p.rating ? `Rated ${p.rating} on Google${p.ratingCount ? ` · ${p.ratingCount} reviews` : ""}` : null];
       const link = p.url ? `<a class="pk-link" href="${esc(p.url)}" target="_blank" rel="noopener">${ev ? "See tickets" : "Directions"}<span class="sr"> for ${esc(p.title)} (opens in a new tab)</span></a>` : "";
       return `<div class="pick-card ${ev ? "ev" : "pl"}"><button class="pick" data-vote="${p.id}" aria-pressed="${view.myVote === p.id}">
-        <span class="row sb"><span class="row" style="gap:6px;flex-wrap:wrap">${tag}${p.candidate ? '<span class="tag soc">You saved this</span>' : ""}</span>${avStack(voters)}</span>
+        <span class="row sb"><span class="row" style="gap:6px;flex-wrap:wrap">${tag}${p.candidate ? '<span class="tag soc">You saved this</span>' : ""}${p.closest ? '<span class="tag hot">Closest we found</span>' : ""}</span>${avStack(voters)}</span>
         <h2>${esc(p.title)}</h2>
+        ${p.why ? `<span class="pk-why">${esc(p.why.replace(/^Closest we found · /, ""))}</span>` : ""}
         <span class="pk-when">${esc(p.when)}</span>
         ${meta.filter(Boolean).map((m) => `<span class="pk-meta">${esc(m)}</span>`).join("")}
         ${p.reason ? `<span class="small" style="color:var(--acc)">${esc(p.reason)}</span>` : ""}
@@ -1431,12 +1456,41 @@
     announceThinking(null);
     stageIn({ firstElementChild: null }, "picks");
     document.getElementById("body").innerHTML = `<div class="board${land}">${boardHead('<span class="tag ok">All set</span>')}<p class="small" style="padding:0 14px 12px;color:var(--t2)">${esc(summary)}</p></div>
-      <div class="q${land}" style="border-radius:22px;border:1px solid var(--pri-e)"><span class="small">${mixed ? "A show to go to, or a spot to drop in. Tap one to vote." : "Two picks fit everyone · tap one to vote"}</span>${picks}</div>
+      <div class="q${land}" style="border-radius:22px;border:1px solid var(--pri-e)"><span class="small">${view.picks.some((p) => p.closest) ? "Nothing matched exactly, so the closest we found is marked. Tap one to vote." : mixed ? "A show to go to, or a spot to drop in. Tap one to vote." : "Two picks fit everyone · tap one to vote"}</span>${picks}</div>
       ${wildHTML(view.wildcard)}
       <p class="small">Picked for your crew's budget, distance and vibe. Venues can't pay to appear here.</p>
       ${lock}`;
     renderTicks();
   }
+
+  // The way back into the app after a call: the Plan tab when signed in, Discover when signed out or in the demo
+  // (the voice study has its own "Back to the checklist" instead)
+  function backHome() {
+    let demo = false;
+    try { demo = sessionStorage.getItem("sq2.demo") === "1"; } catch {}
+    return userId() && !demo ? { href: "/sk", screen: null } : { href: "/", screen: "discover" };
+  }
+  function backBtn() {
+    if (STUDY) return "";
+    const b = backHome();
+    return `<a class="btn pri back-home" id="backHome" href="${b.href}"${b.screen ? ` data-screen-to="${b.screen}"` : ""}>Back to SideQuest</a>`;
+  }
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("#backHome");
+    if (!a) return;
+    if (a.dataset.screenTo) ss.set("sq2.screen", a.dataset.screenTo);
+    if (a.getAttribute("href") === "/sk") { e.preventDefault(); location.assign("/sk"); }
+  }, true);
+
+  // "+ Something else…" on the call's vibe card: their words go in as "want" (Looking for), like saying it
+  function sendOther() {
+    const text = other.draft.trim();
+    if (!text) { const i = document.getElementById("vibeOtherIn"); if (i) i.focus(); return toast("Type what you're in the mood for first."); }
+    send("answer", { slot: "want", value: [text], source: "call_card" }).then((r) => { if (r) toast(`Added: ${text}`); });
+    other.draft = "";
+    other.open = false;
+  }
+  document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.id === "vibeOtherIn" && document.getElementById("vibeOtherAdd")) { e.preventDefault(); sendOther(); } });
 
   function renderDone() {
     const L = view.locked;
@@ -1455,7 +1509,8 @@
     const studyNext = STUDY_V === "form"
       ? `<div class="priv" style="border-style:solid;border-color:var(--bs)"><h2>Practice done</h2><p class="muted">Head back to the checklist for the next step.</p><a class="btn pri" href="/study?s=${encodeURIComponent(STUDY)}">Back to the checklist</a></div>`
       : `<div class="priv" style="border-style:solid;border-color:var(--bs)"><h2>Voice ${esc(STUDY_V)} done</h2><p class="muted">Four quick taps about this call, back on the checklist.</p><a class="btn pri" href="/study?s=${encodeURIComponent(STUDY)}#call${esc(STUDY_V)}">Answer 4 quick questions</a></div>`;
-    document.getElementById("body").innerHTML = plan + (STUDY ? studyNext : survey); // in the study, its own questions replace these
+    document.getElementById("body").innerHTML = plan + (STUDY ? studyNext : survey + backBtn()); // in the study, its own questions replace these
+    callNav(true); // the app's tabs stay on the ended screen too
     renderTicks();
   }
 
@@ -1689,6 +1744,7 @@
     if (t.closest("#sharePlanBtn")) { const box = document.getElementById("planShare"); if (box) { box.hidden = !box.hidden; t.closest("#sharePlanBtn").setAttribute("aria-expanded", String(!box.hidden)); } return; }
     if (t.closest("#copyPlan") || t.closest("[data-copyplan]")) return void copyText(planText(), "Plan copied. Paste it in the group chat.");
     if (t.closest("#nativeSharePlan")) return void navigator.share({ title: `${view.crew}'s plan`, text: planText() }).catch(() => {});
+    if (t.closest("#vibeOtherAdd")) return void sendOther();
     const ans = t.closest("[data-answer]");
     if (ans && view && view.card) {
       const card = view.card.form ? (ans.dataset.slot === "budget" ? view.card.budget : view.card.slots.find((c) => c.slot === ans.dataset.slot)) : view.card;
@@ -1738,7 +1794,8 @@
         if (confirm("End the call for everyone? The transcript will be deleted.")) send("end", {});
       } else {
         leaveQuietly();
-        app.innerHTML = `<h1>You left the call</h1><p class="muted">You can rejoin with the same link while it's running.</p><button class="btn out" onclick="location.reload()">Rejoin</button>`;
+        app.innerHTML = `<h1>You left the call</h1><p class="muted">You can rejoin with the same link while it's running.</p>${backBtn()}<button class="btn out" onclick="location.reload()">Rejoin</button>`;
+        callNav(true);
       }
       return;
     }

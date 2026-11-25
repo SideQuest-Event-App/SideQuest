@@ -30,7 +30,7 @@ const MIN_GAP_MS = 5000; // at least this long between Sidekick's lines, unless 
 const NUDGE_AFTER_MS = 20000;
 const SILENT_MS = () => Number(process.env.SIDEKICK_SILENT_MS || 20000); // quiet this long in the call: invited in by name, once
 const IDLE_MS = 3 * 3600 * 1000;
-const PROMPTS = { night: "Which night works?", time: "What time works?", origin: "Where are you starting from?", vibe: "What kind of night?", budget: "Your max for the night?", nos: "Anything that's a no?", kind: "A ticketed event, or just somewhere good to go?" };
+const PROMPTS = { night: "Which night works?", time: "What time works?", origin: "Where are you starting from?", vibe: "What are you in the mood for?", budget: "Your max for the night?", nos: "Anything that's a no?", kind: "A ticketed event, or just somewhere good to go?" };
 
 const id = (n = 6) => crypto.randomBytes(n).toString("base64url");
 // Changes every time the server starts. Rooms live in memory, so a phone that saw a different boot
@@ -393,7 +393,7 @@ async function closeMode(room) {
 }
 
 // The question the crew should answer first, said out loud
-const QUESTION_SPOKEN = { night: "what day works best for everyone?", time: "what time works for everyone?", origin: "where's everyone coming from?", vibe: "what kind of night are we after?", budget: "pop your budget in on your screen, it's private", kind: "a ticketed event, or just somewhere good to go?" };
+const QUESTION_SPOKEN = { night: "what day works best for everyone?", time: "what time works for everyone?", origin: "where's everyone coming from?", vibe: "what are you in the mood for: food, a show, anything?", budget: "pop your budget in on your screen, it's private", kind: "a ticketed event, or just somewhere good to go?" };
 
 async function setMode(room, mode, how) {
   const was = room.mode;
@@ -509,6 +509,10 @@ function extractKeywords(room, lines) {
     if (/games?|trivia|arcade/.test(tv)) vibes.push("games");
     if (/danc|club/.test(t)) vibes.push("dance");
     if (/\bart\b|gallery|film|movie/.test(t)) vibes.push("arts");
+    if (/\bkaraoke\b/.test(t)) vibes.push("karaoke");
+    if (/\b(drinks|cocktails|pub)\b/.test(t)) vibes.push("drinks");
+    if (/\boutdoors?\b/.test(t)) vibes.push("outdoors");
+    if (/\bmarkets?\b/.test(t)) vibes.push("markets");
     add("vibe", vibes);
     // The specifics in their own words: "Chinese skewers", "karaoke with private rooms" (lib/search/want.js)
     add("want", wantLib.find(l.text));
@@ -725,8 +729,8 @@ function ideasFor(room, f, slot, events) {
   const pool = P.filterEvents(events, room, f);
   const count = (pred) => pool.filter(pred).length;
   if (slot === "vibe") {
-    const names = { music: "live music", comedy: "comedy", games: "a games night", dance: "dancing", arts: "art or a film" };
-    const ranked = Object.keys(P.VIBES).map((v) => [v, count((e) => (e.vibes || []).some((t) => P.VIBES[v].includes(t)))]).filter(([, n]) => n).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([v]) => names[v]);
+    const names = { music: "live music", comedy: "comedy", games: "a games night", dance: "dancing", arts: "art or a film", food: "good food", drinks: "a bar", karaoke: "karaoke", outdoors: "something outdoors", markets: "a market" };
+    const ranked = Object.keys(P.VIBES).map((v) => [v, count((e) => P.vibeMatch(e, v))]).filter(([, n]) => n).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([v]) => names[v]);
     return ranked.length ? (ranked.length > 1 ? `${ranked.slice(0, -1).join(", ")}, or ${ranked[ranked.length - 1]}` : ranked[0]) : null;
   }
   if (slot === "night") {
@@ -748,7 +752,7 @@ function hotFor(room, f, slot, events) {
     return room.persona === "friend" ? `${per[0][0]}'s the move, it's got the most going on` : `${per[0][0]} or ${per[1][0]}`;
   }
   if (slot === "vibe") {
-    const ranked = Object.keys(P.VIBES).map((v) => [v, pool.filter((e) => (e.vibes || []).some((t) => P.VIBES[v].includes(t))).length]).filter(([, n]) => n).sort((a, b) => b[1] - a[1]).map(([v]) => talk.say(room, "vibe", v));
+    const ranked = Object.keys(P.VIBES).map((v) => [v, pool.filter((e) => P.vibeMatch(e, v)).length]).filter(([, n]) => n).sort((a, b) => b[1] - a[1]).map(([v]) => talk.say(room, "vibe", v));
     if (ranked.length < 2) return null;
     return room.persona === "friend" ? `${ranked[0]}'s the move tonight` : `${ranked[0]} or ${ranked[1]}`;
   }
@@ -905,8 +909,9 @@ async function ensurePlaces(room, f) {
   room.placesWant = wantKey(f);
   const again = (room.placesSearches || 0) > 0;
   // A second round (a new want) searches just the want; the vibes' places from the first round stay
-  const out = again ? await places.searchWant(wants, { origins }) : await places.forCall(f.vibe.value || [], { origins, want: wants });
-  room.placesSearches = (room.placesSearches || 0) + (again ? 1 : Math.min(places.perCall(), (wants.length ? 1 : 0) + Math.max(1, new Set([...(f.vibe.value || []), ...(wants.length ? [] : ["default"])]).size)));
+  // The second search (when there's no second vibe or want) goes to the crew's taste, never a generic filler
+  const out = again ? await places.searchWant(wants, { origins }) : await places.forCall(f.vibe.value || [], { origins, want: wants, taste: callside.tasteVibes(room) });
+  room.placesSearches = (room.placesSearches || 0) + (again ? 1 : out.used != null ? out.used : 1);
   if (again && !room.picks && room.status === "live") { room.places = places.dedupePlaces([out.places, room.places || []]); return; }
   if (room.picks || room.status !== "live") return; // too late: the picks went ahead without them (see decide)
   room.places = out.places;
@@ -1322,6 +1327,26 @@ async function makePicks(room, list) {
   }
 }
 
+const KIND_WORD = { music: "live music", comedy: "comedy", games: "games", dance: "dancing", arts: "art & film", food: "food", drinks: "drinks", karaoke: "karaoke", outdoors: "outdoors", markets: "markets" };
+const ORIGIN_NAME = { union: "Union", finch: "Finch", kennedy: "Kennedy", kipling: "Kipling" };
+function whyLine(room, e, f, closest) {
+  if (!e) return "";
+  const parts = [];
+  if (closest) parts.push("Closest we found");
+  else if (e.type === "place") { const t = places.placeType(e.tags); if (t && t !== "spot") parts.push(t.charAt(0).toUpperCase() + t.slice(1)); }
+  if (!closest) {
+    const r = P.fitReasons(e, room, f);
+    const named = (word, names) => (names.length === 1 ? `${names[0]}'s ${word}` : names.length ? `${word} for ${talk.andList(names.slice(0, 3))}` : word);
+    for (const w of r.wants.slice(0, 1)) parts.push(named(w.text, w.names));
+    for (const v of r.vibes.slice(0, r.wants.length ? 1 : 2)) parts.push(named(KIND_WORD[v.v] || v.v, v.names));
+  }
+  // The trip from each starting point someone picked (a station; a shared location isn't named here)
+  const origins = [...new Set(P.crew(room).map((p) => (room.answers[p.id] || {}).origin).filter((o) => o && !o.here).map((o) => o.value))];
+  const trips = origins.map((o) => [o, e.travel && e.travel.from && e.travel.from[o] && e.travel.from[o].minutes]).filter(([, m]) => Number.isFinite(m)).slice(0, 2);
+  if (trips.length) parts.push(trips.map(([o, m], i) => `${Math.round(m)} min${i ? "" : ""} from ${ORIGIN_NAME[o] || o}`).join(", "));
+  return parts.join(" · ");
+}
+
 async function pickTwo(room, list, deadline) {
   const f = factsOf(room);
   const people = P.crew(room).map((p) => {
@@ -1329,7 +1354,11 @@ async function pickTwo(room, list, deadline) {
     const vibes = [a.want ? [].concat(a.want.value).join(", ") : null, a.vibe ? a.vibe.value.map((v) => P.labelOf("vibe", v, room)).join(", ") : null].filter(Boolean).join(", ") || "anything fun";
     return { name: p.name, interests: vibes, origin: a.origin ? a.origin.value : undefined };
   });
-  const pool = list.slice(0, 25);
+  // Every pick fits at least one person's vibe or want. Only when fewer than two do, the rest of the list (the best
+  // overall) fills in, and that pick is labelled "Closest we found"
+  const fits = (e) => P.fitsSomeone(e, room, f);
+  const fitting = list.filter(fits);
+  const pool = (fitting.length >= 2 ? fitting : list).slice(0, 25);
   let matches = [];
   let late = false;
   try {
@@ -1362,7 +1391,8 @@ async function pickTwo(room, list, deadline) {
   const typeOf = (id) => ((pool.find((x) => x.id === id) || {}).type === "place" ? "place" : "event");
   const mixed = !(f.kind && f.kind.known && f.kind.value.length === 1 && f.kind.value[0] !== "either");
   if (mixed && matches.length >= 2 && typeOf(matches[0].id) === typeOf(matches[1].id)) {
-    const other = list.find((e) => (e.type === "place" ? "place" : "event") !== typeOf(matches[0].id));
+    // ...but only a listing that fits someone as well: a well-rated bar nobody asked for never comes in for balance
+    const other = list.find((e) => (e.type === "place" ? "place" : "event") !== typeOf(matches[0].id) && (fitting.length < 2 || fits(e)));
     if (other) {
       if (!pool.includes(other)) pool.push(other);
       matches[1] = { id: other.id, reason: "", fits: {} };
@@ -1380,6 +1410,13 @@ async function pickTwo(room, list, deadline) {
     // An event: a day and a start time, and a ticket price
     return { id: e.id, kind: "event", date: e.startsAt ? P.localDay(e.startsAt) : null, title: e.title, when: e.startsAt ? `${startDay(e.startsAt)} · starts ${startTime(e.startsAt)}` : e.date, stretch: [...room.relax].map((k) => P.RELAX_WORDS[k]), price: e.price === 0 ? "Free" : e.price != null ? `$${e.price} ticket` : "Price not listed", where: [e.venue && e.venue.name, e.neighbourhood].filter(Boolean).join(", "), startsAt: e.startsAt || null, reason: m.reason || "", fits: m.fits || {}, url: e.sourceUrl || null };
   });
+  // The card's "why": what it matches and for whom, then the trip ("Arcade · Jay's games · 12 min from Union").
+  // Facts only; never a budget or an area someone avoids.
+  for (const p of picks) {
+    const e = pool.find((x) => x.id === p.id);
+    p.closest = !fits(e) || undefined;
+    p.why = whyLine(room, e, f, p.closest);
+  }
   const whyOf = (p) => {
     const e = pool.find((x) => x.id === p.id);
     if (e.type === "place") return [e.rating ? `rated ${e.rating}` : null, e.neighbourhood && `in ${e.neighbourhood}`, e.price != null ? `about ${e.price} dollars each` : null].filter(Boolean).join(", ");
@@ -1391,7 +1428,8 @@ async function pickTwo(room, list, deadline) {
   // The line is written before the cards go up, so both land together. Past the deadline it's the
   // line book's plain "here's what I've got so far" with the two names.
   // Each pick as a short story: a hook, a vivid detail, why it fits named people
-  const story = talk.stories(room, picks.map((p) => ({ ...pool.find((x) => x.id === p.id), placeType: p.placeType })), room.persona, f);
+  const story = talk.stories(room, picks.map((p) => ({ ...pool.find((x) => x.id === p.id), placeType: p.placeType })), room.persona, f)
+    .map((x, i) => (picks[i] && picks[i].closest ? `${x}, ${room.persona === "friend" ? "closest I could find to what you asked for" : "the closest I could find to what you asked for"}` : x));
   const spokenName = (p) => { const e = pool.find((x) => x.id === p.id); return talk.spokenTitle(p.title, e && e.venue && e.venue.name); };
   await speak(room, "picks", { kinds, story, why: picks.map(whyOf), short: picks.map(spokenName), picks: picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => picks.some((p) => p.id === e.id)), deadline, late, lateKey: "fallback" });
   if (room.status !== "live") return;
@@ -1492,6 +1530,22 @@ function rows(room, f = factsOf(room), viewer = null) {
 }
 
 const MODE_OPTIONS = [["lead", "Take the lead"], ["sidelines", "We'll fill it in"]];
+// The vibe chips: suggestions, not the full menu. Taste first (the person's, or the crew's on the call), then the
+// kinds that actually have listings on the call's nights (events by count; food, bars and karaoke when places are
+// on), up to 6, plus anything someone already picked. "Something else…" (the form) covers the rest, into want.
+const CHIPS = 6;
+function vibeChips(room, { user = null, chosen = [] } = {}) {
+  const fromTaste = (user ? callside.userTaste(user) : callside.tasteVibes(room))
+    .map((v) => Object.keys(P.KINDS).find((k) => P.KINDS[k].tags.includes(v))).filter(Boolean);
+  const nights = new Set(room.nights);
+  const evs = upcoming().filter((e) => e.startsAt && nights.has(P.localDay(e.startsAt)));
+  const counts = Object.keys(P.KINDS).map((k) => [k, evs.filter((e) => P.vibeMatch(e, k)).length]).filter(([, n]) => n).sort((a, b) => b[1] - a[1]).map(([k]) => k);
+  const placesOn = places.configured() || require("./foursquare").configured();
+  const order = [...new Set([...fromTaste, ...counts.slice(0, 3), ...(placesOn ? ["food", "drinks", "karaoke"] : []), ...counts.slice(3)])].slice(0, CHIPS);
+  const list = [...new Set([...order, ...chosen.filter((v) => P.KINDS[v])])];
+  return P.optionsFor("vibe", room).filter(([v]) => list.includes(v)).sort((a, b) => list.indexOf(a[0]) - list.indexOf(b[0]));
+}
+
 // A card's options with who picked each. "Starting from" adds "My location" for someone who shared
 // theirs, and never puts a location-sharer's initial on a station chip.
 function slotOptions(room, person, slot) {
@@ -1502,7 +1556,9 @@ function slotOptions(room, person, slot) {
     for (const v of [].concat(x.a.value)) voters[v] = [...(voters[v] || []), initial(x.person.name)];
   }
   const chosen = !mine[slot] ? [] : slot === "origin" && mine.origin.here ? ["here"] : [].concat(mine[slot].value);
-  const opts = slot === "origin" && mine.location ? [["here", "My location"], ...P.optionsFor(slot, room)] : P.optionsFor(slot, room);
+  const opts = slot === "origin" && mine.location ? [["here", "My location"], ...P.optionsFor(slot, room)]
+    : slot === "vibe" ? vibeChips(room, { chosen: P.answersFor(room, "vibe").flatMap((x) => [].concat(x.a.value)) })
+    : P.optionsFor(slot, room);
   return opts.map(([value, label]) => ({ value, label, voters: voters[value] || [], mine: chosen.includes(value) }));
 }
 function cardFor(room, person) {
@@ -1691,7 +1747,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       });
       return;
     }
-    if (req.method === "GET" && action === "info") return sendJSON(res, 200, { boot: BOOT, crew: room.crew, status: room.status, form: Boolean(room.form), deadline: room.deadline, closed: room.closed, nights: room.nights.map((d) => P.nightLabel(d)), people: P.crew(room).map((p) => p.name), member: room.people.some((p) => p.id === url.searchParams.get("p")) });
+    if (req.method === "GET" && action === "info") return sendJSON(res, 200, { boot: BOOT, crew: room.crew, status: room.status, form: Boolean(room.form), deadline: room.deadline, closed: room.closed, nights: room.nights.map((d) => P.nightLabel(d)), vibes: vibeChips(room, { user: /^[\w-]{1,40}$/.test(url.searchParams.get("user") || "") ? url.searchParams.get("user") : null }).map(([value, label]) => ({ value, label })), people: P.crew(room).map((p) => p.name), member: room.people.some((p) => p.id === url.searchParams.get("p")) });
     if (req.method !== "POST") return sendJSON(res, 404, { error: "Not found" });
     const body = await readBody(req);
     if (action === "join") {
@@ -1995,7 +2051,8 @@ function planState(room) {
     mode: room.mode === "sidelines" ? "sitting back (stay quiet unless someone says Sidekick)" : "leading",
     // What people just said (public facts, with names), so the agent can say it back before its next question
     just_heard: (room.heard || []).filter((h) => !h.undone && !h.here && now() - h.at < 60000).slice(-6).map((h) => `${h.name}: ${h.label}`),
-    picks: room.picks && room.picks.length ? room.picks.map((x) => ({ title: x.title, kind: x.kind, when: x.when, price: x.price, where: x.where, reason: x.reason || undefined })) : null,
+    picks: room.picks && room.picks.length ? room.picks.map((x) => ({ title: x.title, kind: x.kind, when: x.when, price: x.price, where: x.where, why: x.why || undefined, closest: x.closest || undefined, reason: x.reason || undefined })) : null,
+    ...(room.picks && room.picks.some((x) => x.closest) ? { picks_note: "Nothing matched exactly what they asked for, so a pick marked closest is the closest we found. Say so honestly when you present it." } : {}),
     locked: room.locked ? room.locked.title : null,
   };
 }
@@ -2038,7 +2095,7 @@ async function nextMove(room) {
     const q = st.open_question;
     move = q.private
       ? { next_move: "private_card", what_to_do: "The budget card is on everyone's screen. Ask them to tap their max there; it stays private. Never ask for amounts out loud, and never say who has or hasn't answered it." }
-      : { next_move: "ask", what_to_do: `Ask: ${QUESTION_SPOKEN[q.slot] || q.question}${q.options ? ` Options: ${q.options.join(", ")}.` : ""}${q.waiting_on.length ? ` Still waiting on: ${q.waiting_on.join(", ")}.` : " Everyone has answered; recap it in a few words."}`, example_line: fresh ? fresh.example : undefined };
+      : { next_move: "ask", what_to_do: `Ask: ${QUESTION_SPOKEN[q.slot] || q.question}${q.options ? (q.slot === "vibe" ? ` It's an open question: these are only ideas (${q.options.join(", ")}). Anything else they say (a dish, a cuisine, a kind of place) goes in record_facts as want, in their words, and you say it back.` : ` Options: ${q.options.join(", ")}.`) : ""}${q.waiting_on.length ? ` Still waiting on: ${q.waiting_on.join(", ")}.` : " Everyone has answered; recap it in a few words."}`, example_line: fresh ? fresh.example : undefined };
   } else move = { next_move: "wait", what_to_do: "Nothing needed from the app right now. Chat briefly if someone's talking to you, or stay quiet (skip_turn)." };
   return { ...move, ...st };
 }
@@ -2117,4 +2174,4 @@ function init({ events }) {
   eventsSource = events;
 }
 
-module.exports = { init, handle, preview, liveCalls, BOOT, _test: { rooms, createRoom, expectedView, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates } };
+module.exports = { init, handle, preview, liveCalls, BOOT, _test: { rooms, createRoom, vibeChips, slotOptions, expectedView, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates } };

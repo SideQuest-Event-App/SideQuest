@@ -56,9 +56,20 @@ function nearCrew(origins) {
 }
 const PER_CALL = () => Number(process.env.SIDEKICK_PLACES_PER_CALL || 2); // most searches one planning call may use
 
-// One search per vibe, worded the way people search
-const QUERY = { music: "live music bar", comedy: "comedy club", games: "arcade bar or board game cafe", dance: "dance club", arts: "art gallery open late", food: "late night restaurant", default: "cocktail bar" };
-const VIBE_TAGS = { music: ["Live music"], comedy: ["Comedy"], games: ["Games & social"], dance: ["Dance"], arts: ["Art & making"], food: [], default: [] };
+// One search per kind of night (the call's vibe options), worded the way people search. There's no generic
+// default: a search is only ever for something someone asked for (a vibe, a want) or likes (their taste).
+const KIND_PLACES = {
+  music: { query: "live music bar", tags: ["Live music"] },
+  comedy: { query: "comedy club", tags: ["Comedy"] },
+  games: { query: "arcade bar or board game cafe", tags: ["Games & social"] },
+  dance: { query: "dance club", tags: ["Dance"] },
+  arts: { query: "art gallery open late", tags: ["Art & making"] },
+  food: { query: "late night restaurant", tags: ["Food & drink"] },
+  drinks: { query: "cocktail bar or pub", tags: [] },
+  karaoke: { types: ["karaoke"], query: "karaoke bar", tags: ["Games & social"] },
+  outdoors: { types: ["park"], query: "park", tags: ["Outdoors"] },
+  markets: { query: "night market", tags: ["Markets"] },
+};
 // Every app vibe -> how to find places for it: Google place types for Nearby Search where a type says it exactly,
 // otherwise a Text Search query worded the way people search. Types are from Google's Table A (Places API New);
 // the ones used for includedTypes are limited to types this code already reads back from Google (TYPE_TAGS) or
@@ -88,8 +99,7 @@ const VIBE_PLACES = {
 };
 // Sidekick's broad vibes (music, comedy...) keep their Text Search queries; an app vibe name uses VIBE_PLACES
 function planFor(vibe) {
-  if (VIBE_PLACES[vibe]) return VIBE_PLACES[vibe];
-  return { query: QUERY[vibe] || QUERY.default, tags: VIBE_TAGS[vibe] || [] };
+  return VIBE_PLACES[vibe] || KIND_PLACES[vibe] || null;
 }
 // Google place types that tell us the vibe on their own
 const TYPE_TAGS = { night_club: ["Dance"], karaoke: ["Games & social"], bowling_alley: ["Games & social"], amusement_center: ["Games & social"], video_arcade: ["Games & social"], comedy_club: ["Comedy"], art_gallery: ["Art & making"], museum: ["Art & making"], movie_theater: ["Film nights"], live_music_venue: ["Live music"], concert_hall: ["Live music"] };
@@ -115,7 +125,7 @@ function toCandidate(p, vibe) {
   const where = place(lat, lng, "Toronto");
   const start = p.priceRange && p.priceRange.startPrice && Number(p.priceRange.startPrice.units);
   const price = Number.isFinite(start) ? start : p.priceLevel in LEVEL_PRICE ? LEVEL_PRICE[p.priceLevel] : null;
-  const tags = new Set([...(planFor(vibe).tags || []), ...(p.types || []).flatMap((t) => TYPE_TAGS[t] || [])]);
+  const tags = new Set([...((planFor(vibe) || {}).tags || []), ...(p.types || []).flatMap((t) => TYPE_TAGS[t] || [])]);
   const title = (p.displayName && p.displayName.text) || "A place nearby";
   return {
     id: numId(p.id),
@@ -180,6 +190,7 @@ async function search(vibe, { fetchImpl = fetch, origins, tier = "enterprise" } 
   if (!configured()) return { places: [], capped: "not configured" };
   const t = TIERS[tier] || TIERS.enterprise;
   const plan = planFor(vibe);
+  if (!plan) return { places: [], capped: null };
   const circle = nearCrew(origins);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 6000);
@@ -268,8 +279,10 @@ async function searchWant(wants, { fetchImpl = fetch, origins, tier = "want" } =
 }
 
 // Places for one call: up to PER_CALL searches near the crew's starting points (opts.origins). When someone said
-// what they want (opts.want: ["Chinese skewers"]), that's searched first, in their words, and the "default" cocktail
-// bar search is skipped: it's what used to answer a skewer request with Bar Maya. Then one search per vibe.
+// what they want (opts.want: ["Chinese skewers"]), that's searched first, in their words. Then one search per vibe,
+// then the crew's taste (opts.taste: app vibe names, strongest first) for any search left. Never a generic filler:
+// the old "cocktail bar" default is what filled a games night with speakeasies.
+// Returns { places, capped, used } (used: how many searches it made).
 async function forCall(vibes, opts = {}) {
   const wants = [].concat(opts.want || []).filter(Boolean);
   const seen = new Map();
@@ -280,16 +293,17 @@ async function forCall(vibes, opts = {}) {
     used++;
     if (out.capped) capped = out.capped;
     for (const p of out.places) if (!seen.has(p.id)) seen.set(p.id, p);
-    if (out.capped && out.capped !== "not configured") return { places: [...seen.values()], capped };
+    if (out.capped && out.capped !== "not configured") return { places: [...seen.values()], capped, used };
   }
-  const list = [...new Set([...(vibes || []), ...(wants.length ? [] : ["default"])])].slice(0, Math.max(0, PER_CALL() - used));
+  const list = [...new Set([...(vibes || []), ...(opts.taste || [])])].filter((v) => planFor(v)).slice(0, Math.max(0, PER_CALL() - used));
   for (const v of list) {
+    used++;
     const out = await search(v, opts);
     if (out.capped) capped = out.capped;
     for (const p of out.places) if (!seen.has(p.id)) seen.set(p.id, p);
     if (out.capped && out.capped !== "not configured") break; // over the limit: stop searching
   }
-  return { places: dedupePlaces([[...seen.values()]]), capped };
+  return { places: dedupePlaces([[...seen.values()]]), capped, used };
 }
 
 // What kind of place it is, in a word Sidekick can say ("a bar you can drop into")
@@ -334,4 +348,4 @@ function closesLabel(periods, day, hour) {
   return "Open that evening";
 }
 
-module.exports = { configured, available, search, searchWant, dedupePlaces, forCall, WANT_FIELDS, perCall: PER_CALL, openAt, closesLabel, toCandidate, nearCrew, nearestStation, nearLabel, placeType, planFor, seenIds, FIELDS, PRO_FIELDS, VIBE_PLACES, _numId: numId, _idCache: idCache };
+module.exports = { configured, available, search, searchWant, dedupePlaces, forCall, WANT_FIELDS, perCall: PER_CALL, openAt, closesLabel, toCandidate, nearCrew, nearestStation, nearLabel, placeType, planFor, KIND_PLACES, seenIds, FIELDS, PRO_FIELDS, VIBE_PLACES, _numId: numId, _idCache: idCache };

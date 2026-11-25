@@ -30,6 +30,7 @@ const skOg = require("./lib/sidekick/og"); // link previews for call invites
 const skStudy = require("./lib/sidekick/study"); // the voice A/B study (public/study.html, reference/sidekick-ab-study-plan.md)
 const skPlan = require("./lib/sidekick/planflow"); // the Plan tab's steps: squads and friends, who's free each night, availability
 const launch = require("./lib/launch"); // the launch map: "You · <neighbourhood>" and nearby places
+const mixed = require("./lib/search/mixed"); // search as one list of events and places, one score
 const taste = require("./lib/search/taste"); // per-person vibe weights learned from saves, accepts, ratings, "not for me"
 const discover = require("./lib/search/discover"); // feed order (variety, seen penalty), Wildcard, crew blend, data age
 const freshness = require("./lib/freshness"); // the daily import's 36-hour staleness warning
@@ -259,7 +260,6 @@ function shortlist(pool, score, n) {
     .slice(0, n)
     .map((x) => x.e);
 }
-const vibeOverlap = (e, vibes) => (e.vibes || []).filter((v) => vibes.includes(v)).length;
 const wordHits = (e, words) => {
   const hay = ai.haystack(e);
   return words.filter((w) => hay.includes(w)).length;
@@ -1544,6 +1544,16 @@ async function apiFeed({ userId, force }) {
   return user.feed;
 }
 
+// Places for the map, or for a typed search: each place gets the same score as search's events (how well it matches
+// the words, plus the person's taste), so the app can show one mixed list
+async function apiPlaces(body = {}) {
+  const out = await launch.nearby(body);
+  const user = body.userId && db.data.users[body.userId];
+  if (!body.query || !out.places) return out;
+  const weights = user ? taste.weights(user) : null;
+  return { ...out, places: out.places.map((p) => ({ ...p, score: mixed.score(p, { relevance: p.relevance || 0, weights }) })) };
+}
+
 // Search answers a page of picks at a time. only: the ids that pass the filters set in the app (null when none are on).
 // exclude: ids already on screen, so the next page picks from the rest.
 const SEARCH_PAGE = 10;
@@ -1559,11 +1569,14 @@ async function apiSearch({ userId, query, only, exclude }) {
   const firstPage = !seen.size;
   const left = pool.filter((e) => (!allowed || allowed.has(e.id)) && !seen.has(e.id));
   const people = [{ name: user.name || "You", interests, origin: user.origin }];
-  const words = ai.wordsOf(interests);
-  // Searching an event's name finds it, even when its words ("art", "con") also hit hundreds of others
-  const phrase = interests.toLowerCase();
-  const candidates = shortlist(left, (e) => (e.title.toLowerCase().includes(phrase) ? 20 : 0) + wordHits(e, words) * 3 + vibeOverlap(e, user.vibes) * 0.5 + soonness(e) * 0.2, 35);
-  const result = candidates.length ? await ai.match(people, candidates, SEARCH_PAGE) : { mode: ai.mode(), matches: [], unmet: firstPage ? ai.phrasesOf(interests).map((i) => ({ person: people[0].name, interest: i })) : [] };
+  // Searching an event's name finds it, even when its words ("art", "con") also hit hundreds of others; what the
+  // words mean counts too ("skewers" finds "chuan'r" and "yakitori"; lib/search/mixed.js)
+  // (keyword matching only sees the literal words, so events that show what they mean come in too, below the rest)
+  const found = await mixed.searchEvents(left, interests, { people, vibes: user.vibes || [], now: now().getTime(), page: SEARCH_PAGE });
+  const result = found.result || { mode: ai.mode(), matches: [], unmet: firstPage ? ai.phrasesOf(interests).map((i) => ({ person: people[0].name, interest: i })) : [] };
+  // One score for events and places (how well it matches, plus your taste), so the app can mix them in one list
+  const weights = taste.weights(user);
+  result.matches = result.matches.map((m) => ({ ...m, score: mixed.score(findEvent(m.id) || {}, { relevance: (m.match || 0) / 100, weights }) }));
   // A full page means there are probably more good fits; a short one means the AI (or the keywords) ran out
   const more = result.matches.length >= SEARCH_PAGE && left.length > result.matches.length;
   if (!firstPage) return { mode: result.mode, error: result.error, matches: result.matches, unmet: [], more };
@@ -1939,7 +1952,7 @@ const server = http.createServer(async (req, res) => {
     }
     // The launch map: name a (rounded) point, and the one places search a map session gets
     if (req.method === "GET" && url.pathname === "/api/where") return sendJSON(res, 200, launch.where(url.searchParams.get("lat"), url.searchParams.get("lng")));
-    if (req.method === "POST" && url.pathname === "/api/places") return sendJSON(res, 200, await launch.nearby(await readBody(req)));
+    if (req.method === "POST" && url.pathname === "/api/places") return sendJSON(res, 200, await apiPlaces(await readBody(req)));
     const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster, "/api/extract": apiExtract, "/api/from-link": apiFromLink, "/api/cover": apiCover, "/api/read-ticket": apiReadTicket };
     if (req.method === "POST" && ROUTES[url.pathname]) {
       const body = await readBody(req);
