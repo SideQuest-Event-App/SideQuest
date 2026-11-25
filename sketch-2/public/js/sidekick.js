@@ -1198,7 +1198,7 @@
 
   function cardHTML(card, label) {
     // The vibe: the same suggested chips as the form (wrapping pills), plus "+ Something else…" into want
-    const opts = card.slot === "vibe"
+    const opts = card.slot === "vibe" && !STUDY // the voice study keeps its answer rows
       ? `<div class="chips vibe-chips" role="group" aria-label="${esc(card.prompt)}">${card.options.map((o) => `<button class="chip" data-slot="vibe" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}">${esc(o.label)}${o.voters.length ? ` <span class="vn">${esc(o.voters.join(""))}</span>` : ""}</button>`).join("")}${otherHTML(true)}</div>`
       : card.options.map((o) => `<button class="ans" data-slot="${esc(card.slot)}" data-answer="${esc(o.value)}" aria-pressed="${Boolean(o.mine)}"><span class="grow">${esc(o.label)}</span>${avStack(o.voters)}</button>`).join("");
     const hint = label || `Sidekick is asking · ${view.me.mode === "voice" ? "say it or tap it" : "tap to answer"}${card.multi ? " · pick any that work" : ""}`;
