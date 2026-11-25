@@ -2567,6 +2567,13 @@
     // The server still thinks this phone runs the agent (the page reloaded mid-call): hand back to the built-in voice
     if (view && view.agentOn && view.me.planner && !agent && !agentStarting && !relayToAgent.ended) { relayToAgent.ended = true; send("voice-agent/end", { seconds: 0 }); }
     if (view && !view.agentOn) relayToAgent.ended = false;
+    // The server gave up on a silent live voice: close this phone's session and carry on with the built-in voice
+    if (agent && view && view.agentSilent && view.agentSilent !== relayToAgent.silent) {
+      relayToAgent.silent = view.agentSilent;
+      agentFallback();
+      vset("agent", "failed:silent");
+      return;
+    }
     if (!agent || !view) return;
     try {
       const remote = (pid) => { const p = view.people.find((x) => x.id === pid); return Boolean(p && p.audio && Audio.on); };
@@ -3013,7 +3020,7 @@
 
   // The "Sidekick's voice" sheet: the three ways, in plain words, the tips, and "Try sound again"
   let voiceOpen = false;
-  const AGENT_WORDS = { "no-key": "Not set up", "no-agent": "Not set up", off: "Switched off", "upstream-401": "No permission for this key", "upstream-403": "No permission for this key", "upstream-429": "Daily limit reached", limit: "Daily limit reached", "upstream-5xx": "ElevenLabs is having trouble", network: "Couldn't connect", mic: "Microphone blocked", sdk: "Couldn't load the voice", timeout: "Took too long to connect", disconnected: "Dropped, switched to backup" };
+  const AGENT_WORDS = { "no-key": "Not set up", "no-agent": "Not set up", off: "Switched off", "upstream-401": "No permission for this key", "upstream-403": "No permission for this key", "upstream-429": "Daily limit reached", limit: "Daily limit reached", "upstream-5xx": "ElevenLabs is having trouble", network: "Couldn't connect", mic: "Microphone blocked", sdk: "Couldn't load the voice", timeout: "Took too long to connect", disconnected: "Dropped, switched to backup", silent: "Connected but didn't answer, switched to backup" };
   const AGENT_WHY = { "no-key": "The server has no ElevenLabs key.", "no-agent": "The server has no agent ID for this voice.", off: "Switched off on the server.", "upstream-401": "ElevenLabs refused the key (401).", "upstream-403": "ElevenLabs refused the key (403).", "upstream-429": "ElevenLabs says the limit is reached (429).", limit: "Today's allowance is used up.", mic: "The phone didn't allow the microphone.", sdk: "The voice code didn't load on this phone." };
   function voiceWords(path) {
     const v = VS[path];

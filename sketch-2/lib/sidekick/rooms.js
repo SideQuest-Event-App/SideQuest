@@ -26,6 +26,10 @@ const rooms = new Map();
 const SUMMARY_FILE = path.join(__dirname, "..", "..", "data", "sidekick-summaries.jsonl");
 const QUIET_MS = 900; // wait this long after the last line before thinking, so Sidekick never cuts in
 const QUIET_ASKED_MS = 400; // shorter when someone just spoke to Sidekick ("Sidekick, ..."): they're waiting on it
+// Alone on a call: wait this long for a second person, then Sidekick leads anyway (straight away if they talk to it)
+const SOLO_MS = () => Number(process.env.SIDEKICK_SOLO_MS || 4000);
+// The live voice connected but says nothing this long after the start or after someone speaks: hand back to the built-in voice
+const AGENT_SILENT_MS = () => Number(process.env.SIDEKICK_AGENT_SILENT_MS || 10000);
 const MIN_GAP_MS = 5000; // at least this long between Sidekick's lines, unless someone asks it something
 const NUDGE_AFTER_MS = 20000;
 const SILENT_MS = () => Number(process.env.SIDEKICK_SILENT_MS || 20000); // quiet this long in the call: invited in by name, once
@@ -773,7 +777,23 @@ async function agentReady() {
   if (!process.env.ELEVENLABS_AGENT_FRIEND && !process.env.ELEVENLABS_AGENT_CONCIERGE) return false;
   return usage.available("elevenlabs_minutes", AGENT_MAX_MIN());
 }
+// The live voice is meant to answer: if it connected but stays silent, stop waiting on it and let the built-in voice lead
+function armAgentWatch(room) {
+  if (!room.agentMode || room.agentWatch) return;
+  const armedAt = now();
+  room.agentWatch = setTimeout(async () => {
+    room.agentWatch = null;
+    if (!room.agentMode || (room.agentSaidAt || 0) >= armedAt) return;
+    vlog(room, `agent silent for ${Math.round(AGENT_SILENT_MS() / 1000)}s: switching to the built-in voice`);
+    room.agentSilent = now(); // the planner's phone sees this and closes its session
+    await endAgent(room, room.agent ? (now() - room.agent.startedAt) / 1000 : 0);
+    if (room.status === "live" && !room.picks && room.card && P.SLOTS[room.card.slot]) room.card = null; // let the built-in voice ask it out loud
+    broadcast(room);
+    schedule(room, 300);
+  }, AGENT_SILENT_MS());
+}
 async function endAgent(room, seconds) {
+  if (room.agentWatch) { clearTimeout(room.agentWatch); room.agentWatch = null; }
   if (room.agent) {
     const usedMin = Math.min(room.agent.reserved, Math.ceil(Math.max(0, Number(seconds) || 0) / 60));
     await usage.release("elevenlabs_minutes", room.agent.reserved - usedMin);
@@ -958,7 +978,13 @@ async function decideNow(room, { forcePicks = false } = {}) {
   }
   if (!room.mode) {
     if (room.people.length >= 2) return startCheckIn(room); // wait for a second person before saying hello
-    return;
+    // Alone: never sit silent. After a short wait for a friend, or as soon as they say or type something, Sidekick leads.
+    const waited = now() - room.createdAt;
+    if (!room.addressed && !room.lines.length && waited < SOLO_MS()) { schedule(room, SOLO_MS() - waited + 50); return; }
+    room.mode = "lead";
+    room.modeHow = "solo";
+    room.modeSetAt = now();
+    track("sk_mode", { sessionId: room.id, persona: room.persona, mode: "lead", how: "solo", votes: 0 });
   }
   if (room.mode === "voting" && !forcePicks) return;
   if (room.wantMode) {
@@ -1664,6 +1690,7 @@ function viewFor(room, pid) {
     agentNotes: me && me.role === "planner" && room.agentMode ? room.agentNotes.slice(-8) : [],
     voiceAgent: Boolean(me && me.role === "planner" && agentIdFor(room)),
     agentOn: room.agentMode,
+    agentSilent: room.agentSilent || null,
     mode: room.mode,
     modeCloseAt: room.mode === "voting" ? room.modeCloseAt || null : null,
     sidekick: room.said.slice(-3),
@@ -1889,6 +1916,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       }
       const out = addLine(room, person, body.text, body.kind);
       if (out && out.dropped) return sendJSON(res, 200, { ok: true, dropped: out.dropped });
+      armAgentWatch(room); // with the live voice on, someone spoke: it should answer within a few seconds
       broadcast(room);
       // Someone spoke to Sidekick: answer after a short pause instead of the usual one. Anyone who keeps
       // talking pushes it back again (each line restarts the wait), so Sidekick still never cuts in.
@@ -1978,6 +2006,8 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       room.agent.live = true;
       vlog(room, "agent live");
       room.agentMode = true;
+      room.agentSilent = null;
+      armAgentWatch(room); // its opening line should come within a few seconds
       room.agentNotes = [];
       room.nextMove = null;
       // The opening line already asks this question: put its card up so taps and the board follow along
@@ -2012,6 +2042,8 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       if (person.role !== "planner" || !room.agent) return sendJSON(res, 403, { error: "Not allowed." });
       const text = String(body.text || "").trim().slice(0, 400);
       if (text) {
+        room.agentSaidAt = now();
+        if (room.agentWatch) { clearTimeout(room.agentWatch); room.agentWatch = null; }
         room.said.push({ id: id(4), text, move: "agent", at: now() });
         if (room.said.length > 20) room.said.shift();
         // The agent's words often reach us after other phones already captioned them: take those back out
@@ -2245,4 +2277,4 @@ function init({ events }) {
   eventsSource = events;
 }
 
-module.exports = { init, handle, preview, liveCalls, BOOT, _test: { rooms, createRoom, vibeChips, slotOptions, expectedView, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates } };
+module.exports = { init, handle, preview, liveCalls, BOOT, _test: { rooms, createRoom, vibeChips, slotOptions, expectedView, addPerson, setAnswer, addLine, heardElsewhere, iceServers, think, decide, extractKeywords, viewFor, endRoom, voteMode, closeMode, setMode, runTool, planState, nextMove, endAgent, makePicks, thinkingView, THINK, upcoming, QUIET_MS, QUIET_ASKED_MS, nudgeTick, unhear, applyUpdates, armAgentWatch } };

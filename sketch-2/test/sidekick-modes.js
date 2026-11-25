@@ -37,12 +37,48 @@ async function newCall(persona = "friend", extra = ["Maya", "Jay"]) {
 const last = (room) => room.said[room.said.length - 1];
 
 (async () => {
-  await test("Nothing happens while the planner is alone", async () => {
+  await test("Alone, the planner waits a few seconds for a friend, then Sidekick leads instead of staying silent", async () => {
     const { room: rid } = T.createRoom({ crew: "Solo", planner: "Asia", nights: [FRI, SAT], persona: "friend" });
     const room = T.rooms.get(rid);
     await T.think(room);
-    assert.strictEqual(room.mode, null);
+    assert.strictEqual(room.mode, null, "no hello in the first seconds: a friend may be joining");
     assert.strictEqual(room.said.length, 0);
+    room.createdAt -= 5000; // the short wait is over and nobody joined
+    await T.think(room);
+    assert.strictEqual(room.mode, "lead");
+    assert.strictEqual(room.modeHow, "solo");
+    assert(room.said.length > 0, "Sidekick says something");
+    T.endRoom(room, "test");
+  });
+
+  await test("Alone, typing to Sidekick gets an answer straight away (no wait for a friend)", async () => {
+    const { room: rid } = T.createRoom({ crew: "Solo", planner: "Asia", nights: [FRI, SAT], persona: "friend" });
+    const room = T.rooms.get(rid);
+    T.addLine(room, room.people[0], "Friday works, we want live music", "typed");
+    await T.think(room);
+    assert.strictEqual(room.mode, "lead");
+    assert(room.said.length > 0, "Sidekick answers");
+    T.endRoom(room, "test");
+  });
+
+  await test("A live voice that connects but stays silent hands back to the built-in voice", async () => {
+    process.env.SIDEKICK_AGENT_SILENT_MS = "200";
+    const { room } = await newCall("friend");
+    room.agent = { startedAt: Date.now(), reserved: 0, live: true };
+    room.agentMode = true;
+    T.armAgentWatch(room);
+    await new Promise((r) => setTimeout(r, 400));
+    assert.strictEqual(room.agentMode, false, "the built-in voice takes over");
+    assert(room.agentSilent, "the planner's phone is told to close its session");
+    assert(T.viewFor(room, room.people[0].id).agentSilent, "and it's in the view");
+    // An agent that does speak keeps the call
+    room.agent = { startedAt: Date.now(), reserved: 0, live: true };
+    room.agentMode = true; room.agentSilent = null;
+    T.armAgentWatch(room);
+    room.agentSaidAt = Date.now() + 1;
+    await new Promise((r) => setTimeout(r, 400));
+    assert.strictEqual(room.agentMode, true, "a speaking agent isn't cut off");
+    delete process.env.SIDEKICK_AGENT_SILENT_MS;
     T.endRoom(room, "test");
   });
 
