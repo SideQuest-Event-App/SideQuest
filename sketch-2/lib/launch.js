@@ -152,11 +152,20 @@ async function forQuery({ query, lat, lng } = {}) {
 
 // Places near a point, once per map session. Never throws: any trouble is just "no places".
 // With a query (Discover's search box), the places for those words instead (forQuery).
-async function nearby({ sessionId, lat, lng, vibes, query } = {}) {
+// area: true is "Search this area" after the map was panned: one search per area (rounded to about 1 km), at most
+// AREA_MAX areas per map session, on the same meters and caps.
+const AREA_MAX = 8;
+async function nearby({ sessionId, lat, lng, vibes, query, area } = {}) {
   if (query) return forQuery({ query: String(query).slice(0, 120), lat, lng });
   sweep();
-  const key = String(sessionId || "").slice(0, 40);
-  if (!/^[\w-]{6,40}$/.test(key)) return { places: [], reason: "no session" };
+  const sid = String(sessionId || "").slice(0, 40);
+  if (!/^[\w-]{6,40}$/.test(sid)) return { places: [], reason: "no session" };
+  let key = sid;
+  if (area && okPoint(round2(lat), round2(lng))) {
+    key = `${sid}@${round2(lat)},${round2(lng)}`;
+    const n = [...sessions.keys()].filter((k) => k.startsWith(`${sid}@`)).length;
+    if (!sessions.has(key) && n >= AREA_MAX) return { places: [], reason: "area limit" };
+  }
   const hit = sessions.get(key);
   if (hit) return hit.out;
   const out = search({ lat: round2(lat), lng: round2(lng), vibes: Array.isArray(vibes) ? vibes.slice(0, 20).map(String) : [] })

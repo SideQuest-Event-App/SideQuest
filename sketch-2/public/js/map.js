@@ -219,7 +219,7 @@
         m.place();
       };
       window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", () => window.removeEventListener("pointermove", move), { once: true });
+      window.addEventListener("pointerup", () => { window.removeEventListener("pointermove", move); if (SQ.onMapMoved) SQ.onMapMoved(id); }, { once: true });
     };
     ph.addEventListener("pointerdown", down);
     const ro = window.ResizeObserver ? new ResizeObserver(() => m.place()) : null;
@@ -283,7 +283,7 @@
         const fold = () => ph.querySelectorAll(".maplibregl-compact-show").forEach((x) => x.classList.remove("maplibregl-compact-show"));
         fold();
         map.once("load", fold);
-        map.on("moveend", () => Object.assign(SQ.u.maps[id], { lng: map.getCenter().lng, lat: map.getCenter().lat, zoom: map.getZoom() }));
+        map.on("moveend", () => { Object.assign(SQ.u.maps[id], { lng: map.getCenter().lng, lat: map.getCenter().lat, zoom: map.getZoom() }); if (SQ.onMapMoved) SQ.onMapMoved(id); });
         m = live[id] = { el: ph, map, marks: [], styled: false, circles: [], id, clusters: [] };
         m.addMark = (n) => { const k = new maplibregl.Marker({ element: n, anchor: "top-left" }).setLngLat([+n.dataset.lng, +n.dataset.lat]).addTo(map); k.el = n; return k; };
         map.on("zoomend", () => cluster(m, map.getZoom(), (lat, lng) => { const p = map.project([lng, lat]); return [p.x, p.y]; }));
@@ -321,7 +321,9 @@
             const h = m.el.querySelector(".map-you, .map-home");
             if (h) Object.assign(v, { lat: +h.dataset.lat, lng: +h.dataset.lng });
           } else v.zoom = Math.max(9, Math.min(18, v.zoom + (k === "in" ? 1 : -1)));
-          return m.place();
+          m.place();
+          if (SQ.onMapMoved) SQ.onMapMoved(z.dataset.for);
+          return;
         }
         if (k === "in") m.map.zoomIn();
         else if (k === "out") m.map.zoomOut();

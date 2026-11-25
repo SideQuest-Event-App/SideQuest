@@ -23,7 +23,7 @@ const posters = require("./lib/posters");
 const { geocode } = require("./lib/geocode");
 const { findDuplicate, mergeInto } = require("../sketch-1/import/dedupe");
 const { jsonLdEvents } = require("../sketch-1/import/fetch");
-const { stripHtml, trimText, place, travel: travelTo, vibesOf, NA } = require("../sketch-1/import/normalize");
+const { stripHtml, trimText, place, travel: travelTo, vibesOf, NA, cleanListing } = require("../sketch-1/import/normalize");
 const siteName = require("./public/js/sites.js"); // shared with the add-event form
 const sidekick = require("./lib/sidekick/rooms"); // Sidekick planning calls (lib/sidekick, public/sidekick.html)
 const skOg = require("./lib/sidekick/og"); // link previews for call invites
@@ -36,6 +36,7 @@ const discover = require("./lib/search/discover"); // feed order (variety, seen 
 const freshness = require("./lib/freshness"); // the daily import's 36-hour staleness warning
 const weather = require("./lib/search/weather"); // Open-Meteo, cached hourly, skipped when unreachable
 const rank = require("./lib/search/rank");
+const foryou = require("./lib/search/foryou"); // Discover's For you as vibe collections of events and places
 const tabs = require("./lib/tabs"); // Squads, the Sidequests wallet, Profile, Stats and Taste (designs TB2, TB3 D1)
 const { torontoDate } = require("./lib/tabs/time"); // Toronto wall-clock time to an instant, across daylight saving
 
@@ -285,7 +286,7 @@ function eventsPayload() {
     for (const g of d.logs.going) if (!g.sample) goingCounts[g.eventId] = (goingCounts[g.eventId] || 0) + 1;
     // Passed events are left out, except ones someone has in their Quest Log or a host published (for ratings and recaps)
     const kept = new Set(Object.values(d.users).flatMap((u) => Object.keys(u.log || {})).map(Number));
-    const json = JSON.stringify({ version, events: d.events.filter((e) => !isOver(e) || e.ended || e.publishedBy || kept.has(e.id)).map((e) => ({ ...e, joinRequests: undefined, going: (e.going || 0) + (goingCounts[e.id] || 0), over: isOver(e), ended: !!e.ended })) });
+    const json = JSON.stringify({ version, events: d.events.filter((e) => !isOver(e) || e.ended || e.publishedBy || kept.has(e.id)).map((e) => ({ ...cleanListing(e), joinRequests: undefined, going: (e.going || 0) + (goingCounts[e.id] || 0), over: isOver(e), ended: !!e.ended })) });
     eventsCache = { version, json, gzip: zlib.gzipSync(json) };
   }
   return eventsCache;
@@ -1554,6 +1555,21 @@ async function apiPlaces(body = {}) {
   return { ...out, places: out.places.map((p) => ({ ...p, score: mixed.score(p, { relevance: p.relevance || 0, weights }) })) };
 }
 
+// For you as vibe collections: the person's top taste vibes, each a row of events and places. places: the cards the
+// map already has (kept in the browser's memory only, as Google's terms ask), sent back to be ranked, never stored.
+const FORYOU_DAYS = 7;
+async function apiForYou({ userId, places } = {}) {
+  const user = db.data.users[userId];
+  if (!user) throw new Error("Sign up first.");
+  const now = Date.now();
+  const { pool } = applyLimits({ budget: user.budget, origins: user.origin ? [user.origin] : [], maxMinutes: user.maxMinutes });
+  const soon = pool.filter((e) => !user.notForMe.includes(e.id) && !(user.adult === false && /19\+/.test(`${(e.tags || []).join(" ")} ${e.title}`))
+    && Date.parse(e.startsAt) - now > -3 * 3600000 && Date.parse(e.startsAt) - now < FORYOU_DAYS * 86400000);
+  const cards = (Array.isArray(places) ? places : []).slice(0, 40).filter((p) => p && typeof p.id === "string")
+    .map((p) => ({ id: p.id.slice(0, 60), title: String(p.title || "").slice(0, 120), type: String(p.type || "").slice(0, 40), vibes: Array.isArray(p.vibes) ? p.vibes.slice(0, 10).map(String) : [] }));
+  return { collections: foryou.collections(user, soon, cards, { now }) };
+}
+
 // Search answers a page of picks at a time. only: the ids that pass the filters set in the app (null when none are on).
 // exclude: ids already on screen, so the next page picks from the rest.
 const SEARCH_PAGE = 10;
@@ -1953,7 +1969,7 @@ const server = http.createServer(async (req, res) => {
     // The launch map: name a (rounded) point, and the one places search a map session gets
     if (req.method === "GET" && url.pathname === "/api/where") return sendJSON(res, 200, launch.where(url.searchParams.get("lat"), url.searchParams.get("lng")));
     if (req.method === "POST" && url.pathname === "/api/places") return sendJSON(res, 200, await apiPlaces(await readBody(req)));
-    const ROUTES = { "/api/feed": apiFeed, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster, "/api/extract": apiExtract, "/api/from-link": apiFromLink, "/api/cover": apiCover, "/api/read-ticket": apiReadTicket };
+    const ROUTES = { "/api/feed": apiFeed, "/api/foryou": apiForYou, "/api/search": apiSearch, "/api/blend": apiBlend, "/api/draft": apiDraft, "/api/poster": apiPoster, "/api/extract": apiExtract, "/api/from-link": apiFromLink, "/api/cover": apiCover, "/api/read-ticket": apiReadTicket };
     if (req.method === "POST" && ROUTES[url.pathname]) {
       const body = await readBody(req);
       const route = url.pathname.slice("/api/".length);
