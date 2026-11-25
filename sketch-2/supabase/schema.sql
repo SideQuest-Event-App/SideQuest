@@ -7,7 +7,11 @@ alter table sketch2_events enable row level security;
 -- Every finished account (attendees and hosts), one row each. The server writes a row when onboarding is done or a host
 -- is approved, and again whenever that account changes; data holds the whole profile. Only the server's secret key and
 -- the dashboard can read it (row level security is on, with no policies).
-drop view if exists sketch2_accounts;
+do $$ begin
+  if exists (select 1 from pg_views where schemaname = 'public' and viewname = 'sketch2_accounts') then
+    drop view sketch2_accounts;  -- only the old view version; never the table
+  end if;
+end $$;
 create table if not exists sketch2_accounts (
   id text primary key,
   role text not null,          -- attendee or host
