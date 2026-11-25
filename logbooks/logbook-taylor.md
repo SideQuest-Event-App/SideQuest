@@ -9,7 +9,7 @@
 
 
 
-## Week 1 – Sept 10
+## Week 1 – Sept 10 – Studio launch: build first, then figure out why
 - Reading → decision: N/A
 - What I did:
     Set up GitHub for the team and linked it to VS Code.
@@ -21,7 +21,7 @@
 - AI use (disclose):
     Very minimal, Claude Code not yet set up. Asked Claude for clarification on what a Sketch 0 is and what it should look like
 
-## Week 2 – Sept 17
+## Week 2 – Sept 17 – Product strategy: vision, positioning, North Star
 - Reading → decision:
     With the North Star Playbook urging us to focus on a user-centred goal, we started with "Connecting users to other like-minded people through events in their area" and worked backwards to brainstorm the key inputs that can get us there, what opportunities arise here, and what interventions can help progress us.
 - What I did:
@@ -38,7 +38,7 @@
     Used Claude chat to help me with setting up Claude Code, and got it to generate sketch 0 with sample event data after granting it access to my files. Also used it as an assistant during error debugging.
     Used it to assist in making the product strategy stronger for updating the sketch, and ot provided guidance on how to use claude code based on prompts like this, suggesting putting the strategy in CLAUDE.md and developing it from there.
 
-## Week 3 – Sept 24
+## Week 3 – Sept 24 – Discovery & problem framing
 *what did you hear that you did not want to hear?*
 - Reading → decision:
     Based on the opportunity tree reading, we consolidated the key parts of the interviews to establish a more solid, clear direction of the different paths we could take or things to include in our app, in a way that was higher-level and grounded in the interviews. I like the structured hierarchy aspect of opportunity trees, and the purpose-forward angle, since other thematic analysis tasks I've done were a lot more open-ended and purely focused on discovery, which can lead to weird organizational structures. Knowing that interview responses needed to relate to "connecting users to other like-minded people through worthwhile events in their area" and also present opportunities for our app created a solid lens for analysis and made it easier to find concrete answers.
@@ -54,7 +54,7 @@
     Used Otter.ai for transcription and Claude for the interview synthesis, opportunity tree, and consolidated opportunity tree (from both interviews, the other interview had an individual opportunity tree already). I also asked it to suggest potential app features, of which I sorted through and asked it to implement a select few of them to support location-informed search. As mentioned before, Claude did most of the heavy lifting with implementing this feature. Location-based search is pretty standard in most apps, so I didn't feel the need to fully define what that would look like for our app, because I assumed it would just be another data point that would help search refinement and algorithmic suggestions.
 
 
-## Week 4 – Oct 1
+## Week 4 – Oct 1 – Socio-technical systems & the boundaries of human control
 - Reading → decision:
     The systems reading was pretty insightful regarding the concerns I had last week. Its emphasis on the interconnectedness of parts, inflow, and outflow made it a bit more clear how we could clean up the process and have everything grounded in data. I wanted to be able to clearly map the outflow to parts of the inflow, and also improve the app so we had an actual build. Since we were also bringing forward a more polished prototype, we decided to leverage skills a bit more to bring more design-forward inflow.
 - What I did:
@@ -72,7 +72,7 @@
 - AI use (disclose):
     Decided this stage of the process would just be exploration of "full speed ahead!" to see what a full, actualized app would look like. I asked Claude to combine SideQuest's interface with some key features in my sketch-0 and real Toronto events, with the expectation of it being bloated and not fully developed. It took a few tries to get it to work right, since the first result was not what I asked for, but the end result was only okay.
 
-## Week 5 – Oct 8
+## Week 5 – Oct 8 – Design spike & prioritization: pretotyping and feasibility
 - Reading → decision:
     With the pretotyping readings, I took inspiration from the "Facade" and decided to make the promotional website to generate hype and gauge outside interest. I bought sidequest.rsvp for a year and used Claude Code to draft up a single-page site. Along with this, I also made the Facebook and Instagram accounts to accompany this, and hopefully gain more traction.
 
@@ -98,14 +98,60 @@
 - AI use (disclose):
     While I was able to set up all accounts and API access points, I used Claude to guide me through this whole process, since it was new to me. It did a great job at troubleshooting and clarifying what I needed to do within the various developer dashboards. I also got it to generate the draft website for sidequest.rsvp, based on some simple stylistic prompts.
 
-## Week 6 – Oct 15
+## Week 6 – Oct 15 – Building with AI: interaction patterns & the vertical slice
+- Reading → decision:
+    Amershi, S., et al. (2019). "Guidelines for Human-AI Interaction." CHI 2019.
+
+- What I did:
+- Systemic reflection:
+- An honest doubt:
+- AI use (disclose):
+
+## Week 7 – Oct 22 – Midpoint demo
+- Reading → decision: N/A
+- What I did:
+- Systemic reflection:
+- An honest doubt:
+- AI use (disclose):
+
+## Week 8 – Nov 5 – Human-AI collaboration & agency
+- Reading → decision:
+    Shneiderman, B. (2022). Human-Centered AI. Oxford — Part II.
+- What I did:
+- Systemic reflection:
+- An honest doubt:
+- AI use (disclose):
+
+## Week 9 – Nov 12 – Testing & evals I: hypothesis-driven evaluation & reliability
+- Reading → decision:
+    Husain, H. (2024). "Your AI Product Needs Evals."
+- What I did:
+- Systemic reflection:
+- An honest doubt:
+- AI use (disclose):
+
+## Week 10 – Nov 19 – Testing & evals II: incidents, trust, escalation & governance
+- Reading → decision:
+    Crawford, K. (2021). Atlas of AI. Yale — introduction + one chapter of the team's choice.
+- What I did:
+    
+- Systemic reflection:
+- An honest doubt:
+- AI use (disclose):
+
+
+
+
+
+
+## Week 11 – Nov 26 – Integration: deploy, launch & the service around the product
 - Reading → decision:
 - What I did:
 - Systemic reflection:
 - An honest doubt:
 - AI use (disclose):
 
-## Week 7 – Oct 22
+## Week 12 – Dec 3 – Final demo day
 - Reading → decision:
 - What I did:
 - Systemic reflection:
