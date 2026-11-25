@@ -16,6 +16,13 @@ const DAY = 86400000;
 // Areas people chose at onboarding -> a point near the middle of each (for the "near your areas" bonus)
 const AREA_POINTS = { "West End": [43.651, -79.43], Downtown: [43.651, -79.383], "East End": [43.668, -79.335], Midtown: [43.698, -79.397], "North York": [43.765, -79.412], Scarborough: [43.775, -79.257], Etobicoke: [43.64, -79.53] };
 
+// How often each rating tag ("The price", "Easy to get to", "My crew"…) came up in their good nights
+function tagCounts(user) {
+  const out = {};
+  for (const l of Object.values(user.log || {})) if (l.rating >= 4) for (const t of l.tags || []) out[t] = (out[t] || 0) + 1;
+  return out;
+}
+
 function context(user, extra = {}) {
   return { whenOut: user.whenOut || [], ...extra };
 }
@@ -35,6 +42,11 @@ function shortlistScore(user, e, ctx = {}) {
   const c = rank.contextBonus(e, context(user, ctx.context));
   s += c.bonus;
   why.push(...c.why);
+  // The rest of the taste model: energy, "Surprise me", days and times, follows, and why good nights worked
+  if (!ctx.tags) ctx.tags = tagCounts(user); // once per feed, not once per listing
+  const p = taste.prefScore(user, w, e, { origin: user.origin, tags: ctx.tags });
+  s += p.bonus;
+  why.unshift(...p.why);
   return { s, fit: f.fit, why, setting: c.setting };
 }
 
@@ -61,6 +73,7 @@ function noteWildcard(store, vibe, kind) {
 // One labelled Wildcard from the eligible pool, outside the person's top vibes and not already in the top of the feed
 function wildcardFor(user, pool, { counts = {}, exclude = new Set(), seed } = {}) {
   const w = taste.weights(user);
+  if (w.surprise < 0.15) return null; // "Surprise me" set to familiar: no Wildcard
   const top = Object.entries(w.vibes).filter(([, x]) => x > 0).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([v]) => v);
   // Exploring means new ground, not things they've passed on: no vibe or organizer they've marked down
   const cands = pool.filter((e) => !exclude.has(e.id) && (e.vibes || []).length && taste.fit(w, e).score >= 0 && !(e.vibes || []).some((v) => (w.vibes[v] || 0) < 0));
@@ -123,4 +136,4 @@ function staleLine(h) {
   return h && h.stale ? `WARNING: the event data is ${h.days} days old (imported ${h.importedAt}); more than ${h.limit} days means the scheduled import may not be reaching this server.` : null;
 }
 
-module.exports = { shortlistScore, order, wildcardFor, noteWildcard, crewView, fairOrder, weightsFromVibes, dataHealth, staleLine, context, AREA_POINTS, STALE_DAYS };
+module.exports = { tagCounts, shortlistScore, order, wildcardFor, noteWildcard, crewView, fairOrder, weightsFromVibes, dataHealth, staleLine, context, AREA_POINTS, STALE_DAYS };
