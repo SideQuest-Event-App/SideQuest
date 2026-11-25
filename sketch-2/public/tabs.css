@@ -384,3 +384,4 @@
 [data-layout="desktop"] .sq-mid > .row:first-child { gap: 12px; }
 .te-vibe .tb-plain { min-width: 44px; }
 .tt-cols > *, .te-cols > *, .pf-top > *, .sq-desk > *, .st-bento > *, .pf-cards > *, .pf-settings > * { min-width: 0; }
+.tb-card.row > .tb-btn { flex: none; }

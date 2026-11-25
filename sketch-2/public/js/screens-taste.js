@@ -248,7 +248,7 @@
     const more = U().tasteMore;
     return `<div class="tt-hero"><div class="row"><b class="tb-t14">Your taste</b>${tbtn("Edit", { "data-go": "taste-edit" }, "glass sm")}</div>
       <div class="row start tt-hero-in" style="gap:12px">${SQ.donutSvg(tp.donut, 124, tp.counts.nights, tp.counts.nights === 1 ? "night" : "nights")}
-        <div class="stack" style="gap:6px;min-width:0;flex:1"><b class="tt-h">Your top vibes</b>${legend(tp.donut, more ? 5 : 4) || '<span class="tb-s">Pick a few vibes in Edit to start.</span>'}${tp.donut.length > 4 ? `<button class="tb-link light" data-act="tasteMore">${more ? "Show less" : "Show more ›"}</button>` : ""}</div></div>
+        <div class="stack" style="gap:0;min-width:0;flex:1"><b class="tt-h" style="margin-bottom:4px">Your top vibes</b>${legend(tp.donut, more ? 5 : 4) || '<span class="tb-s">Pick a few vibes in Edit to start.</span>'}${tp.donut.length > 4 ? `<button class="tb-link light" data-act="tasteMore">${more ? "Show less" : "Show more ›"}</button>` : ""}</div></div>
       <span class="tb-s light">Based on ${plural(tp.counts.nights, "night")} out, ${plural(tp.counts.saves, "save")} and ${tp.counts.notForMe} "not for me"</span></div>`;
   }
   function compare(tp) {

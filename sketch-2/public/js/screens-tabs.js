@@ -191,7 +191,7 @@
     const n = d.picked.length + 1;
     return screen(`<div class="tb-pad stack sq-new-form" style="gap:14px">
         <div class="row"><button class="icon-btn" data-back aria-label="Close">${icon("x")}</button><h1 class="tb-h2 grow" style="text-align:center">New squad</h1><span style="width:44px"></span></div>
-        <label class="tb-field"><span>Name</span><input data-bind="newSquad.name" value="${esc(d.name)}" placeholder="Thursday climbers" maxlength="40" autofocus></label>
+        <label class="tb-field"><span>Name</span><input data-bind="newSquad.name" data-live value="${esc(d.name)}" placeholder="Thursday climbers" maxlength="40" autofocus></label>
         <div class="stack" style="gap:8px"><span class="tb-flab">Who's in?</span>
           <label class="search">${icon("search")}<input data-bind="newSquad.q" data-live value="${esc(d.q)}" placeholder="Search friends" aria-label="Search friends"></label>
           ${d.picked.length ? `<div class="chips">${d.picked.map((k) => `<button class="tb-chip on" data-act="squadPick" data-arg="${esc(k)}" aria-label="Remove ${esc(people([k])[0])}">${esc(people([k])[0])}${icon("x", "xs")}</button>`).join("")}</div>` : ""}
