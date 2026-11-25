@@ -239,8 +239,10 @@
         // Stay on this page (no reload), so the tap that unlocked audio on iPhones still counts
         history.pushState(null, "", `/sk/${roomId}${STUDY ? `?study=${encodeURIComponent(STUDY)}&v=${out.n || 1}` : ""}`);
         connect();
-        // Sidekick's natural voice starts on this same tap: no second button to find
+        // Sidekick's natural voice starts on this same tap: no second button to find. Without it, the
+        // captions mic starts instead, so the planner is never silently muted.
         if (autoAgent) startAgent({ auto: true });
+        else startMic();
       } catch (err) {
         e.target.disabled = false;
         toast(err.message);
@@ -711,6 +713,7 @@
       if (!form) pfOn(false);
       connect();
       if (autoAgent) startAgent({ auto: true });
+      else if (!form) startMic(); // no natural voice: listen with the captions mic, never start muted
     } catch (err) {
       unpend(btn);
       toast(err.message);
@@ -957,6 +960,7 @@
         me = { person: out.person, mode: b.dataset.mode, boot: info.boot };
         store.set(`sk:${roomId}`, me);
         connect();
+        if (me.mode === "voice") startMic(); // a friend joining by voice is heard from the start (this tap allows the mic)
       } catch (err) {
         b.disabled = false;
         toast(err.message);
@@ -2158,7 +2162,9 @@
       if (reserved) api(`/api/sk/rooms/${roomId}/voice-agent/end`, { p: me.person, seconds: 0 }).catch(() => {});
       // Quietly carry on with the built-in voice. A tap on the switch gets a short note; the automatic start doesn't.
       if (!auto) toast(agentCapped ? "Sidekick's natural voice is resting for now. The built-in voice carries on." : "Couldn't start Sidekick's natural voice. The built-in voice carries on.");
-      if (hadMic && !micOn && (phase === "call" || phase === "picks")) startMic();
+      // The natural voice didn't start (on its own, at the start of the call, the mic was never on yet):
+      // listen with the captions mic so nobody is left muted with nothing hearing them
+      if ((hadMic || auto) && !micOn && me && me.mode === "voice" && phase !== "ended" && phase !== "locked") startMic();
     } finally {
       agentStarting = false;
       if (phase) renderDock();

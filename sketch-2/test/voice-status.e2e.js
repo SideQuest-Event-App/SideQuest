@@ -168,6 +168,8 @@ const INIT = () => {
       await friend(c.rid);
       await until(async () => (await pill(c.page)) === "backup", 10000, "Backup voice");
       assert.match((await c.page.textContent("#voicePill")).replace(/\s+/g, " "), /Backup voice\s*Why\?/);
+      // The natural voice failing at the start must not leave the planner muted with nothing listening
+      await until(async () => (await c.page.getAttribute("#mic", "aria-pressed")) === "true", 4000, "the mic on after the natural voice failed");
       await wait(300);
       await shot(c.page, "voice-backup.png");
       await c.page.click("#voicePill");
@@ -192,6 +194,7 @@ const INIT = () => {
       mode.agent = 200; mode.tts = 401;
       tts._reset();
       const c = await call({ agent: false });
+      await until(async () => (await c.page.getAttribute("#mic", "aria-pressed")) === "true", 4000, "the mic on from the start without the natural voice");
       await friend(c.rid);
       await until(async () => (await pill(c.page)) === "backup", 10000, "Backup voice (the phone's voice carries on)");
       await c.page.click("#voicePill");
