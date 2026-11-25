@@ -158,6 +158,9 @@ function fakeSupabase(users) {
       await page.waitForSelector(".pf-strip");
       const t = await text(page);
       assert(!t.includes("Language") && !t.includes("Langue") && !t.includes("Français"), "no Language row on Profile");
+      await go(page, "settings-home");
+      await page.waitForFunction(() => SQ.u.screen === "settings-home");
+      assert(!/Language|Langue|Français/.test(await text(page)), "no Language row in Settings");
       assert(!(await page.$('button[data-act="openSettings"][data-arg="language"]')), "no Language settings card");
       const tabs = await page.$eval("nav.tabs", (n) => [...n.querySelectorAll(".tab")].map((x) => x.textContent.trim()));
       assert.deepStrictEqual(tabs, ["Discover", "Squads", "Plan", "Sidequests", "Profile"], "labels stay English");
@@ -586,7 +589,7 @@ function fakeSupabase(users) {
       ["taste-edit", { tbSheet: { kind: "fresh", screen: "taste-edit" } }, "fresh"],
     ];
     for (const [w, h] of [[375, 812], [1280, 800]]) {
-      await test(`j. ${w} px: new screens and sheets have no sideways scroll, 44 px targets, weights 400/500/600, 12 px text`, async () => {
+      await test(`j. ${w} px: new screens and sheets have no sideways scroll, 44 px targets, weights from the type scale, 12 px text`, async () => {
         const { ctx, page } = await phone({ width: w, height: h });
         const bad = [];
         for (const [screen, extra = {}, tag = "", scope = "#screen"] of SCREENS) {
@@ -618,7 +621,7 @@ function fakeSupabase(users) {
           if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${name}-${w}.png`) });
           if (r.overflow > 0 || r.inner > 0) bad.push(`${name}: ${Math.max(r.overflow, r.inner)}px sideways scroll`);
           if (r.small.length) bad.push(`${name}: small targets ${r.small.join("; ")}`);
-          if (!r.weights.every((x) => ["400", "500", "600"].includes(x))) bad.push(`${name}: weights ${r.weights.join(", ")}`);
+          if (!r.weights.every((x) => ["400", "500", "600", "700", "800"].includes(x))) bad.push(`${name}: weights ${r.weights.join(", ")}`); // 700/800: the redesign's titles
           if (r.tiny.length) bad.push(`${name}: tiny text ${r.tiny.join("; ")}`);
         }
         // The live card and the sheets are really there

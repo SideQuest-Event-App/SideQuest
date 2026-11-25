@@ -162,67 +162,104 @@
       <span class="grow" style="min-width:0"><b class="tb-t14">Live call · ${s.live.on} in</b><span class="tb-s ellipsis">${esc([s.live.names.join(", "), `${liveMins(s.live)} min`].filter(Boolean).join(" · "))}</span></span>
       <a class="tb-btn v sm sq-join" href="/sk/${esc(s.live.id)}" data-join-call="${esc(s.live.id)}" aria-label="Join ${esc(s.name)}'s call">${ix("phone")}<span>Join</span></a></div>` : "");
 
-  function squadCard(s) {
+  // Each squad gets its own photo from public/assets/photos, picked from its id so it never changes
+  const SQUAD_PHOTOS = ["cheers", "beer-garden", "string-lights", "lanterns", "jazz-band", "bokeh-2", "pinwheels", "sax", "dragon-boat", "hall", "performer", "bokeh-1"];
+  const squadPhoto = (s) => SQUAD_PHOTOS[SQ.hash(s.id) % SQUAD_PHOTOS.length];
+  SQ.squadPhoto = squadPhoto;
+  // Faces in the tag style; anyone online (on the squad's call, or chatting in the last half hour) glows
+  const faces = (s, cls = "s", max = 5) => {
+    const on = new Set(s.online || []);
+    const names = crewNames(s);
+    return `<span class="sq-faces">${names.slice(0, max).map((n) => {
+      const a = n === "You" ? avatar((me() && me().name) || "You", cls) : avatar(n, cls);
+      return on.has(n) ? a.replace('class="av ', 'class="av online ').replace(/title="([^"]*)"/, 'title="$1, online"') : a;
+    }).join("")}${names.length > max ? `<span class="av more ${cls}">+${names.length - max}</span>` : ""}</span>`;
+  };
+  const ago = (iso) => {
+    const d = Math.max(0, Math.round((SQ.now().getTime() - Date.parse(iso)) / 86400000));
+    return d === 0 ? "today" : d === 1 ? "yesterday" : d < 14 ? `${d} days ago` : `${Math.round(d / 7)} weeks ago`;
+  };
+  // One status line: live call, who's online, the next plan, an open vote, or nothing yet (no blend %)
+  function statusLine(s) {
     const next = s.next && ev(s.next);
-    const line = next ? `Next: ${next.title} · ${dayLabel(next.startsAt)} · ${venueOf(next)}` : s.options.length ? `Vote open · ${s.options.length} pick${s.options.length === 1 ? "" : "s"}` : "Next: nothing locked yet";
-    const status = s.closes ? pill(`Vote closes ${closesLabel(s.closes)}`, "pink") : next ? pill("Locked in", "green") : pill("Nothing planned", "dim");
-    return `<div class="sq-card${U().squad === s.id ? " sel" : ""}${s.live ? " live" : ""}">
+    if (s.live) return `● Live call · ${s.live.on} in`;
+    const on = (s.online || [])[0];
+    const what = next ? `${dayLabel(next.startsAt, { weekday: "short" })} ${timeLabel(next.startsAt)} · ${next.title}` : s.options.length ? `Vote open${s.closes ? ` · closes ${closesLabel(s.closes)}` : ""}` : s.lastAt ? `Last chat ${ago(s.lastAt)}` : "Nothing planned yet";
+    return on ? `● ${on}${(s.online || []).length > 1 ? ` and ${(s.online || []).length - 1} more` : ""}${(s.online || []).length > 1 ? " are" : "'s"} online · ${next || s.options.length ? what : "nothing planned yet"}` : what;
+  }
+  SQ.squadStatus = statusLine;
+  // The most active squad: a live call first, then new messages, an open vote, and the latest chat
+  const activity = (s) => (s.live ? 1e15 : 0) + (s.fresh || 0) * 1e13 + (s.options.length ? 1e12 : 0) + (s.lastAt ? Date.parse(s.lastAt) : 0) / 1e3;
+  function squadHero(s) {
+    return `<div class="sq-card sq-hero${s.live ? " live" : ""}" data-squad="${esc(s.id)}">
+      ${SQ.ph(squadPhoto(s), "sq-img")}<span class="sq-fade" aria-hidden="true"></span>
       ${liveRow(s)}
-      <button class="sq-open" data-act="openSquad" data-arg="${esc(s.id)}" aria-label="Open ${esc(s.name)}">
-        <span class="row start" style="gap:10px">${stack(crewNames(s), "s")}<span class="sq-name grow ellipsis">${esc(s.name)}</span>${icon("chevR")}</span>
-        <span class="sq-line ellipsis">${esc(line)}</span>
+      <button class="sq-open sq-hero-open" data-act="openSquad" data-arg="${esc(s.id)}" aria-label="Open ${esc(s.name)}">
+        ${faces(s, "s")}
+        <span class="sq-hero-t">${esc(s.name)}</span>
+        <span class="sq-line ellipsis">${esc(statusLine(s)).replace(/^● /, '<i class="sq-dot" aria-hidden="true"></i>')}</span>
       </button>
-      <span class="row sq-foot">${status}${s.fair != null ? `<span class="sq-fair">Fair blend ${s.fair}%</span>` : !next && !s.closes ? `<a class="tb-btn o sm" href="${planLink(s)}">Start a plan</a>` : ""}</span>
+      <span class="row start sq-hero-acts" style="gap:8px">
+        <a class="tb-btn grad sm sq-plan" href="${planLink(s)}" data-plan-squad="${esc(s.id)}">Plan a night</a>
+        ${s.fresh ? `<button class="tb-btn o sm sq-new-msgs" data-act="openSquadChat" data-arg="${esc(s.id)}" aria-label="${s.fresh} new message${s.fresh === 1 ? "" : "s"} in ${esc(s.name)}"><span aria-hidden="true">💬</span><span>${s.fresh} new</span></button>` : ""}
+      </span>
     </div>`;
   }
+  function squadRow(s) {
+    return `<div class="sq-card sq-row${s.live ? " live" : ""}" data-squad="${esc(s.id)}">
+      ${SQ.ph(squadPhoto(s), "sq-img")}<span class="sq-fadeL" aria-hidden="true"></span>
+      ${liveRow(s)}
+      <button class="sq-open" data-act="openSquad" data-arg="${esc(s.id)}" aria-label="Open ${esc(s.name)}">
+        ${faces(s, "s", 3)}
+        <span class="grow" style="min-width:0"><span class="sq-name ellipsis">${esc(s.name)}</span><span class="sq-line ellipsis">${esc(statusLine(s)).replace(/^● /, '<i class="sq-dot" aria-hidden="true"></i>')}</span></span>
+        ${s.fresh ? `<span class="sq-badge" aria-label="${s.fresh} new">${s.fresh}</span>` : ""}
+      </button>
+    </div>`;
+  }
+  // Kept for the desktop list (one squad open beside it)
+  const squadCard = squadRow;
   function squadList() {
-    const u = me();
     const list = squadsOf();
-    const reqs = (u.friendRequests || []).length;
-    const friends = u.friendList || [];
-    return `<div class="tb-head row"><h1 class="tb-h1">${esc(L("Squads"))}</h1>
-        <span class="row" style="gap:8px">
-          <button class="icon-btn" data-act="openFriends" aria-label="Friends${reqs ? `, ${reqs} request${reqs === 1 ? "" : "s"}` : ""}">${icon("userPlus")}${reqs ? `<span class="count-badge">${reqs}</span>` : ""}</button>
-          <button class="icon-btn" data-act="newSquad" aria-label="New squad">${icon("plus")}</button></span></div>
-      <div class="stack sq-list" style="gap:12px">
-        ${list.length ? [...list.filter((s) => s.live), ...list.filter((s) => !s.live)].map(squadCard).join("") : `<div class="tb-empty"><p class="tb-t">Make your first squad</p><p class="tb-s">Squads are the friends you go out with. Each one gets its own vote, chat and plans.</p>${tbtn("Make a squad", { "data-act": "newSquad" }, "v", "plus")}<a class="tb-btn o" href="/sk">Start a plan with anyone</a></div>`}
-        ${list.length ? `<button class="sq-new" data-act="newSquad">${icon("plus")}<span>New squad</span></button>` : ""}
-      </div>
-      <div class="stack" style="gap:8px;margin-top:20px">
-        <div class="row">${lab(`Friends · ${friends.length}`)}<button class="tb-link" data-act="openFriends">See all</button></div>
-        ${friends.length ? `<div class="sq-friends">${friends.slice(0, 12).map((f) => `<button class="sq-friend" data-act="openFriend" data-arg="${esc(f.key)}">${avatar(f.name, "s")}<span>${esc(f.name)}</span></button>`).join("")}</div>` : `<p class="tb-s">No friends yet. Find people with the add-friend button.</p>`}
+    const order = [...list].sort((a, b) => activity(b) - activity(a));
+    const [top, ...rest] = order;
+    return `<div class="tb-head row sq-head"><h1 class="dx-title">${esc(L("Your"))}<br>${esc(L("squads"))}</h1>
+        <button class="icon-btn sq-add" data-act="newSquad" aria-label="New squad">${icon("plus")}</button></div>
+      <div class="stack sq-list" style="gap:10px">
+        ${list.length ? `${squadsDesk() ? order.map(squadCard).join("") : squadHero(top) + rest.map(squadRow).join("")}` : `<div class="tb-empty"><p class="tb-t">Make your first squad</p><p class="tb-s">Squads are the friends you go out with. Each one gets its own chat and plans.</p>${tbtn("Make a squad", { "data-act": "newSquad" }, "v", "plus")}<a class="tb-btn o" href="/sk">Start a plan with anyone</a></div>`}
       </div>`;
   }
-  // One squad's space: blend, next plan, open vote (pink deadline), chat preview, start a plan
-  function squadSpace(s, { desktop = false } = {}) {
-    if (!s) return `<div class="tb-empty"><p class="tb-t">That squad isn't here anymore</p>${tbtn("Back to squads", { "data-go": "squads" }, "o")}</div>`;
+  // One squad: members in the header, one "what's next" state (a live call, the next plan, the open vote, or nothing
+  // yet), the chat, and one button: Plan a night with <squad>
+  function whatsNext(s) {
     const next = s.next && ev(s.next);
     const opts = s.options.map((o) => ({ ...o, e: ev(o.id) })).filter((o) => o.e);
-    const voteDay = opts.length ? dayLabel(opts[0].e.startsAt, { weekday: "long" }) : "";
     const hasVotes = opts.some((o) => o.voters.length);
-    const live = liveRow(s);
-    const head = `${live}<div class="row sq-tags">${s.fair != null ? pill(`Fair blend ${s.fair}%`, "teal") : ""}${s.themes.map((t) => pill(t, "violet")).join("")}</div>`;
-    const nextCard = next ? `<button class="sq-next" data-act="openQuest" data-arg="${next.id}"><span class="row">${pill(isPlace(next) ? "Place" : "Event", isPlace(next) ? "teal" : "violet", isPlace(next) ? "pin" : "ticket")}${pill(s.locked === next.id ? "Locked in" : "Going", "green")}</span>
-        <span class="sq-next-t">Next: ${esc(next.title)}</span><span class="tb-s">${esc([dayLabel(next.startsAt), timeLabel(next.startsAt), venueOf(next), next.going ? `${next.going} going` : ""].filter(Boolean).join(" · "))}</span></button>`
-      : `<div class="sq-next none"><span class="sq-next-t">Nothing locked yet</span><span class="tb-s">Send a pick to the squad from any event, or start a plan.</span></div>`;
-    const vote = opts.length ? `<div class="stack" style="gap:8px"><div class="row">${lab(`Open vote${voteDay ? ` · ${voteDay}` : ""}`)}${s.closes ? pill(`Closes ${closesLabel(s.closes)}`, "pink") : ""}</div>
+    const suits = s.themes.length ? `${s.themes.slice(0, 2).join(" and ")} suit${s.themes.length === 1 ? "s" : ""} ${s.names.length > 1 ? `all ${s.names.length + 1} of you` : "you both"}.` : "Start a plan and Sidekick finds something for everyone.";
+    if (next) return `<button class="sq-next" data-act="openQuest" data-arg="${next.id}"><span class="dx-mono">${s.locked === next.id ? "Locked in" : "Next up"}</span>
+        <span class="sq-next-t">${esc(next.title)}</span><span class="tb-s">${esc([dayLabel(next.startsAt), timeLabel(next.startsAt), venueOf(next), next.going ? `${next.going} going` : ""].filter(Boolean).join(" · "))}</span></button>`;
+    if (opts.length) return `<div class="sq-next vote stack" style="gap:8px"><div class="row"><span class="dx-mono">Vote open${opts.length ? ` · ${dayLabel(opts[0].e.startsAt, { weekday: "long" })}` : ""}</span>${s.closes ? pill(`Closes ${closesLabel(s.closes)}`, "pink") : ""}</div>
         ${opts.map((o) => {
           const mine = s.myVote === o.id;
           return `<div class="sq-opt"><button class="sq-opt-open" data-act="openQuest" data-arg="${o.e.id}"><span class="tb-ico ${isPlace(o.e) ? "teal" : "violet"}">${icon(isPlace(o.e) ? "pin" : "ticket")}</span>
-            <span class="grow" style="min-width:0"><span class="tb-t14 ellipsis">${esc(o.e.title)}</span><span class="tb-s ellipsis">${esc([venueOf(o.e), timeLabel(o.e.startsAt), o.fair != null ? `fits all ${o.fair}%` : ""].filter(Boolean).join(" · "))}</span></span></button>
+            <span class="grow" style="min-width:0"><span class="tb-t14 ellipsis">${esc(o.e.title)}</span><span class="tb-s ellipsis">${esc([venueOf(o.e), timeLabel(o.e.startsAt)].filter(Boolean).join(" · "))}</span></span></button>
             ${stack(o.voters, "xs")}<button class="tb-btn ${mine ? "v" : "o"} sm" data-act="squadVote" data-arg="${esc(s.id)}|${o.e.id}" aria-pressed="${mine}">${mine ? `${icon("check")}<span>Voted</span>` : "<span>Vote</span>"}</button></div>`;
         }).join("")}
-        ${hasVotes && !s.locked ? tbtn("Lock in the top pick", { "data-act": "squadLock", "data-arg": s.id, "data-pending": "Locking it in", "data-done": "Locked in" }, "o", "check") : ""}</div>`
-      : `<div class="stack" style="gap:6px">${lab("Open vote")}<p class="tb-s">No vote open. Send a pick to ${esc(s.name)} from any event to start one.</p></div>`;
-    const chat = `<div class="stack sq-chat" style="gap:8px"><div class="row">${lab("Chat")}${s.fresh ? `<span class="tb-s">${s.fresh} new</span>` : ""}</div>
-        ${s.chat.length ? s.chat.slice(desktop ? -4 : -3).map((m) => m.from === "Sidequest" ? `<p class="sq-sys">${esc(m.text)}</p>` : `<div class="sq-msg${m.from === "You" ? " me" : ""}">${avatar(m.from === "You" ? me().name || "You" : m.from, "xs")}<span>${m.from === "You" ? "" : `<b>${esc(m.from)}</b> `}${esc(m.text)}</span></div>`).join("") : '<p class="tb-s">No messages yet.</p>'}
+        ${hasVotes && !s.locked ? tbtn("Lock in the top pick", { "data-act": "squadLock", "data-arg": s.id, "data-pending": "Locking it in", "data-done": "Locked in" }, "o", "check") : ""}</div>`;
+    return `<div class="sq-next none"><span class="sq-next-t">Nothing planned yet</span><span class="tb-s">${esc(suits)}</span></div>`;
+  }
+  function squadChat(s, { desktop = false } = {}) {
+    return `<div class="stack sq-chat" id="sq-chat" style="gap:8px"><div class="row"><span class="dx-mono">Chat</span>${s.fresh ? `<span class="tb-s">${s.fresh} new</span>` : ""}</div>
+        ${s.chat.length ? s.chat.slice(desktop ? -4 : -4).map((m, i, arr) => m.from === "Sidequest" ? `<p class="sq-sys">${esc(m.text)}</p>` : `<div class="sq-msg${m.from === "You" ? " me" : ""}${U().squadChatOpen === s.id && i >= arr.length - (s.fresh || 0) && m.from !== "You" ? " fresh" : ""}">${avatar(m.from === "You" ? me().name || "You" : m.from, "xs")}<span>${m.from === "You" ? "" : `<b>${esc(m.from)}</b> `}${esc(m.text)}</span></div>`).join("") : '<p class="tb-s">No messages yet.</p>'}
         <form class="sq-compose" data-act="squadChat" data-arg="${esc(s.id)}"><input data-bind="squadMsg" value="${esc(U().squadMsg || "")}" placeholder="Message ${esc(s.name)}" aria-label="Message ${esc(s.name)}"><button class="icon-btn" type="submit" aria-label="Send">${icon("send")}</button></form>
         <p class="tb-s">Private call answers (budgets, no-gos) never show here.</p></div>`;
-    const actions = `<a class="tb-btn grad" href="${planLink(s)}" data-plan-squad="${esc(s.id)}">Start a plan with ${esc(s.name)}</a>
-      <div class="row" style="gap:8px">${s.main ? tbtn("Crew Blend picks", { "data-go": "party" }, "o", "spark") : ""}${s.main ? tbtn("Who's in", { "data-act": "squadMembers", "data-arg": s.id }, "o", "crew") : tbtn("Leave squad", { "data-act": "leaveSquad", "data-arg": s.id }, "o", "out")}</div>`;
-    if (desktop) return `<div class="sq-mid stack" style="gap:14px"><div class="row"><h2 class="tb-h2">${esc(s.name)}</h2><a class="tb-btn grad sm" href="${planLink(s)}">Start a plan</a></div>${head}${nextCard}${vote}<div class="row" style="gap:8px">${s.main ? tbtn("Crew Blend picks", { "data-go": "party" }, "o", "spark") : ""}${s.main ? "" : tbtn("Leave squad", { "data-act": "leaveSquad", "data-arg": s.id }, "o", "out")}</div></div>
-      <div class="sq-side stack" style="gap:14px">${chat}<div class="stack" style="gap:6px">${lab("Crew Blend")}<p class="tb-s"><b class="tb-strong">${s.fair != null ? `${s.fair}% fair blend` : "No blend yet"}</b>${s.themes.length ? ` · ${esc(s.themes.join(", ").toLowerCase())}` : ""}</p><p class="tb-s">The lowest person's match for the pick, never an average.</p></div></div>`;
-    return `${head}${nextCard}${vote}${chat}${actions}`;
+  }
+  function squadSpace(s, { desktop = false } = {}) {
+    if (!s) return `<div class="tb-empty"><p class="tb-t">That squad isn't here anymore</p>${tbtn("Back to squads", { "data-go": "squads" }, "o")}</div>`;
+    const plan = `<a class="tb-btn grad sq-plan-main" href="${planLink(s)}" data-plan-squad="${esc(s.id)}">Plan a night with ${esc(s.name)}</a>`;
+    const more = `<div class="row start" style="gap:8px">${s.main ? tbtn("Who's in", { "data-act": "squadMembers", "data-arg": s.id }, "o", "crew") : tbtn("Leave squad", { "data-act": "leaveSquad", "data-arg": s.id }, "o", "out")}</div>`;
+    if (desktop) return `<div class="sq-mid stack" style="gap:14px"><div class="row"><h2 class="tb-h2">${esc(s.name)}</h2>${faces(s, "s")}</div>${liveRow(s)}${whatsNext(s)}${plan}${more}</div>
+      <div class="sq-side stack" style="gap:14px">${squadChat(s, { desktop })}</div>`;
+    return `${liveRow(s)}${whatsNext(s)}${squadChat(s)}${more}`;
   }
   const squadsDesk = () => document.documentElement.dataset.layout === "desktop";
   S.squads = { role: "attendee", label: "Squads", render: () => {
@@ -236,12 +273,15 @@
   } };
   S.squad = { role: "attendee", label: "Squad", render: () => {
     const s = squadById(U().squad);
-    const sub = s ? crewNames(s).join(", ") : "";
-    return screen(`<div class="tb-pad stack" style="gap:16px">
-        <div class="row sq-top"><button class="icon-btn" data-back aria-label="Back">${icon("back")}</button><span class="grow" style="min-width:0"><span class="tb-h2 ellipsis" style="display:block">${esc(s ? s.name : "Squad")}</span><span class="tb-s ellipsis" style="display:block">${esc(sub)}</span></span>${s ? stack(crewNames(s), "s") : ""}</div>
+    if (!s) return screen(`<div class="tb-pad">${squadSpace(null)}</div>`, { title: "Squad", tabbar: SQ.attendeeTabs("squads"), cls: "tb-screen" });
+    // The squad's photo behind the top, in duotone; back and the members in the header
+    return screen(`<div class="sq-top-photo" aria-hidden="true">${SQ.ph(squadPhoto(s), "sq-img")}<span class="sq-fade"></span></div>
+      <div class="tb-pad stack sq-page" style="gap:14px">
+        <div class="row sq-top"><button class="icon-btn raised" data-back aria-label="Back">${icon("back")}</button><span class="grow"></span>${s.main ? "" : ""}</div>
+        <div class="stack" style="gap:8px;margin-top:56px">${faces(s, "s", 8)}<h1 class="dx-title">${esc(s.name)}</h1><span class="tb-s ellipsis">${esc(crewNames(s).join(", "))}</span></div>
         ${squadSpace(s)}
-        ${U().squadEdit === (s && s.id) ? `<div class="stack" style="gap:8px">${lab("Who's in")}<div class="chips">${Object.keys(SQ.d.friends).map((f) => SQ.chip(f, s.members.includes(f), { "data-act": "toggleMember", "data-arg": f }, s.members.includes(f) ? "check" : "plus")).join("")}</div></div>` : ""}
-      </div>`, { tabbar: SQ.attendeeTabs("squads"), cls: "tb-screen" });
+        ${U().squadEdit === s.id ? `<div class="stack" style="gap:8px">${lab("Who's in")}<div class="chips">${Object.keys(SQ.d.friends).map((f) => SQ.chip(f, s.members.includes(f), { "data-act": "toggleMember", "data-arg": f }, s.members.includes(f) ? "check" : "plus")).join("")}</div></div>` : ""}
+      </div>`, { tabbar: SQ.attendeeTabs("squads"), cls: "tb-screen bleed", footer: `<div class="footer-bar sq-foot-bar"><a class="tb-btn grad sq-plan-main" href="${planLink(s)}" data-plan-squad="${esc(s.id)}">Plan a night with ${esc(s.name)}</a></div>` });
   } };
   S["squad-new"] = { role: "attendee", label: "New squad", render: () => {
     const d = U().newSquad || (U().newSquad = { name: "", q: "", picked: [] });
@@ -266,6 +306,14 @@
   A.openSquad = (id) => {
     U().squad = id;
     U().squadEdit = null;
+    return squadsDesk() ? undefined : "squad";
+  };
+  // "💬 2 new" on a squad card: the squad, scrolled to its chat, the new messages marked
+  A.openSquadChat = (id) => {
+    U().squad = id;
+    U().squadEdit = null;
+    U().squadChatOpen = id;
+    setTimeout(() => { const c = document.getElementById("sq-chat"); if (c) c.scrollIntoView({ block: "start" }); const i = c && c.querySelector("input"); if (i) i.focus({ preventScroll: true }); }, 30);
     return squadsDesk() ? undefined : "squad";
   };
   A.newSquad = () => {
@@ -341,7 +389,7 @@
     const who = withNames(e);
     const lb = leaveBy(e);
     const kind = host ? "amber" : place ? "teal" : "violet";
-    return `<div class="tk-big ${kind}">
+    return `<div class="tk-big ticket-row ${kind}">${poster(e, "tk-img")}<span class="tk-fade" aria-hidden="true"></span>
       <button class="tk-top" data-act="openQuest" data-arg="${e.id}">
         <span class="row"><span class="row start" style="gap:6px">${host ? pill("★ Hosting", "amber") : pill("Going", kind)}${pill(place ? "Place" : "Event", kind, place ? "pin" : "ticket")}</span>${soon ? pill(soon, "green") : ""}</span>
         <span class="tk-title">${esc(e.title)}</span>
@@ -359,7 +407,7 @@
     const tk = SQ.ticketFor(e.id);
     const d = new Date(e.startsAt);
     const meta = host ? [venueOf(e), `${dayLabel(e.startsAt, { month: "short", day: "numeric" })} · ${timeLabel(e.startsAt)}`] : [venueOf(e), timeLabel(e.startsAt), SQ.d.party && SQ.d.party.locked === e.id ? SQ.d.party.name : ""];
-    return `<div class="tk-stub ${kind}">
+    return `<div class="tk-stub ticket-row ${kind}">${poster(e, "tk-img")}<span class="tk-fade" aria-hidden="true"></span>
       <span class="tk-date"><small>${esc(d.toLocaleDateString("en-US", { weekday: "short", timeZone: TZ }).toUpperCase())}</small><b>${esc(d.toLocaleDateString("en-US", { day: "numeric", timeZone: TZ }))}</b></span>
       <button class="tk-body" data-act="openQuest" data-arg="${e.id}"><span class="row start" style="gap:6px">${host ? pill("★ Hosting", "amber") : pill("Going", kind)}${host ? "" : pill(place ? "Place" : "Event", kind, place ? "pin" : "ticket")}</span>
         <span class="tb-t14 ellipsis">${esc(e.title)}</span><span class="tb-s ellipsis">${esc(meta.filter(Boolean).join(" · "))}</span>
@@ -377,7 +425,7 @@
     const ask = entries.filter((x) => x.l.status === "going" && SQ.isPast(x.e));
     const done = entries.filter((x) => x.l.status === "went" || x.l.status === "missed").sort((a, b) => b.e.startsAt.localeCompare(a.e.startsAt)).slice(0, 6);
     let out = "";
-    if (!up.length && !loose.length) out += `<div class="tb-empty"><p class="tb-t">No sidequests coming up yet</p><p class="tb-s">Tickets you're going to and events you host show up here.</p>${btn("Find a sidequest", { "data-go": "discover" }, "secondary m", "search")}</div>`;
+    if (!up.length && !loose.length) out += `<div class="tb-empty"><p class="tb-t">No sidequests coming up yet</p><p class="tb-s">Tickets you're going to and events you host show up here.</p>${btn("Find a sidequest", { "data-go": "discover" }, "secondary m", "search")}</div>${pickedForYou()}`;
     else {
       const [first, ...rest] = up;
       out += first ? bigTicket(first) : "";
@@ -395,10 +443,19 @@
     }
     return out;
   }
+  // The empty state's For you picks: this week's best matches, as small ticket posters
+  function pickedForYou() {
+    const u = me();
+    const soon = SQ.d.events.filter((e) => SQ.pick(e) && !e.over && !SQ.isPast(e) && !u.log[e.id] && !u.notForMe.includes(e.id) && Date.parse(e.startsAt) - SQ.now().getTime() < 7 * 86400000)
+      .sort((a, b) => SQ.pick(b).match - SQ.pick(a).match);
+    const gs = SQ.groupShows ? SQ.groupShows(soon).slice(0, 6) : [];
+    if (!gs.length) return "";
+    return `<div class="stack sq-picked" style="gap:8px"><span class="dx-mono">Picked for you</span><div class="lx-cards dx-rail hscroll" role="list" aria-label="Picked for you">${gs.map((g) => SQ.evPoster(g)).join("")}</div></div>`;
+  }
   function savedTab() {
     const u = me();
     const saved = u.saved.map(ev).filter((e) => e && !u.log[e.id] && !SQ.isPast(e)).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
-    if (!saved.length) return `<div class="tb-empty"><p class="tb-t">Nothing saved yet</p><p class="tb-s">Tap the bookmark on any event or place and it waits here, with a way to plan it.</p></div>`;
+    if (!saved.length) return `<div class="tb-empty"><p class="tb-t">Nothing saved yet</p><p class="tb-s">Tap the bookmark on any event or place and it waits here, with a way to plan it. Your saved places live here too.</p></div>${pickedForYou()}`;
     const card = (e) => {
       const place = isPlace(e);
       const friends = (e.friends || []).slice(0, 2);
@@ -435,12 +492,14 @@
   }
   S.questlog = { role: "attendee", label: "Sidequests", render: () => {
     const u = me();
-    const tab = ["events", "saved", "requests"].includes(U().sqTab) ? U().sqTab : "events";
+    // "Invites" was "Requests" (friend requests live in Your Sidequesters now); the old name still opens it
+    const tab = U().sqTab === "requests" ? "invites" : ["events", "saved", "invites"].includes(U().sqTab) ? U().sqTab : "events";
     const reqN = u.myRequests.length;
-    const segs = [["events", "Your events"], ["saved", "Saved"], ["requests", `Requests${reqN ? ` ${reqN}` : ""}`]];
-    const body = tab === "saved" ? savedTab() : tab === "requests" ? requestsTab() : yourEvents();
+    const savedN = u.saved.map(ev).filter((e) => e && !u.log[e.id] && !SQ.isPast(e)).length;
+    const segs = [["events", "Your events"], ["saved", `Saved${savedN ? ` ${savedN}` : ""}`], ["invites", `Invites${reqN ? ` ${reqN}` : ""}`]];
+    const body = tab === "saved" ? savedTab() : tab === "invites" ? requestsTab() : yourEvents();
     return screen(`<div class="tb-pad stack" style="gap:12px">
-        <div class="tb-head row"><h1 class="tb-h1">${esc(L("Sidequests"))}</h1>${u.demo ? "" : tbtn("Add event", { "data-act": "addEvent", "aria-label": "Add event" }, "v add", "plus")}</div>
+        <div class="tb-head row"><h1 class="dx-title">Side&shy;quests</h1>${u.demo ? "" : tbtn("Add event", { "data-act": "addEvent", "aria-label": "Add event" }, "v add", "plus")}</div>
         <div class="tb-seg" role="tablist" aria-label="Sidequests">${segs.map(([k, label]) => `<button role="tab" class="${tab === k ? "on" : ""}" data-act="sqTab" data-arg="${k}" aria-selected="${tab === k}" aria-pressed="${tab === k}">${esc(label)}</button>`).join("")}</div>
         <div class="stack sq-wallet" style="gap:10px">${body}</div>
       </div>`, { tabbar: SQ.attendeeTabs("questlog"), cls: "tb-screen" });
@@ -556,46 +615,74 @@
     return `<button class="pf-card taste" data-go="taste"><span class="row"><span class="tb-t16">Taste</span>${icon("chevR")}</span>
       <span class="row start" style="gap:12px">${SQ.donutSvg ? SQ.donutSvg(tp.donut, 64, tp.counts.nights, "nights") : ""}<span class="stack" style="gap:4px;min-width:0">${top.map((d, i) => `<span class="tb-s row start" style="gap:6px"><i class="tb-dot c${i}"></i><span class="ellipsis">${esc(d.vibe)}</span></span>`).join("") || '<span class="tb-s">Pick a few vibes to start.</span>'}</span></span></button>`;
   }
+  // The taste aura: a soft glow behind your photo, in the token tints of your top vibes (violet for music, pink for
+  // comedy and dance, teal for social and outdoors, amber for food and markets, green for wellness)
+  const AURA = [[/music|jazz|gigs|records|electronic|film/i, "var(--action-primary-tint)"], [/comedy|dance|anime/i, "var(--hot-tint)"], [/games|outdoors|run|climbing|tech|photo/i, "var(--social-tint)"], [/food|markets|zines|art|writing/i, "var(--status-warning-tint)"], [/wellness/i, "var(--status-success-tint)"]];
+  const auraTint = (v) => (AURA.find(([re]) => re.test(v)) || [, "var(--action-primary-tint)"])[1];
+  function auraOf(vibes) {
+    const tints = (vibes.length ? vibes : ["Live music"]).slice(0, 3).map(auraTint);
+    const n = tints.length;
+    const stops = tints.map((t, i) => `${t} ${Math.round((i * 100) / n)}% ${Math.round(((i + 1) * 100) / n)}%`).join(", ");
+    return `conic-gradient(from 200deg, ${stops})`;
+  }
+  SQ.auraOf = auraOf;
   S.profile = { role: "attendee", label: "Profile", render: () => {
     const u = me();
     const st = u.stats;
     const tp = u.tastePage;
-    const sq = squadsOf();
     const since = new Date(u.createdAt || SQ.now()).toLocaleDateString("en-US", { month: "long", timeZone: TZ });
     const nightsAll = st.days.length;
-    const hosted = (u.hosting || []).filter((h) => { const e = ev(h.id); return e && Date.parse(e.startsAt) <= SQ.now().getTime(); }).length;
-    const friendsN = new Set(sq.flatMap((s) => s.members)).size;
-    const topVibe = tp.donut[0] && tp.donut[0].vibe;
-    const head = `<div class="pf-head">
-        <div class="row" style="align-items:flex-start">${meAv(u)}<button class="icon-btn pf-bell" data-go="notifications" aria-label="Notifications${u.notifications.some((n) => !n.read) ? ", new" : ""}">${icon("bell")}${u.notifications.some((n) => !n.read) ? `<span class="count-badge">${u.notifications.filter((n) => !n.read).length}</span>` : ""}</button></div>
-        <h1 class="pf-name">${esc(u.name || "You")}</h1>
-        <span class="tb-s13">${esc(`${handleOf(u)} · since ${since}`)}</span>
-        <div class="row start" style="gap:8px;flex-wrap:wrap">${pill(`${nightsAll} night${nightsAll === 1 ? "" : "s"} out`, "lav", "ticket")}${topVibe ? pill(`${topVibe} fan`, "line") : ""}${u.demo ? pill("Demo", "line") : ""}</div></div>`;
-    const strip = `<div class="pf-strip"><div class="pf-nums">
-        <div><span class="pf-big">${nightsAll}</span><span class="tb-s">${esc(L("Nights out"))}</span></div>
-        <div><span class="pf-big">${hosted}</span><span class="tb-s">${esc(L("Hosted"))}</span></div>
-        <div><span class="pf-big lav">${sq.length}</span><span class="tb-s">${esc(L("Squads"))}</span></div></div>
-        <span class="pf-bar" role="img" aria-label="${st.seasonThrough}% of the way through ${esc(st.seasonName)}"><i style="width:${st.seasonThrough}%"></i></span>
-        <span class="row"><span class="tb-s">${esc(st.seasonLabel.split(" ")[0])} season · ${st.seasonThrough}% through</span><button class="tb-link sm" data-go="stats">Stats ›</button></span></div>`;
-    const squadsStrip = `<button class="pf-squads" data-go="squads">${stack(["You", ...new Set(sq.flatMap((s) => s.names))], "s")}<span class="grow" style="min-width:0"><span class="tb-s" style="display:block">Your squads</span><span class="tb-t14">${sq.length} squad${sq.length === 1 ? "" : "s"} · ${friendsN} friend${friendsN === 1 ? "" : "s"}</span></span>${icon("chevR")}</button>`;
+    const friendsN = (u.friendList || []).length;
+    const reqs = (u.friendRequests || []).length;
+    const top = tp.donut.slice(0, 3).map((d) => d.vibe);
+    const vibes = top.length ? top : (u.vibes || []).slice(0, 3);
+    const unread = u.notifications.filter((n) => !n.read).length;
     const earned = st.badges.filter((b) => b.earned).length;
-    const tiles = `<div class="row"><span class="tb-t16">Your stuff</span><span class="tb-s">Scroll for more</span></div>
-      <div class="pf-tiles hscroll" role="list">
-        <button class="pf-tile pv" role="listitem" data-go="badges">${icon("trophy", "lg")}<span><b>Badges</b>${earned ? `${earned} earned` : "None yet"}</span></button>
-        <button class="pf-tile ppk" role="listitem" data-act="openRewind">${ix("rewind", "lg")}<span><b>Rewind</b>${st.season.nights ? `${esc(st.seasonLabel.split(" ")[0])} is ready` : "After a night out"}</span></button>
-        <button class="pf-tile pte" role="listitem" data-go="passport">${ix("passport", "lg")}<span><b>Passport</b>${st.stamps.length} stamp${st.stamps.length === 1 ? "" : "s"}</span></button>
-        <button class="pf-tile pam" role="listitem" data-go="taste">${ix("spark4", "lg")}<span><b>Taste</b>${tp.actions ? `${tp.actions} signal${tp.actions === 1 ? "" : "s"}` : "Tune it"}</span></button>
-      </div>`;
-    const cards = `<div class="pf-cards">${statsCard(st)}${tasteCard(tp)}</div>`;
-    const settings = `<div class="pf-settings"><div class="stack" style="gap:8px">${lab(L("Account"))}${GROUPS.slice(0, 3).map(settingCard).join("")}</div>
-      <div class="stack" style="gap:8px">${lab(L("App"))}${GROUPS.slice(3).map(settingCard).join("")}</div></div>`;
-    const bottom = `<div class="pf-bottom">${tbtn(u.demo ? L("Exit demo") : L("Log out"), { "data-act": "signOut" }, "o", "out")}${tbtn(L("Edit profile"), { "data-act": "editProfile" }, "v grow")}
+    const head = `<div class="pf-head">
+        <div class="row pf-icons"><button class="icon-btn raised" data-go="settings-home" aria-label="Settings">${icon("settings")}</button>
+          <button class="icon-btn raised pf-bell" data-go="notifications" aria-label="Notifications${unread ? `, ${unread} new` : ""}">${icon("bell")}${unread ? `<span class="count-badge">${unread}</span>` : ""}</button></div>
+        <div class="pf-id">${meAv(u, "xl")}
+          <h1 class="pf-name">${esc(u.name || "You")}</h1>
+          <span class="tb-s13">${esc(`${handleOf(u)} · out since ${since}`)}</span>
+          ${vibes.length ? `<span class="dx-mono pf-vibes">${esc(vibes.join(" · "))}</span>` : ""}${u.demo ? pill("Demo", "line") : ""}</div></div>`;
+    // Stats in one row
+    const strip = `<div class="pf-strip pf-stat3" role="list">
+        <div role="listitem"><b class="pf-big">${nightsAll}</b><span class="tb-s">${esc(L("Nights out"))}</span></div>
+        <div role="listitem"><b class="pf-big">${friendsN}</b><span class="tb-s">Sidequesters</span></div>
+        <div role="listitem"><b class="pf-big">${st.stamps.length}</b><span class="tb-s">new places</span></div></div>`;
+    const item = (label, sub, a) => `<button class="pf-mi" ${SQ.attr(a)}><span class="grow">${esc(label)}</span><span class="pf-mi-sub">${sub}</span>${icon("chevR")}</button>`;
+    const menu = `<nav class="pf-menu" aria-label="Profile">
+        ${item("Your Sidequesters", reqs ? `<span class="pf-req">${reqs} request${reqs === 1 ? "" : "s"}</span>` : esc(String(friendsN)), { "data-act": "openFriends", "aria-label": `Your Sidequesters, ${friendsN}${reqs ? `, ${reqs} friend request${reqs === 1 ? "" : "s"}` : ""}` })}
+        ${item("Your taste", tp.actions ? `${tp.actions} signal${tp.actions === 1 ? "" : "s"}` : "Tune it", { "data-go": "taste" })}
+        ${item("Night passport", earned ? `${earned} stamp${earned === 1 ? "" : "s"}` : "None yet", { "data-go": "night-passport" })}
+        ${item("Stats", st.season.nights ? `${st.season.nights} this ${esc(st.seasonName)}` : "", { "data-go": "stats" })}
+        ${item("Settings", "", { "data-go": "settings-home" })}
+      </nav>`;
+    const bottom = `<div class="pf-bottom">${tbtn(u.demo ? L("Exit demo") : L("Log out"), { "data-act": "signOut" }, "o", "out")}${tbtn(L("Edit profile"), { "data-act": "editProfile" }, "o grow")}
       <button class="tb-danger" data-go="delete-account" aria-label="${esc(L("Delete account"))}" title="${esc(L("Delete account"))}">${ix("warn")}</button></div>`;
-    return screen(`<div class="tb-pad pf">
-        <div class="pf-top"><div class="stack" style="gap:14px">${head}${strip}</div><div class="stack" style="gap:14px">${squadsStrip}${tiles}</div></div>
-        ${cards}${settings}${bottom}
+    return screen(`<div class="pf-aura" style="background:${auraOf(vibes)}" aria-hidden="true"></div><div class="tb-pad pf">
+        ${head}${strip}${menu}${bottom}
         <p class="tb-s" style="text-align:center">Matching: ${esc(SQ.aiLabel(SQ.d.mode))}</p>
-      </div>`, { tabbar: SQ.attendeeTabs("profile"), cls: "tb-screen" });
+      </div>`, { tabbar: SQ.attendeeTabs("profile"), cls: "tb-screen pf-screen" });
+  } };
+  // Settings, from Profile's ⚙ and its menu: the groups, each with what it's set to now
+  S["settings-home"] = { role: "attendee", label: "Settings", render: () => screen(`<div class="tb-pad stack" style="gap:14px">
+      <div class="stack" style="gap:8px">${lab(L("Account"))}${GROUPS.slice(0, 3).map(settingCard).join("")}</div>
+      <div class="stack" style="gap:8px">${lab(L("App"))}${GROUPS.slice(3).map(settingCard).join("")}</div>
+    </div>`, { title: "Settings", tabbar: SQ.attendeeTabs("profile"), cls: "tb-screen" }) };
+  // Night passport: the badges as stamps (earned ones inked, the rest faint, with how to get them), then a stamp for
+  // every venue of a confirmed night out
+  S["night-passport"] = { role: "attendee", label: "Night passport", render: () => {
+    const st = me().stats;
+    const tones = ["s1", "s2", "s3"];
+    const stamps = st.badges.map((b, i) => `<div class="np-stamp ${b.earned ? tones[i % 3] : "off"}" role="listitem" aria-label="${esc(`${b.name}: ${b.earned ? "earned" : b.how}`)}"><span>${esc(b.name)}</span></div>`).join("");
+    const venues = st.stamps;
+    return screen(`<div class="tb-pad stack" style="gap:16px">
+        <p class="tb-s13">A stamp for each thing you've done on a night out. They never expire.</p>
+        <div class="np-grid" role="list">${stamps}</div>
+        <div class="stack" style="gap:8px">${lab("Venues")}
+          ${venues.length ? `<div class="pp-grid">${venues.map((s) => `<div class="pp-stamp ${s.kind}"><b class="tb-t14">${esc(s.venue)}</b><span class="tb-s">${esc([s.hood].filter(Boolean).join(" · "))}</span></div>`).join("")}</div>` : '<p class="tb-s">Your first venue stamp comes with your first confirmed night out.</p>'}</div>
+      </div>`, { title: "Night passport", tabbar: SQ.attendeeTabs("profile"), cls: "tb-screen" });
   } };
 
   // ---------- Settings (one screen per group, each control saved on the account) ----------
