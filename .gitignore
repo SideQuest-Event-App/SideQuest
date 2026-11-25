@@ -21,3 +21,4 @@ sketch-1/data/geocode.json
 
 # Sketch 2 local database and generated files
 sketch-2/data/
+sketch-2/test/.timings.json

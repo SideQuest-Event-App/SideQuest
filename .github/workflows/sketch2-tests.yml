@@ -1,0 +1,41 @@
+name: Sketch 2 tests
+
+# Runs every sketch-1 and sketch-2 test file on each push, so the chat doesn't have to wait for them.
+# On Render, set Auto-Deploy to "After CI Checks Pass" so a failing push never deploys.
+on:
+  push:
+    branches: ["main", "claude/**"]
+    paths: ["sketch-1/**", "sketch-2/**", ".github/workflows/sketch2-tests.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: sketch2-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright and Chromium (tools only; the app itself has no dependencies)
+        run: |
+          mkdir -p /tmp/node-tools && cd /tmp/node-tools
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      - name: Run the tests (3 at a time)
+        env:
+          NODE_PATH: /tmp/node-tools/node_modules
+        run: node sketch-2/test/run.js -j 3
