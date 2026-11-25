@@ -20,7 +20,7 @@ const S2 = path.join(__dirname, "..");
 const REPO = path.join(S2, "..");
 const HELPERS = new Set(["fake-supabase", "mini-yaml"]); // modules other tests require, not tests
 // Tests that measure real time (a 300 ms window, a 3 s line) run on their own after the rest, so a busy CPU can't fail them
-const ALONE = new Set(["sketch-2/sidekick-thinking", "sketch-2/sidekick-tts"]);
+const ALONE = new Set(["sketch-2/sidekick-thinking", "sketch-2/sidekick-tts", "sketch-2/launch.e2e"]);
 const TIMINGS = path.join(__dirname, ".timings.json");
 const args = process.argv.slice(2);
 const flag = (f) => args.includes(f);
@@ -135,7 +135,13 @@ function runOne(t, root, logDir) {
     timings[keyOf(t)] = r.secs;
     const ok = r.code === 0 && r.fail === 0;
     console.log(`${ok ? "ok  " : "FAIL"}  ${keyOf(t).padEnd(36)} ${String(r.pass).padStart(3)} passed  ${String(r.secs).padStart(4)} s`);
-    if (!ok) console.log(r.text.split("\n").slice(-30).map((l) => `      ${l}`).join("\n"));
+    if (!ok) {
+      // The failing checks themselves (with the lines under them), then the end of the output
+      const lines = r.text.split("\n");
+      const shown = [];
+      lines.forEach((l, i) => { if (/^(FAIL|\s*not ok)/.test(l)) shown.push(...lines.slice(i, i + 8), ""); });
+      console.log([...shown, ...lines.slice(-8)].map((l) => `      ${l}`).join("\n"));
+    }
   };
   await Promise.all(Array.from({ length: jobs }, async (_, i) => {
     const root = path.join(base, `w${i}`);
