@@ -229,3 +229,8 @@
 .qd-sheet > .row > .btn-ghost { flex: 1 1 140px; min-width: 0; }
 /* Accept and Decline on Your Sidequesters are full 44 px targets */
 .sqr-row .btn.s { min-height: 44px; }
+
+/* Vote options never grow past the screen: long titles truncate inside the row (seen with wider fallback fonts) */
+.sq-opt { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.sq-opt-open { overflow: hidden; }
+.sq-opt .ellipsis { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
