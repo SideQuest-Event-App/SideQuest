@@ -11,7 +11,7 @@
   const SQ = window.SQ;
   const FAST = 150, BASE = 250, SLOW = 400;
   const OUT = "cubic-bezier(0.23, 1, 0.32, 1)", IN = "cubic-bezier(0.55, 0, 1, 0.45)", INOUT = "cubic-bezier(0.65, 0, 0.35, 1)";
-  const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.motion === "reduce"; // or Settings > Display > Reduce motion
 
   // el.animate, with will-change on while it runs, and the end state kept. Returns the Animation (or null).
   function play(el, frames, opts) {

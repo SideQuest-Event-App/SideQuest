@@ -239,11 +239,12 @@
   }
 
   // ---------- Navigation ----------
-  const ROOTS = ["discover", "parties", "questlog", "profile", "host-demand", "host-quests", "host-insights", "host-messages"];
+  const ROOTS = ["discover", "squads", "questlog", "profile", "host-demand", "host-quests", "host-insights", "host-messages"];
   const OPEN = ["mode", "landing", "role", "login", "login-code", "signup", "host-type", "host-login"]; // screens that work signed out
   // Where you actually land: signed-out users can't open app screens
   function guard(id) {
     if (id === "discover-map") id = "discover"; // the old map view is Discover now
+    if (id === "parties") id = "squads"; // Community is Squads now
     const scr = SQ.screens[id];
     if (!scr) return "landing";
     if (id === "friend" && !SQ.u.friendProfile) return "friends"; // a reload forgets whose profile it was
@@ -251,7 +252,7 @@
     if (scr.role === "host") return SQ.d.host ? id : "host-type";
     if (!SQ.d.user) return "landing";
     if (!SQ.d.user.registered && (ROOTS.includes(id) || id === "requests")) return "ob-vibes";
-    if (SQ.d.user.demo && (ROOTS.includes(id) || id === "requests") && !["discover", "parties", "questlog"].includes(id)) return "discover"; // the demo account only gets Discover, Community and Sidequests
+    if (SQ.d.user.demo && (ROOTS.includes(id) || id === "requests") && !["discover", "squads", "questlog", "profile"].includes(id)) return "discover"; // the demo account gets the same tabs: Discover, Squads, Sidequests and Profile
     return id;
   }
   // Analytics: which screens people reach, and from where (fire and forget)
@@ -277,7 +278,7 @@
     navKind = SQ.u.screen === target ? null : ROOTS.includes(target) ? "fade" : "push";
     SQ.u.screen = target;
     // Tabs show what's cached at once and refresh it quietly (at most every 30 s)
-    if (navKind === "fade" && ["parties", "questlog"].includes(target) && Date.now() - quietAt > 30000) {
+    if (navKind === "fade" && ["squads", "questlog"].includes(target) && Date.now() - quietAt > 30000) {
       quietAt = Date.now();
       SQ.refresh().then(() => {
         const a = document.activeElement;

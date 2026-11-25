@@ -24,8 +24,10 @@
     // Plan opens the Sidekick call (its own page); Add Event lives on Sidequests now, as its "+" button
     const plan = ["plan", "Plan", "orb", { href: SQ.planHref ? SQ.planHref() : "/sk" }];
     if (active === "requests") active = "questlog";
-    if (u && u.demo) return tabs([[home, "Discover", "home2"], ["parties", "Community", "crew"], plan, ["questlog", "Sidequests", "ticket"], ["landing", "Exit demo", "out", { act: "signOut" }]], active, { questlog: pending });
-    return tabs([[home, "Discover", "home2"], ["parties", "Community", "crew"], plan, ["questlog", "Sidequests", "ticket"], ["profile", "Profile", "user"]], active, { questlog: pending + unread });
+    if (active === "parties") active = "squads";
+    // The same five tabs for the demo and real accounts (the demo's Exit is on Profile); labels follow Settings > Language
+    const L = SQ.t || ((k) => k);
+    return tabs([[home, L("Discover"), "home2"], ["squads", L("Squads"), "crew"], plan, ["questlog", L("Sidequests"), "ticket"], ["profile", L("Profile"), "user"]], active, { questlog: pending + (u && u.demo ? 0 : unread) });
   }
   SQ.attendeeTabs = attendeeTabs;
 
@@ -1515,7 +1517,7 @@
           <span class="t-data c-secondary">${esc([handleOf(u), u.homeArea, `since ${since}`].filter(Boolean).join(" · "))}</span>
           <div class="row" style="gap:8px;width:100%;padding-top:8px">
             <span class="stat-tile"><span class="t-title-l">${went}</span><span class="t-caption c-secondary">Sidequests</span></span>
-            <button class="stat-tile" data-go="parties"><span class="t-title-l">${SQ.d.party && SQ.d.party.members.length ? 1 : 0}</span><span class="t-caption c-secondary">Parties</span></button>
+            <button class="stat-tile" data-go="squads"><span class="t-title-l">${SQ.d.party && SQ.d.party.members.length ? 1 : 0}</span><span class="t-caption c-secondary">Parties</span></button>
             <button class="stat-tile" data-go="requests"><span class="t-title-l">${u.myRequests.length}</span><span class="t-caption c-secondary">Requests</span></button>
           </div></div>
         <div class="stack" style="gap:10px"><div class="section-head"><span class="t-title-l">What your taste avatar knows</span></div>
