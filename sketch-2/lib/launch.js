@@ -11,8 +11,15 @@
 // don't let us keep ratings, hours or prices, so results live in this process's memory for the session
 // only (SESSION_MS) and are never written anywhere. When places are off or capped, the map shows events only.
 
+//
+// Discover's free-text search ("Chinese skewers", "karaoke with private rooms") also searches places, in the
+// person's words (forQuery below): one search per distinct query per SESSION_MS, Pro fields only, on the same meters,
+// with Foursquare beside Google when its key is set. Only results that match the words are returned.
+
 const places = require("./sidekick/places");
 const usage = require("./sidekick/usage");
+const fsq = require("./sidekick/foursquare");
+const want = require("./search/want");
 const { place } = require("../../sketch-1/import/normalize");
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
@@ -71,7 +78,7 @@ function card(c, loc, now) {
     hours,
     price,
     url: c.mapsUrl,
-    attribution: "Google Maps",
+    attribution: c.attribution || "Google Maps",
   };
 }
 
@@ -98,8 +105,46 @@ async function search({ lat, lng, vibes }) {
   return { places: list.slice(0, 10), reason: out.capped || (out.error ? "unavailable" : null) };
 }
 
+// Places for a typed search, in the person's words. Returns { places, want, reason }. The words are cleaned first
+// (no numbers, amounts or areas go to Google), and only places that match them come back, best match first.
+const queries = new Map(); // cleaned query + rounded point -> { at, out }
+async function forQuery({ query, lat, lng } = {}) {
+  sweep();
+  const words = want.find(query);
+  const wants = words.length ? words : [want.loose(query)].filter(Boolean);
+  if (!wants.length) return { places: [], want: null, reason: "nothing specific" };
+  if (!places.configured() && !fsq.configured()) return { places: [], want: wants, reason: "off" };
+  const at = okPoint(round2(lat), round2(lng)) ? { lat: round2(lat), lng: round2(lng) } : DOWNTOWN;
+  const key = `${wants.join("|").toLowerCase()}@${at.lat},${at.lng}`;
+  const hit = queries.get(key);
+  if (hit && Date.now() - hit.at < SESSION_MS) return hit.out;
+  const out = (async () => {
+    // Leave the planning calls their headroom, as the map does
+    const googleOk = places.configured() && (await usage.available("places_text_search", 1 + HEADROOM())) && (await usage.available("places_search_pro", 1));
+    if (!googleOk && !fsq.configured()) return { places: [], want: wants, reason: "capped" };
+    const res = await (googleOk ? places.searchWant(wants, { origins: [at], tier: "pro" }) : (async () => {
+      const plan = want.plan(wants);
+      const f = await fsq.search(plan.query, { center: { latitude: at.lat, longitude: at.lng }, radius: 8000 });
+      return { places: f.places.map((p) => ({ ...p, wantQuery: plan.query })), capped: f.capped, plan };
+    })());
+    const plan = res.plan || want.plan(wants);
+    const now = torontoNow();
+    const list = res.places.filter((c) => c.lat != null)
+      .map((c) => ({ c, r: want.relevance(c, plan) }))
+      .filter((x) => x.r >= want.MIN_RELEVANCE)
+      .sort((a, b) => b.r - a.r)
+      .map(({ c, r }) => ({ ...card(c, { latitude: c.lat, longitude: c.lng }, now), relevance: Math.round(r * 100) / 100 }));
+    return { places: list.slice(0, 10), want: wants, reason: res.capped || null };
+  })().catch(() => ({ places: [], want: wants, reason: "unavailable" }));
+  queries.set(key, { at: Date.now(), out });
+  if (queries.size > 500) queries.delete(queries.keys().next().value);
+  return out;
+}
+
 // Places near a point, once per map session. Never throws: any trouble is just "no places".
-async function nearby({ sessionId, lat, lng, vibes } = {}) {
+// With a query (Discover's search box), the places for those words instead (forQuery).
+async function nearby({ sessionId, lat, lng, vibes, query } = {}) {
+  if (query) return forQuery({ query: String(query).slice(0, 120), lat, lng });
   sweep();
   const key = String(sessionId || "").slice(0, 40);
   if (!/^[\w-]{6,40}$/.test(key)) return { places: [], reason: "no session" };
@@ -111,4 +156,4 @@ async function nearby({ sessionId, lat, lng, vibes } = {}) {
   return out;
 }
 
-module.exports = { where, nearby, queryFor, _sessions: sessions };
+module.exports = { where, nearby, forQuery, queryFor, _sessions: sessions, _queries: queries };

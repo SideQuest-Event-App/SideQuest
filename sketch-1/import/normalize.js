@@ -234,17 +234,21 @@ const NA = "N/A"; // shown wherever a listing doesn't say
 // Every in-person GTA listing is kept except the off-topic ones in EXCLUDE; listings that match none
 // of our vibes get the scene "Other". Anything the listing doesn't give is "N/A", never made up.
 function toEvent(raw) {
-  const lat = Number(raw.venue && raw.venue.lat);
-  const lng = Number(raw.venue && raw.venue.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !raw.title || !raw.startsAt || isNaN(Date.parse(raw.startsAt))) return null;
+  // venue.noPin (import/locate.js): its coordinates were wrong and nothing trustworthy was found. It stays listed,
+  // with no coordinates (never a guessed point), so it shows in lists but not on the map.
+  const noPin = Boolean(raw.venue && raw.venue.noPin);
+  const lat = noPin ? null : Number(raw.venue && raw.venue.lat);
+  const lng = noPin ? null : Number(raw.venue && raw.venue.lng);
+  if ((!noPin && (!Number.isFinite(lat) || !Number.isFinite(lng))) || !raw.title || !raw.startsAt || isNaN(Date.parse(raw.startsAt))) return null;
   const title = tidyTitle(raw.title);
   const description = trimText(raw.description || "");
   const words = `${title} ${(raw.categories || []).join(" ")} ${description}`;
   // Judge off-topic by title and categories only: a concert "in the church hall" is still a concert
   if (EXCLUDE.test(`${title} ${(raw.categories || []).join(" ")}`.toLowerCase())) return null;
   const vibes = vibesOf(words, `${title} ${(raw.categories || []).join(" ")}`);
-  const { neighbourhood, area } = place(lat, lng, raw.venue.city);
-  const tr = travel(lat, lng);
+  const inCity = !raw.venue.city || /toronto|north york|scarborough|etobicoke|east york|york/i.test(raw.venue.city);
+  const { neighbourhood, area } = noPin ? (inCity ? { neighbourhood: "Toronto", area: "Toronto" } : { neighbourhood: raw.venue.city, area: "Beyond Toronto" }) : place(lat, lng, raw.venue.city);
+  const tr = noPin ? { stop: "", walkKm: null, from: {}, estimated: true, unknown: true } : travel(lat, lng);
   let price = raw.price == null || !Number.isFinite(Number(raw.price)) ? null : Math.ceil(Number(raw.price));
   // No price field, but the listing itself says entry is free ("Free admission"): that's its price
   let priceNote = raw.priceNote;
@@ -266,7 +270,7 @@ function toEvent(raw) {
     runsUntil: raw.runsUntil || null,
     neighbourhood,
     area,
-    venue: { name: venueName || NA, address: address || NA, lat, lng },
+    venue: { name: venueName || NA, address: address || NA, lat, lng, ...(noPin ? { noPin: true } : {}) },
     scene: vibes.length ? SCENE_OF[vibes[0]] : "Other",
     price,
     priceNote: priceNote || (price == null ? NA : price === 0 ? "Free" : raw.priceHigh && raw.priceHigh > price ? `From $${price}` : `$${price}`),

@@ -1,0 +1,229 @@
+{
+ "meta": {
+  "total": 6,
+  "page": 1,
+  "per_page": 100
+ },
+ "events": [
+  {
+   "id": 9001,
+   "title": "Jazz at the Rex: Late Set",
+   "short_title": "Jazz at the Rex: Late Set",
+   "url": "https://seatgeek.com/e/9001",
+   "type": "concert",
+   "datetime_utc": "2026-11-28T00:00:00",
+   "datetime_local": "2026-11-28T00:00:00",
+   "datetime_tbd": false,
+   "time_tbd": false,
+   "taxonomies": [
+    {
+     "name": "concert"
+    }
+   ],
+   "performers": [
+    {
+     "name": "Jazz at the Rex: Late Set",
+     "image": "https://seatgeek.com/images/9001.jpg"
+    }
+   ],
+   "venue": {
+    "name": "The Rex Hotel Jazz & Blues Bar",
+    "address": "194 Queen St W",
+    "extended_address": "Toronto, ON M5V 1Z1",
+    "city": "Toronto",
+    "state": "ON",
+    "location": {
+     "lat": 43.6504,
+     "lon": -79.3886
+    }
+   },
+   "stats": {
+    "lowest_price": 15,
+    "highest_price": 25
+   }
+  },
+  {
+   "id": 9002,
+   "title": "Coldplay Tribute Night",
+   "short_title": "Coldplay Tribute Night",
+   "url": "https://seatgeek.com/e/9002",
+   "type": "concert",
+   "datetime_utc": "2026-11-30T00:00:00",
+   "datetime_local": "2026-11-30T00:00:00",
+   "datetime_tbd": false,
+   "time_tbd": false,
+   "taxonomies": [
+    {
+     "name": "concert"
+    }
+   ],
+   "performers": [
+    {
+     "name": "Coldplay Tribute Night",
+     "image": "https://seatgeek.com/images/9002.jpg"
+    }
+   ],
+   "venue": {
+    "name": "Scotiabank Arena",
+    "address": "40 Bay St",
+    "extended_address": "Toronto, ON",
+    "city": "Toronto",
+    "state": "ON",
+    "location": {
+     "lat": 43.6435,
+     "lon": -79.3791
+    }
+   },
+   "stats": {
+    "lowest_price": 45,
+    "highest_price": 120
+   }
+  },
+  {
+   "id": 9003,
+   "title": "Maple Leafs vs. Canadiens",
+   "short_title": "Maple Leafs vs. Canadiens",
+   "url": "https://seatgeek.com/e/9003",
+   "type": "nhl",
+   "datetime_utc": "2026-12-01T00:00:00",
+   "datetime_local": "2026-12-01T00:00:00",
+   "datetime_tbd": false,
+   "time_tbd": false,
+   "taxonomies": [
+    {
+     "name": "nhl"
+    }
+   ],
+   "performers": [
+    {
+     "name": "Maple Leafs vs. Canadiens",
+     "image": "https://seatgeek.com/images/9003.jpg"
+    }
+   ],
+   "venue": {
+    "name": "Scotiabank Arena",
+    "address": "40 Bay St",
+    "extended_address": "Toronto, ON",
+    "city": "Toronto",
+    "state": "ON",
+    "location": {
+     "lat": 43.6435,
+     "lon": -79.3791
+    }
+   },
+   "stats": {
+    "lowest_price": 45,
+    "highest_price": 120
+   }
+  },
+  {
+   "id": 9004,
+   "title": "Waterfront Folk Session",
+   "short_title": "Waterfront Folk Session",
+   "url": "https://seatgeek.com/e/9004",
+   "type": "concert",
+   "datetime_utc": "2026-12-03T00:00:00",
+   "datetime_local": "2026-12-03T00:00:00",
+   "datetime_tbd": false,
+   "time_tbd": false,
+   "taxonomies": [
+    {
+     "name": "concert"
+    }
+   ],
+   "performers": [
+    {
+     "name": "Waterfront Folk Session",
+     "image": "https://seatgeek.com/images/9004.jpg"
+    }
+   ],
+   "venue": {
+    "name": "Harbourfront Concert Stage",
+    "address": "235 Queens Quay W",
+    "extended_address": "Toronto, ON",
+    "city": "Toronto",
+    "state": "ON",
+    "location": {
+     "lat": 43.6,
+     "lon": -79.38
+    }
+   },
+   "stats": {
+    "lowest_price": 0,
+    "highest_price": 0
+   }
+  },
+  {
+   "id": 9005,
+   "title": "Pop-up Comedy in the Park",
+   "short_title": "Pop-up Comedy in the Park",
+   "url": "https://seatgeek.com/e/9005",
+   "type": "comedy",
+   "datetime_utc": "2026-12-04T00:00:00",
+   "datetime_local": "2026-12-04T00:00:00",
+   "datetime_tbd": false,
+   "time_tbd": false,
+   "taxonomies": [
+    {
+     "name": "comedy"
+    }
+   ],
+   "performers": [
+    {
+     "name": "Pop-up Comedy in the Park",
+     "image": "https://seatgeek.com/images/9005.jpg"
+    }
+   ],
+   "venue": {
+    "name": "JM35+VH Toronto",
+    "address": "",
+    "city": "Toronto",
+    "state": "ON",
+    "location": {
+     "lat": 43.604687,
+     "lon": -79.341064
+    }
+   },
+   "stats": {
+    "lowest_price": 20,
+    "highest_price": 20
+   }
+  },
+  {
+   "id": 9006,
+   "title": "Sabres Parking Pass",
+   "short_title": "Sabres Parking Pass",
+   "url": "https://seatgeek.com/e/9006",
+   "type": "parking",
+   "datetime_utc": "2026-11-29T00:00:00",
+   "datetime_local": "2026-11-29T00:00:00",
+   "datetime_tbd": false,
+   "time_tbd": false,
+   "taxonomies": [
+    {
+     "name": "parking"
+    }
+   ],
+   "performers": [
+    {
+     "name": "Sabres Parking Pass",
+     "image": "https://seatgeek.com/images/9006.jpg"
+    }
+   ],
+   "venue": {
+    "name": "KeyBank Center",
+    "address": "1 Seymour H Knox III Plaza",
+    "city": "Buffalo",
+    "state": "NY",
+    "location": {
+     "lat": 42.875,
+     "lon": -78.876
+    }
+   },
+   "stats": {
+    "lowest_price": 45,
+    "highest_price": 120
+   }
+  }
+ ]
+}

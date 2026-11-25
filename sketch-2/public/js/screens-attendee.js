@@ -503,13 +503,18 @@
     const STOP = { peek: "cards", half: "list and map", full: "list" };
     const wk = u.feed ? weekly() : [];
     const picked = wk.length > 0;
-    const evAll = (picked ? wk : soonWeek()).filter((e) => passes(e) && e.venue && e.venue.lat != null);
+    // Every event stays in the list; the map only pins those on land in the GTA (map.js SQ.onMap), never a guess
+    const evAll = (picked ? wk : soonWeek()).filter((e) => passes(e));
     const evs = L.show.events ? evAll : [];
     const pls = L.show.places ? L.places || [] : [];
     const sel = L.sel;
+    // Your places (Going, Saved, Hosting) have their own pins, like Google Maps' saved lists (launch.js)
+    const yours = SQ.lx.yourPins(sel);
+    const yourIds = new Set(yours.map((p) => p.arg));
     const pins = [
       // The map draws the best matches (by match, as before); the list below follows the feed's varied order
-      ...[...evs].sort((a, b) => matchOf(b) - matchOf(a) || a.startsAt.localeCompare(b.startsAt)).slice(0, 60).map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, kind: "event", tier: pick(e) ? SQ.matchTier(matchOf(e)) : "low", selected: sel === `e${e.id}`, act: "lxPin", arg: `e${e.id}`, label: e.title })),
+      ...[...evs].filter((e) => e.venue && !yourIds.has(`e${e.id}`)).sort((a, b) => matchOf(b) - matchOf(a) || a.startsAt.localeCompare(b.startsAt)).slice(0, 60).map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, kind: "event", tier: pick(e) ? SQ.matchTier(matchOf(e)) : "low", selected: sel === `e${e.id}`, act: "lxPin", arg: `e${e.id}`, label: e.title })),
+      ...yours,
       ...pls.map((p) => ({ lat: p.lat, lng: p.lng, kind: "place", selected: sel === p.id, act: "lxPin", arg: p.id, label: p.title })),
     ];
     // Cards: the best matches, with a place after every two events
@@ -549,14 +554,16 @@
         ${m.length && L.show.events ? `<section class="lx-sec"><div class="section-header lx-pad"><h2>Vibe Mixes</h2><button data-go="weekly">See all (${wk.length})</button></div>
           <div class="hscroll">${m.map(([l, p, n]) => `<button class="mix" data-act="openMix" data-arg="${esc(l)}" aria-label="${esc(l)}, ${n} sidequest${n === 1 ? "" : "s"} this week"><span class="mix-cover">${ph(p)}<span class="scrim"></span><span class="mix-count">${n}</span><span class="t-title-m">${esc(l)}</span></span></button>`).join("")}</div></section>` : ""}`;
     return screen(`<div class="disc-map lx" data-stop="${L.stop}">
-      ${SQ.mapView("discover", { pins, you: L.loc ? [L.loc.lat, L.loc.lng] : null, labels: ["Kensington", "Queen West", ...(u.areas || [])], view: { lat: center.lat, lng: center.lng, zoom: L.loc ? 13.6 : 12.4 } })}
+      ${SQ.mapView("discover", { pins, cluster: true, you: L.loc ? [L.loc.lat, L.loc.lng] : null, labels: ["Kensington", "Queen West", ...(u.areas || [])], view: { lat: center.lat, lng: center.lng, zoom: L.loc ? 13.6 : 12.4 } })}
       <div class="map-ctrls">
         <div class="row" style="gap:10px">${searchBar()}${bell()}</div>
         <div class="lx-chips scroll-x">
+          ${SQ.lx.ypChip()}
           <button class="lx-loc${L.loc ? " on" : ""}" data-act="lxLocate" aria-label="${L.loc ? `Showing near you, ${esc(L.loc.label)}. Tap to update your location` : "Showing downtown Toronto. Use my location"}">${icon(L.loc ? "loc" : "pin", "sm")}<span>${esc(where)}</span></button>
           ${activeFilters().map(([l, [act, arg]]) => chip(l, true, { "data-act": act, "data-arg": arg }, "x")).join("")}
         </div>
       </div>
+      ${SQ.lx.ypPanel()}
       <div class="lx-float">
         <div class="lx-legend" role="group" aria-label="Show on the map">
           <button class="lx-key ev" data-act="lxShow" data-arg="events" aria-pressed="${L.show.events}"><i aria-hidden="true">★</i>Events</button>

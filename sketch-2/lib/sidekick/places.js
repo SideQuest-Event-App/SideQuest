@@ -9,6 +9,8 @@
 // Needs GOOGLE_MAPS_API_KEY (restricted to the Places API (New)). Without it, places are simply off.
 
 const usage = require("./usage");
+const fsq = require("./foursquare");
+const want = require("../search/want");
 const { travel, place } = require("../../../sketch-1/import/normalize");
 
 const ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
@@ -20,7 +22,10 @@ const FIELDS = ["id", "displayName", "formattedAddress", "location", "types", "p
 // has its own, larger free allowance (about 5,000 a month against Enterprise's 1,000; see usage.js). Check the tier of
 // each field on Google's pricing sheet before changing this list.
 const PRO_FIELDS = ["id", "displayName", "formattedAddress", "location", "types", "primaryType", "googleMapsUri"].map((f) => `places.${f}`).join(",");
-const TIERS = { enterprise: { fields: FIELDS, meter: "places_text_search" }, pro: { fields: PRO_FIELDS, meter: "places_search_pro" } };
+// A search for what someone asked for adds the editorial summary, so a pick can be checked against the request
+// ("Xinjiang-style lamb skewers"). That field is in Google's "Enterprise + Atmosphere" SKU, its own meter.
+const WANT_FIELDS = `${FIELDS},places.editorialSummary`;
+const TIERS = { enterprise: { fields: FIELDS, meter: "places_text_search" }, pro: { fields: PRO_FIELDS, meter: "places_search_pro" }, want: { fields: WANT_FIELDS, meter: "places_search_atmosphere" } };
 const CITY = () => process.env.SIDEKICK_CITY || "Toronto, ON";
 const CENTER = { latitude: 43.6532, longitude: -79.3832 }; // downtown Toronto; 15 km covers the city
 // Where each starting point is, so places are searched near the crew rather than always downtown
@@ -93,7 +98,8 @@ const LEVEL_PRICE = { PRICE_LEVEL_FREE: 0, PRICE_LEVEL_INEXPENSIVE: 15, PRICE_LE
 const LEVEL_SIGNS = { PRICE_LEVEL_FREE: "Free", PRICE_LEVEL_INEXPENSIVE: "$", PRICE_LEVEL_MODERATE: "$$", PRICE_LEVEL_EXPENSIVE: "$$$", PRICE_LEVEL_VERY_EXPENSIVE: "$$$$" };
 
 const configured = () => Boolean(process.env.GOOGLE_MAPS_API_KEY) && process.env.SIDEKICK_PLACES_OFF !== "1";
-const available = async () => configured() && (await usage.available("places_text_search"));
+// Places are on for a call when either source can still search (Google under its cap, or Foursquare)
+const available = async () => (configured() && (await usage.available("places_text_search"))) || (await fsq.available());
 
 // A stable negative number id, so places never clash with event ids (positive) and votes work the same way
 function numId(s) {
@@ -132,6 +138,7 @@ function toCandidate(p, vibe) {
     travel: travel(lat, lng),
     mapsUrl: p.googleMapsUri || null,
     source: "Google Maps",
+    summary: (p.editorialSummary && p.editorialSummary.text) || "",
   };
 }
 
@@ -151,7 +158,7 @@ async function request(kind, plan, circle, tier, fetchImpl, signal) {
   if (!ok.ok) return { capped: ok.reason };
   const body = kind === "nearby"
     ? { includedTypes: plan.types, maxResultCount: 10, locationRestriction: { circle } }
-    : { textQuery: `${plan.query} in ${CITY()}`, pageSize: 10, locationBias: { circle } };
+    : { textQuery: `${plan.query} in ${CITY()}`, pageSize: 10, locationBias: { circle }, ...(plan.includedType ? { includedType: plan.includedType } : {}) };
   const res = await fetchImpl(kind === "nearby" ? NEARBY : ENDPOINT, {
     method: "POST",
     signal,
@@ -197,19 +204,92 @@ async function search(vibe, { fetchImpl = fetch, origins, tier = "enterprise" } 
   }
 }
 
-// Places for one call: up to PER_CALL searches, one per vibe the crew wants (or a default), near the
-// crew's starting points (opts.origins)
-async function forCall(vibes, opts) {
-  const list = [...new Set([...(vibes || []), "default"])].slice(0, PER_CALL());
+// The same place from Google and Foursquare (or twice from Google): same name, within about 150 m. Google's copy wins
+// (it has hours and prices); a Foursquare twin lends it its categories for matching.
+const sameName = (a, b) => {
+  const n = (s) => String(s || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, " ").replace(/\b(the|restaurant|bar|cafe|toronto)\b/g, " ").replace(/\s+/g, " ").trim();
+  const x = n(a), y = n(b);
+  return Boolean(x && y && (x === y || (Math.min(x.length, y.length) >= 5 && (x.includes(y) || y.includes(x)))));
+};
+function dedupePlaces(lists) {
+  const out = [];
+  for (const p of lists.flat()) {
+    if (!p) continue;
+    const twin = out.find((q) => q.id === p.id || (sameName(q.title, p.title) && q.lat != null && p.lat != null && km([q.lat, q.lng], [p.lat, p.lng]) < 0.15));
+    if (!twin) { out.push(p); continue; }
+    if (twin.source === "Foursquare" && p.source !== "Foursquare") { out[out.indexOf(twin)] = { ...p, categories: [...(p.categories || []), ...(twin.categories || [])], wantQuery: p.wantQuery || twin.wantQuery }; continue; }
+    if (p.categories) twin.categories = [...(twin.categories || []), ...p.categories];
+  }
+  return out;
+}
+
+// Search for what someone asked for, in their words: "Chinese skewers restaurant in Toronto", biased to the crew,
+// narrowed to the Google type that fits ("chinese_restaurant"), on the Enterprise + Atmosphere meter. Foursquare, when
+// it's set up, searches the same words; the two are merged. Returns { places, capped }; never throws.
+// opts.tier: "want" (calls: hours, prices, the summary) or "pro" (Discover: name, pin and link).
+async function searchWant(wants, { fetchImpl = fetch, origins, tier = "want" } = {}) {
+  const plan = want.plan(wants);
+  if (!plan) return { places: [], capped: null };
+  const circle = nearCrew(origins);
+  const tagged = (list) => list.map((p) => ({ ...p, wantQuery: plan.query, vibes: [...new Set([...(p.vibes || []), ...(plan.food ? ["Food & drink"] : [])])] }));
+  const google = (async () => {
+    if (!configured()) return { places: [], capped: "not configured" };
+    const t = TIERS[tier] || TIERS.want;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    try {
+      let out;
+      try {
+        out = await request("text", plan, circle, t, fetchImpl, ctrl.signal);
+      } catch (err) {
+        if (!plan.includedType || err.status !== 400) throw err;
+        console.error(`${err.message} (retrying without the place type)`);
+        out = await request("text", { ...plan, includedType: null }, circle, t, fetchImpl, ctrl.signal);
+      }
+      if (out.capped) return { places: [], capped: out.capped };
+      const raw = out.data.places || [];
+      const list = raw.map((p) => {
+        const c = toCandidate(p, "Food & drink");
+        return c && { ...c, lat: p.location.latitude, lng: p.location.longitude };
+      }).filter(Boolean);
+      rememberIds(areaKey(`want:${plan.query}`, circle), list);
+      return { places: list, capped: null };
+    } catch (err) {
+      console.error(err.message);
+      return { places: [], capped: null, error: err.message };
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+  const four = fsq.configured() ? fsq.search(plan.query, { center: circle.center, radius: circle.radius, fetchImpl }) : Promise.resolve({ places: [], capped: "not configured" });
+  const [g, f] = await Promise.all([google, four]);
+  const capped = g.capped && g.capped !== "not configured" ? g.capped : null;
+  return { places: tagged(dedupePlaces([g.places, f.places])), capped: capped || (g.capped && f.capped ? g.capped : null), plan };
+}
+
+// Places for one call: up to PER_CALL searches near the crew's starting points (opts.origins). When someone said
+// what they want (opts.want: ["Chinese skewers"]), that's searched first, in their words, and the "default" cocktail
+// bar search is skipped: it's what used to answer a skewer request with Bar Maya. Then one search per vibe.
+async function forCall(vibes, opts = {}) {
+  const wants = [].concat(opts.want || []).filter(Boolean);
   const seen = new Map();
   let capped = null;
+  let used = 0;
+  if (wants.length) {
+    const out = await searchWant(wants, opts);
+    used++;
+    if (out.capped) capped = out.capped;
+    for (const p of out.places) if (!seen.has(p.id)) seen.set(p.id, p);
+    if (out.capped && out.capped !== "not configured") return { places: [...seen.values()], capped };
+  }
+  const list = [...new Set([...(vibes || []), ...(wants.length ? [] : ["default"])])].slice(0, Math.max(0, PER_CALL() - used));
   for (const v of list) {
     const out = await search(v, opts);
     if (out.capped) capped = out.capped;
     for (const p of out.places) if (!seen.has(p.id)) seen.set(p.id, p);
     if (out.capped && out.capped !== "not configured") break; // over the limit: stop searching
   }
-  return { places: [...seen.values()], capped };
+  return { places: dedupePlaces([[...seen.values()]]), capped };
 }
 
 // What kind of place it is, in a word Sidekick can say ("a bar you can drop into")
@@ -254,4 +334,4 @@ function closesLabel(periods, day, hour) {
   return "Open that evening";
 }
 
-module.exports = { configured, available, search, forCall, openAt, closesLabel, toCandidate, nearCrew, nearestStation, nearLabel, placeType, planFor, seenIds, FIELDS, PRO_FIELDS, VIBE_PLACES, _numId: numId, _idCache: idCache };
+module.exports = { configured, available, search, searchWant, dedupePlaces, forCall, WANT_FIELDS, perCall: PER_CALL, openAt, closesLabel, toCandidate, nearCrew, nearestStation, nearLabel, placeType, planFor, seenIds, FIELDS, PRO_FIELDS, VIBE_PLACES, _numId: numId, _idCache: idCache };

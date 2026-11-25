@@ -4,13 +4,29 @@
 // data/sidekick-usage.json, and to Supabase Storage when it's configured (Render's disk is wiped on deploy).
 //
 // Meters (all numbers can be changed in .env / Render):
-//   places_text_search  Google Places Text Search (Enterprise fields). Google's free cap is about
-//                       1,000 a month; we stop at 80% (800), and at 40 a day.
-//   places_search_pro   Google Places searches with only Pro fields (no rating, price or hours), used by the map.
-//                       A separate SKU with its own free cap of about 5,000 a month; we stop at 80% (4,000), and at
-//                       150 a day. Confirm both allowances on Google's pricing sheet before raising anything.
+//   Google's free allowances are per SKU and per month (since March 2025): Text Search Pro 5,000, Text Search
+//   Enterprise 1,000, Text Search Enterprise + Atmosphere 1,000. Every Google meter stops at 80% of its allowance
+//   (GOOGLE_*_STOP_AT, default 0.8: never set it above 0.8) and has a daily ceiling so one busy day can't use the month.
+//   places_text_search  Google Places Text Search (Enterprise fields: rating, price, hours), for planning calls.
+//                       Stops at 800 a month and 60 a day (was 40). Env: GOOGLE_PLACES_FREE_PER_MONTH,
+//                       GOOGLE_PLACES_STOP_AT, GOOGLE_PLACES_DAILY_MAX.
+//   places_search_atmosphere  A call's search for what someone asked for ("Chinese skewers"): Enterprise fields
+//                       plus the editorial summary (Enterprise + Atmosphere SKU), so picks can be checked against
+//                       the request. Stops at 800 a month and 40 a day. Env: GOOGLE_PLACES_ATMOS_FREE_PER_MONTH,
+//                       GOOGLE_PLACES_ATMOS_STOP_AT, GOOGLE_PLACES_ATMOS_DAILY_MAX.
+//   places_search_pro   Google Places searches with only Pro fields (no rating, price or hours): the map and Discover
+//                       searches. Stops at 4,000 a month and 250 a day (was 150). Env: GOOGLE_PLACES_PRO_FREE_PER_MONTH,
+//                       GOOGLE_PLACES_PRO_STOP_AT, GOOGLE_PLACES_PRO_DAILY_MAX. Confirm the allowances on Google's
+//                       pricing sheet before raising anything.
+//   foursquare_places   Foursquare Places search (Pro fields only). Foursquare's pricing page lists 10,000 free Pro
+//                       calls a month; we stop at 80% (8,000) and 300 a day. Env: FOURSQUARE_FREE_PER_MONTH,
+//                       FOURSQUARE_STOP_AT, FOURSQUARE_DAILY_MAX.
 //   elevenlabs_minutes  ElevenLabs agent minutes. Each call reserves its maximum length up front and
 //                       gives back what it didn't use when it ends.
+//   elevenlabs_tts_chars  ElevenLabs text-to-speech characters (Sidekick's lines in its own voices, lib/sidekick/tts.js).
+//                       A conservative 10,000 a month (the free plan's credits), stopping at 80% and at 2,000 a day;
+//                       repeated lines come from memory and aren't counted. Env: ELEVENLABS_TTS_CHARS_PER_MONTH,
+//                       ELEVENLABS_TTS_STOP_AT, ELEVENLABS_TTS_DAILY_CHARS.
 //
 // This is a second line of defence. Also set quota caps in Google Cloud and usage limits in ElevenLabs:
 // those stop spending even if this app has a bug or the key leaks.
@@ -29,14 +45,28 @@ function meters() {
       off: process.env.SIDEKICK_PLACES_OFF === "1",
       monthlyFree: num(process.env.GOOGLE_PLACES_FREE_PER_MONTH, 1000),
       stopAt: num(process.env.GOOGLE_PLACES_STOP_AT, 0.8),
-      dailyMax: num(process.env.GOOGLE_PLACES_DAILY_MAX, 40),
+      dailyMax: num(process.env.GOOGLE_PLACES_DAILY_MAX, 60),
+    },
+    places_search_atmosphere: {
+      label: "Google Places searches for what people asked for (Enterprise + Atmosphere)",
+      off: process.env.SIDEKICK_PLACES_OFF === "1",
+      monthlyFree: num(process.env.GOOGLE_PLACES_ATMOS_FREE_PER_MONTH, 1000),
+      stopAt: num(process.env.GOOGLE_PLACES_ATMOS_STOP_AT, 0.8),
+      dailyMax: num(process.env.GOOGLE_PLACES_ATMOS_DAILY_MAX, 40),
+    },
+    foursquare_places: {
+      label: "Foursquare Places searches",
+      off: process.env.FOURSQUARE_OFF === "1",
+      monthlyFree: num(process.env.FOURSQUARE_FREE_PER_MONTH, 10000),
+      stopAt: num(process.env.FOURSQUARE_STOP_AT, 0.8),
+      dailyMax: num(process.env.FOURSQUARE_DAILY_MAX, 300),
     },
     places_search_pro: {
       label: "Google Places searches (map, Pro fields)",
       off: process.env.SIDEKICK_PLACES_OFF === "1",
       monthlyFree: num(process.env.GOOGLE_PLACES_PRO_FREE_PER_MONTH, 5000),
       stopAt: num(process.env.GOOGLE_PLACES_PRO_STOP_AT, 0.8),
-      dailyMax: num(process.env.GOOGLE_PLACES_PRO_DAILY_MAX, 150),
+      dailyMax: num(process.env.GOOGLE_PLACES_PRO_DAILY_MAX, 250),
     },
     elevenlabs_minutes: {
       label: "ElevenLabs agent minutes",
@@ -44,6 +74,13 @@ function meters() {
       monthlyFree: num(process.env.ELEVENLABS_MINUTES_PER_MONTH, 15),
       stopAt: num(process.env.ELEVENLABS_STOP_AT, 0.8),
       dailyMax: num(process.env.ELEVENLABS_DAILY_MINUTES, 10),
+    },
+    elevenlabs_tts_chars: {
+      label: "ElevenLabs text-to-speech characters",
+      off: process.env.SIDEKICK_ELEVENLABS_OFF === "1" || process.env.ELEVENLABS_TTS_OFF === "1",
+      monthlyFree: num(process.env.ELEVENLABS_TTS_CHARS_PER_MONTH, 10000),
+      stopAt: Math.min(0.8, num(process.env.ELEVENLABS_TTS_STOP_AT, 0.8)),
+      dailyMax: num(process.env.ELEVENLABS_TTS_DAILY_CHARS, 2000),
     },
   };
 }

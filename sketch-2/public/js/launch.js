@@ -3,7 +3,10 @@
    - the bottom sheet's three stops (peek: cards, half: list over the map, full: list), by drag, by the grabber
      (Enter, or the arrow keys) and by the List and Map buttons, remembered per person in localStorage;
    - "Use my location": asked only after a tap, rounded to 2 decimals (about 1 km) before it goes anywhere, named
-     with Sketch 1's place() helper on the server, and kept for this tab only;
+     with Sketch 1's place() helper on the server, and kept in this page's memory only (never stored, not even in
+     sessionStorage), so "you are here" shows only after the person shares it;
+   - "Your places": the events you're going to, saved and hosting, as Google Maps shows saved lists: their own pins,
+     grouped when zoomed out (map.js), and a panel with each list and its count;
    - places: one search per map session, behind the server's usage caps. If there are none, the map shows events. */
 (function () {
   const SQ = window.SQ;
@@ -30,17 +33,12 @@
   const local = box("localStorage"), session = box("sessionStorage");
   const stopKey = () => `sq2.sheet.${SQ.userId() || "guest"}`;
 
+  let memLoc = null; // the shared location, rounded: this page's memory only
+  session.set("sq2.loc", null); // an older version kept it for the tab; nothing is stored any more
   function state() {
     const L = U().lx;
     if (L && L.user === SQ.userId()) return L;
-    let loc = null;
-    try {
-      loc = JSON.parse(session.get("sq2.loc") || "null");
-      if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) loc = null;
-      else loc = { lat: round2(loc.lat), lng: round2(loc.lng), label: String(loc.label || "your area").slice(0, 40) };
-    } catch {
-      loc = null;
-    }
+    const loc = memLoc;
     const saved = local.get(stopKey());
     return (U().lx = {
       user: SQ.userId(),
@@ -49,7 +47,8 @@
       locState: loc ? "on" : "unknown",
       places: L ? L.places : null, // one search per map session, even across accounts
       placesState: L ? L.placesState : "idle",
-      show: { events: true, places: true },
+      show: { events: true, places: true, yours: true },
+      yp: false, // the "Your places" panel is open
       sel: null,
       peekH: 0,
     });
@@ -98,9 +97,8 @@
       try {
         label = (await (await fetch(`/api/where?lat=${lat}&lng=${lng}`)).json()).label;
       } catch {}
-      L.loc = { lat, lng, label: label || "your area" };
+      L.loc = memLoc = { lat, lng, label: label || "your area" };
       L.locState = "on";
-      session.set("sq2.loc", JSON.stringify(L.loc));
       SQ.mapJump("discover", { lat, lng, zoom: 13.6 });
       SQ.render();
     }, (err) => {
@@ -124,6 +122,103 @@
     }
     if (L.sel && L.stop === "full") setStop("peek", false);
   };
+
+  // ---------- Your places: Going, Saved and Hosting, like Google Maps' saved lists ----------
+  // Each upcoming event in one list only (Hosting beats Going beats Saved). An event whose coordinates aren't on land
+  // in the GTA stays in the panel, marked "Not on the map", and gets no pin.
+  const LISTS = [["going", "Going", "★"], ["saved", "Saved", "♥"], ["hosting", "Hosting", "⚑"]];
+  function yourPlaces() {
+    const u = SQ.d && SQ.d.user;
+    const out = { going: [], saved: [], hosting: [] };
+    if (!u) return out;
+    const ev = (id) => SQ.d.events.find((e) => e.id === Number(id) || e.id === id);
+    const future = (e) => e && !(SQ.isPast && SQ.isPast(e));
+    const taken = new Set();
+    const add = (list, e) => { if (future(e) && !taken.has(e.id)) { taken.add(e.id); out[list].push(e); } };
+    for (const h of u.hosting || []) add("hosting", ev(h && h.id != null ? h.id : h));
+    for (const [id, l] of Object.entries(u.log || {})) if (l && l.status === "going") add("going", ev(id));
+    for (const id of u.saved || []) add("saved", ev(id));
+    for (const k of Object.keys(out)) out[k].sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
+    return out;
+  }
+  const onMapE = (e) => e && e.venue && SQ.onMap(e.venue.lat, e.venue.lng);
+  // Pins for the map: { lat, lng, kind: "event", list, ... }
+  function yourPins(sel) {
+    const L = state();
+    if (!L.show.yours) return [];
+    const lists = yourPlaces();
+    return LISTS.flatMap(([k]) => lists[k].filter(onMapE).map((e) => ({ lat: e.venue.lat, lng: e.venue.lng, kind: "event", list: k, selected: sel === `e${e.id}`, act: "lxPin", arg: `e${e.id}`, label: e.title })));
+  }
+  const total = (lists) => LISTS.reduce((t, [k]) => t + lists[k].length, 0);
+  // The chip in the controls row that opens the panel
+  function ypChip() {
+    const L = state();
+    const n = total(yourPlaces());
+    return `<button class="lx-yp-chip${L.yp ? " on" : ""}" data-act="lxYours" aria-expanded="${L.yp}" aria-controls="lx-yp" aria-label="Your places: ${n} going, saved or hosting">${SQ.PIN_ICONS.HEART}<span>Your places</span><b>${n}</b></button>`;
+  }
+  const when = (e) => {
+    try {
+      return new Date(e.startsAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/Toronto" });
+    } catch { return ""; }
+  };
+  function ypPanel() {
+    const L = state();
+    if (!L.yp) return "";
+    const esc = SQ.esc;
+    const lists = yourPlaces();
+    const icon = { going: SQ.PIN_ICONS.STAR, saved: SQ.PIN_ICONS.HEART, hosting: SQ.PIN_ICONS.FLAG };
+    const sec = ([k, label]) => {
+      const list = lists[k];
+      return `<section class="yp-sec" aria-labelledby="yp-h-${k}">
+        <h3 class="yp-h" id="yp-h-${k}"><span class="yp-ico ${k}" aria-hidden="true">${icon[k]}</span>${label}<span class="yp-n">${list.length} ${list.length === 1 ? "place" : "places"}</span></h3>
+        ${list.length ? `<ul class="yp-list">${list.map((e) => `<li><button class="yp-row" data-act="lxYoursGo" data-arg="e${e.id}"><span class="yp-t">${esc(e.title)}</span><span class="yp-s">${esc([when(e), e.neighbourhood].filter(Boolean).join(" · "))}${onMapE(e) ? "" : " · Not on the map"}</span></button></li>`).join("")}</ul>`
+          : `<p class="yp-empty">${k === "saved" ? "Tap the bookmark on an event and it shows here." : k === "going" ? "Events you're going to show here." : "Sidequests you host show here."}</p>`}
+      </section>`;
+    };
+    return `<section class="lx-yp" id="lx-yp" role="dialog" aria-modal="false" aria-labelledby="lx-yp-title" tabindex="-1">
+      <div class="yp-head"><h2 class="yp-title" id="lx-yp-title">Your places</h2>
+        <button class="yp-show" data-act="lxYoursShow" aria-pressed="${L.show.yours}">${L.show.yours ? "Shown on map" : "Hidden on map"}</button>
+        <button class="icon-btn yp-close" data-act="lxYours" aria-label="Close your places">${SQ.icon ? SQ.icon("x") : "×"}</button></div>
+      <div class="yp-legend" role="list" aria-label="Map key">
+        ${LISTS.map(([k, label]) => `<span role="listitem" class="yp-key"><span class="yp-ico ${k}" aria-hidden="true">${icon[k]}</span>${label}</span>`).join("")}
+        <span role="listitem" class="yp-key"><span class="yp-ico ev" aria-hidden="true">${SQ.PIN_ICONS.STAR}</span>Events</span>
+        <span role="listitem" class="yp-key"><span class="yp-ico pl" aria-hidden="true"></span>Places</span>
+      </div>
+      <div class="yp-body">${LISTS.map(sec).join("")}</div>
+    </section>`;
+  }
+  SQ.lx.yourPlaces = yourPlaces;
+  SQ.lx.yourPins = yourPins;
+  SQ.lx.ypChip = ypChip;
+  SQ.lx.ypPanel = ypPanel;
+  let ypReturn = false;
+  A.lxYours = () => {
+    const L = state();
+    L.yp = !L.yp;
+    ypReturn = !L.yp; // closing: focus goes back to the chip
+    if (L.yp) setTimeout(() => { const p = document.getElementById("lx-yp"); if (p) p.focus(); });
+  };
+  A.lxYoursShow = () => {
+    const L = state();
+    L.show.yours = !L.show.yours;
+  };
+  // A row in the panel: close it, pick the pin and centre the map on it (if it has one)
+  A.lxYoursGo = (id) => {
+    const L = state();
+    L.yp = false;
+    L.sel = id;
+    const e = SQ.d.events.find((x) => `e${x.id}` === id);
+    if (onMapE(e)) SQ.mapJump("discover", { lat: e.venue.lat, lng: e.venue.lng, zoom: Math.max((SQ.mapCenter("discover") || {}).zoom || 13, 13.6) });
+    if (L.stop === "full") setStop("peek", false);
+  };
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const L = U() && U().lx;
+    if (!L || !L.yp || U().screen !== "discover") return;
+    L.yp = false;
+    ypReturn = true;
+    SQ.render();
+  });
 
   // "Switch to demo / testing": forget this tab's answer (and the account on this device) and ask again
   A.modeSwitch = async () => {
@@ -279,6 +374,7 @@
     requestAnimationFrame(() => p.sheet.classList.remove("still"));
     // Streets first, then each pin fades in as it arrives (the opening flies them in itself)
     SQ.pinsArrive(root, SQ.opening.active());
+    if (ypReturn) { ypReturn = false; const c = root.querySelector(".lx-yp-chip"); if (c) c.focus(); }
     const card = L.sel && p.cards.querySelector(`[data-id="${CSS.escape(L.sel)}"]`);
     if (card) p.cards.scrollLeft = Math.max(0, card.offsetLeft - 16);
     if (SQ.d && SQ.d.user) ensurePlaces();

@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---------- robots.txt ----------
 // Official APIs and open-data downloads aren't crawling, so robots.txt doesn't govern them (Facebook's, for one,
 // turns away every crawler, though the Graph API is how Instagram data is meant to be read)
-const API_HOSTS = new Set(["app.ticketmaster.com", "graph.facebook.com", "ckan0.cf.opendata.inter.prod-toronto.ca"]);
+const API_HOSTS = new Set(["app.ticketmaster.com", "api.seatgeek.com", "graph.facebook.com", "ckan0.cf.opendata.inter.prod-toronto.ca"]);
 const UA_TOKEN = "sidequestsketch";
 const robots = {}; // host -> Promise<{ rules: [[allow, pattern]], delayMs }>
 const blocked = {}; // host -> why we've stopped asking it this run

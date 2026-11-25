@@ -229,6 +229,12 @@
     Object.assign(s, { ran: q, loading: true, since: Date.now(), result: null, error: null, matches: [], shown: REVEAL, more: false, loadingMore: false, sig: SQ.filterSig() });
     if (SQ.u.screen !== "search") SQ.go("search");
     else SQ.render();
+    // Places for the same words ("Chinese skewers", "karaoke with private rooms"), beside the events; the server only
+    // searches when the words name something specific, within its usage caps, and keeps nothing
+    s.places = null;
+    const at = (SQ.lx && SQ.lx.state().loc) || null;
+    SQ.post("/api/places", { query: q, lat: at ? at.lat : null, lng: at ? at.lng : null })
+      .then((r) => { if (run === searchRun) { s.places = Array.isArray(r.places) ? r.places : []; s.placesWant = r.want || null; if (!s.loading) SQ.render(); } }, () => { if (run === searchRun) s.places = []; });
     SQ.post("/api/search", { userId: SQ.userId(), query: q, only: SQ.filteredIds() })
       .then((r) => {
         if (run !== searchRun) return;

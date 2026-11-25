@@ -12,6 +12,7 @@ const factsOf = (room) => Object.assign(P.facts(room), { relax: room.relax });
 const personas = require("./personas");
 const talk = require("./talk");
 const claude = require("./claude");
+const wantLib = require("../search/want");
 const ai = require("../ai");
 const places = require("./places");
 const usage = require("./usage");
@@ -176,6 +177,7 @@ function setAnswer(room, person, slot, value, source) {
   const def = P.SLOTS[slot];
   if (!def) return false;
   if (slot === "origin") return setOrigin(room, person, value, source);
+  if (def.free) return setWant(room, person, value, source);
   const valid = P.optionsFor(slot, room).map(([v]) => v);
   let v = def.multi ? [].concat(value).map(String).filter((x) => valid.includes(x)) : valid.includes(String(value)) ? String(value) : null;
   if (v == null || (Array.isArray(v) && !v.length && slot !== "nos")) return false;
@@ -186,6 +188,18 @@ function setAnswer(room, person, slot, value, source) {
   return true;
 }
 
+// "Looking for": what someone asked for in their own words ("Chinese skewers"), cleaned so no amount, number or
+// area name reaches the shared board (lib/search/want.js). Adds to what they said before, newest first, up to 3.
+function setWant(room, person, value, source) {
+  const fresh = [].concat(value || []).map(wantLib.clean).filter(Boolean);
+  if (!fresh.length) return false;
+  const prev = room.answers[person.id].want;
+  const had = prev ? [].concat(prev.value) : [];
+  const v = [...new Set([...fresh, ...had].map((x) => x.toLowerCase()))].map((k) => [...fresh, ...had].find((x) => x.toLowerCase() === k)).slice(0, 3);
+  room.answers[person.id].want = { value: v, source, at: now() };
+  track("response_submitted", { sessionId: room.id, persona: room.persona, slot: "want", source, visibility: "group" });
+  return true;
+}
 // "Starting from": a station, or the person's own location. A location arrives as { lat, lng } and is
 // rounded to 2 decimals (about 1 km) straight away. The rounded point is kept only in that person's
 // private answers (answers.location), for this call: never in a view, broadcast, log, analytics event,
@@ -423,8 +437,8 @@ const FACTS_TOOL = {
           type: "object",
           properties: {
             person: { type: "string", description: "The first name of the person this fact is about, exactly as listed" },
-            slot: { type: "string", enum: ["night", "time", "origin", "vibe", "budget", "nos"] },
-            values: { type: "array", items: { type: "string" }, description: "Allowed values only, from the list given for that slot" },
+            slot: { type: "string", enum: ["night", "time", "origin", "vibe", "budget", "nos", "want"] },
+            values: { type: "array", items: { type: "string" }, description: "Allowed values only, from the list given for that slot. For want: the specific food, dish, cuisine or kind of place they asked for, in their own words, a few words each (\"Chinese skewers\", \"chuan'r\", \"karaoke with private rooms\", \"rooftop patio\"); never a price, an area or a person" },
             confidence: { type: "number", description: "0 to 1" },
           },
           required: ["person", "slot", "values", "confidence"],
@@ -444,7 +458,7 @@ const FACTS_TOOL = {
 
 async function extract(room, lines) {
   const names = P.crew(room).map((p) => p.name);
-  const allowed = Object.keys(P.SLOTS).map((s) => `- ${s}: ${P.optionsFor(s, room).map(([v, l]) => `${v} (${l})`).join(", ")}`).join("\n");
+  const allowed = Object.keys(P.SLOTS).map((s) => (P.SLOTS[s].free ? `- ${s}: free text in their own words (a cuisine, dish or kind of place: "Chinese skewers", "karaoke with private rooms"); only when they name something more specific than the vibes` : `- ${s}: ${P.optionsFor(s, room).map(([v, l]) => `${v} (${l})`).join(", ")}`)).join("\n");
   const user = `People on the call: ${names.join(", ")}.
 Allowed values per slot (night = dates; time: early is noon to 5, evening is 5 to 8, late is after 8; origin = the subway terminal nearest where they start, or "here" when they say they're starting from home or where they are now; budget = max spend in dollars; nos = areas to avoid):
 ${allowed}
@@ -495,6 +509,8 @@ function extractKeywords(room, lines) {
     if (/danc|club/.test(t)) vibes.push("dance");
     if (/\bart\b|gallery|film|movie/.test(t)) vibes.push("arts");
     add("vibe", vibes);
+    // The specifics in their own words: "Chinese skewers", "karaoke with private rooms" (lib/search/want.js)
+    add("want", wantLib.find(l.text));
     const nos = ["West End", "Downtown", "East End", "North York", "Scarborough", "Etobicoke"].filter((a) => new RegExp(`(not|no|avoid)\\W+(the\\W+)?${a.toLowerCase()}`).test(t));
     add("nos", nos);
     if (/\bside ?kick\b/.test(t)) addressed = true;
@@ -512,6 +528,7 @@ function applyUpdates(room, out, lines) {
     if (!def) continue;
     let values = (u.values || []).map(String);
     if (u.slot === "nos") values = [...new Set([...((room.answers[person.id].nos || {}).value || []), ...values])];
+    if (u.slot === "want") values = values.map(wantLib.clean).filter(Boolean).slice(0, 3);
     const ok = setAnswer(room, person, u.slot, def.multi ? values : values[0], line && line.kind === "typed" ? "call_text" : "call_speech");
     if (!ok && u.slot === "origin" && values[0] === "here") room.askOrigin = true; // they didn't share it: ask the usual card
   }
@@ -867,7 +884,11 @@ async function think(room) {
 
 // Loads Google places for this call once: after the night is known and the vibe has been asked or
 // answered. At most SIDEKICK_PLACES_PER_CALL searches, and none once the usage cap is near.
-const placesDue = (room, f) => !room.placesTried && (room.nights.length === 1 || f.night.known) && (f.vibe.answered > 0 || room.asked.includes("vibe") || room.asked.length >= 3);
+// Someone saying what they want ("Chinese skewers") counts as answering the vibe; a new want after the places
+// loaded searches once more (within SIDEKICK_PLACES_PER_CALL searches for the whole call).
+const wantKey = (f) => (f.want && f.want.known ? f.want.value.join("|").toLowerCase() : "");
+const placesDue = (room, f) => (room.nights.length === 1 || f.night.known) && (f.vibe.answered > 0 || (f.want && f.want.known) || room.asked.includes("vibe") || room.asked.length >= 3)
+  && (!room.placesTried || (wantKey(f) && wantKey(f) !== room.placesWant && (room.placesSearches || 0) < places.perCall()));
 async function ensurePlaces(room, f) {
   if (!placesDue(room, f)) return;
   room.placesTried = true;
@@ -879,7 +900,13 @@ async function ensurePlaces(room, f) {
     if (!a.origin) return null;
     return a.origin.here && a.location ? { lat: a.location.lat, lng: a.location.lng } : a.origin.value;
   }).filter(Boolean);
-  const out = await places.forCall(f.vibe.value || [], { origins });
+  const wants = f.want && f.want.known ? f.want.value : [];
+  room.placesWant = wantKey(f);
+  const again = (room.placesSearches || 0) > 0;
+  // A second round (a new want) searches just the want; the vibes' places from the first round stay
+  const out = again ? await places.searchWant(wants, { origins }) : await places.forCall(f.vibe.value || [], { origins, want: wants });
+  room.placesSearches = (room.placesSearches || 0) + (again ? 1 : Math.min(places.perCall(), (wants.length ? 1 : 0) + Math.max(1, new Set([...(f.vibe.value || []), ...(wants.length ? [] : ["default"])]).size)));
+  if (again && !room.picks && room.status === "live") { room.places = places.dedupePlaces([out.places, room.places || []]); return; }
   if (room.picks || room.status !== "live") return; // too late: the picks went ahead without them (see decide)
   room.places = out.places;
   track("sk_places_loaded", { sessionId: room.id, persona: room.persona, n: out.places.length, capped: out.capped || null });
@@ -1298,7 +1325,7 @@ async function pickTwo(room, list, deadline) {
   const f = factsOf(room);
   const people = P.crew(room).map((p) => {
     const a = room.answers[p.id];
-    const vibes = a.vibe ? a.vibe.value.map((v) => P.labelOf("vibe", v, room)).join(", ") : "anything fun";
+    const vibes = [a.want ? [].concat(a.want.value).join(", ") : null, a.vibe ? a.vibe.value.map((v) => P.labelOf("vibe", v, room)).join(", ") : null].filter(Boolean).join(", ") || "anything fun";
     return { name: p.name, interests: vibes, origin: a.origin ? a.origin.value : undefined };
   });
   const pool = list.slice(0, 25);
@@ -1320,6 +1347,14 @@ async function pickTwo(room, list, deadline) {
   }
   // The list is already ranked by the engine's score, and holds only what obeys every hard limit
   for (const e of pool) if (matches.length < 2 && !matches.some((m) => m.id === e.id)) matches.push({ id: e.id, reason: "", fits: {} });
+  // Someone asked for something specific ("Chinese skewers"): the pick that shows it best goes first, whatever the
+  // AI or keyword matcher preferred (both only see a pool that already obeys the request)
+  if (P.wantPlan(f)) {
+    const fit = (m) => P.wantFit(pool.find((x) => x.id === m.id) || {}, f);
+    const best = pool.filter((e) => P.wantFit(e, f) >= 0.5).sort((x, y) => P.wantFit(y, f) - P.wantFit(x, f) || pool.indexOf(x) - pool.indexOf(y))[0];
+    if (best && !matches.slice(0, 2).some((m) => m.id === best.id)) matches.unshift({ id: best.id, reason: "", fits: {} });
+    matches = [...matches.slice(0, 2).sort((x, y) => fit(y) - fit(x)), ...matches.slice(2)];
+  }
   setThinkStage(room, 4);
   // Unless the crew asked for only events or only places, show one of each when both fit: the
   // best event from the listings and the best place from Google, so the crew sees both options.
@@ -1440,11 +1475,13 @@ function originLabel(room, x, viewer) {
   return x.person.id === viewer ? "near you" : x.a.near || "near their spot";
 }
 function rows(room, f = factsOf(room), viewer = null) {
-  return ["night", "time", "budget", "origin", "vibe", ...(room.places && room.places.length ? ["kind"] : [])].map((slot) => {
+  // "Looking for: Chinese skewers" only once someone has said something specific
+  return ["night", "time", "budget", "origin", "vibe", ...(f.want && f.want.known ? ["want"] : []), ...(room.places && room.places.length ? ["kind"] : [])].map((slot) => {
     const g = f[slot];
     let value = null;
     let who = "";
-    if (slot === "budget") { value = P.budgetLabel(f, room); who = g.answered ? `private · ${g.answered} of ${P.crew(room).length}` : ""; }
+    if (slot === "want") { value = g.value.join(", "); who = [...new Set(Object.values(g.supporters).flat())].join(", "); }
+    else if (slot === "budget") { value = P.budgetLabel(f, room); who = g.answered ? `private · ${g.answered} of ${P.crew(room).length}` : ""; }
     else if (slot === "origin" && g.value && g.value.length) { value = [...new Set(P.answersFor(room, "origin").map((x) => originLabel(room, x, viewer)))].join(", "); who = [...new Set(Object.values(g.supporters).flat())].join(", "); }
     else if (slot === "vibe") { value = g.value && g.value.length ? g.value.slice(0, 2).map((v) => P.labelOf(slot, v, room)).join(" + ") : null; who = g.value && g.value[0] ? (g.supporters[g.value[0]] || []).join(", ") : ""; }
     else if (g.value && g.value.length) { value = [].concat(g.value).map((v) => P.labelOf(slot, v, room)).join(slot === "origin" ? ", " : " or "); who = [...new Set(Object.values(g.supporters).flat())].join(", "); }
@@ -1933,7 +1970,7 @@ async function agentTool(req, res, tool, { readBody, sendJSON }) {
   return sendJSON(res, out.status, out.body);
 }
 
-const PUBLIC_SLOTS = ["night", "time", "origin", "vibe", "kind"];
+const PUBLIC_SLOTS = ["night", "time", "origin", "vibe", "kind", "want"];
 // What the board says, for the agent. Budget is only the group label the crew can see anyway.
 function planState(room) {
   const f = factsOf(room);
@@ -1950,7 +1987,9 @@ function planState(room) {
       // Who hasn't answered, for a public question only (who's done with their budget stays private)
       waiting_on: P.SLOTS[open].private ? undefined : P.crew(room).filter((p) => p.mode !== "form" && !got.includes(p.id)).map((p) => p.name),
     } : null,
-    answer_options: Object.fromEntries(PUBLIC_SLOTS.filter((s) => s !== "kind" || (room.places && room.places.length)).map((s) => [s, P.optionsFor(s, room).map(([, l]) => l)])),
+    answer_options: Object.fromEntries(PUBLIC_SLOTS.filter((s) => (s !== "kind" || (room.places && room.places.length)) && !P.SLOTS[s].free).map((s) => [s, P.optionsFor(s, room).map(([, l]) => l)])),
+    // What the crew asked for in their own words ("Chinese skewers"): record more with record_facts slot "want"
+    looking_for: (f.want && f.want.known ? f.want.value : []),
     mode: room.mode === "sidelines" ? "sitting back (stay quiet unless someone says Sidekick)" : "leading",
     // What people just said (public facts, with names), so the agent can say it back before its next question
     just_heard: (room.heard || []).filter((h) => !h.undone && !h.here && now() - h.at < 60000).slice(-6).map((h) => `${h.name}: ${h.label}`),
@@ -2004,6 +2043,7 @@ async function nextMove(room) {
 
 // "Saturday", "sat", "Sat, Nov 28", "after 8", "union": the agent may give labels, weekdays or values
 function toValue(room, slot, v) {
+  if (P.SLOTS[slot] && P.SLOTS[slot].free) return wantLib.clean(v) || null; // their own words, cleaned
   const t = String(v || "").trim().toLowerCase();
   if (!t) return null;
   if (slot === "origin" && /^(here|my location|home)$/.test(t)) return "here";
@@ -2029,8 +2069,13 @@ async function runTool(room, tool, body) {
       if (!PUBLIC_SLOTS.includes(u && u.slot)) { skipped.push(`${(u && u.slot) || "?"}: not something you record (private or unknown)`); continue; }
       const person = P.crew(room).find((p) => p.name.toLowerCase() === String(u.person || "").trim().toLowerCase());
       if (!person) { skipped.push(`${u.person || "?"}: not on this call`); continue; }
-      const values = [].concat(u.values == null ? u.value : u.values).map((v) => toValue(room, u.slot, v)).filter((v) => v != null);
-      if (!values.length) { skipped.push(`${u.person} ${u.slot}: none of those are options`); continue; }
+      const said = [].concat(u.values == null ? u.value : u.values);
+      const values = said.map((v) => toValue(room, u.slot, v)).filter((v) => v != null);
+      // A vibe that isn't one of the options is what they asked for in their own words ("Chinese skewers"): it goes
+      // on the board as "Looking for", so the agent's existing record_facts carries it without a new slot
+      const own = u.slot === "vibe" ? said.filter((v) => toValue(room, "vibe", v) == null).flatMap((v) => wantLib.find(v).length ? wantLib.find(v) : [wantLib.loose(v)]).filter(Boolean) : [];
+      if (own.length) updates.push({ person: person.name, slot: "want", values: own, confidence: 1 });
+      if (!values.length) { if (!own.length) skipped.push(`${u.person} ${u.slot}: none of those are options`); continue; }
       updates.push({ person: person.name, slot: u.slot, values, confidence: 1 });
     }
     applyUpdates(room, { updates }, [{ pid: null, at: now(), kind: "spoken" }]);

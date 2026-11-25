@@ -1,15 +1,27 @@
 # Imports the next three months of GTA events into Supabase: the events table ("listings", see
 # sketch-2/supabase/schema.sql) and, during the switch, the file in Supabase Storage. Sketch 2's server checks for a
 # new import every hour (no commit, no redeploy). See sketch-1/import/run.js.
-#   Every day except Monday, 07:17 UTC: the quick sources (Ticketmaster, City of Toronto, Toronto Public Library,
-#     Luma, DICE, Instagram); every other source keeps its events from the last run (MERGE=1).
+#   Every day except Monday, 07:17 UTC: the quick sources (Ticketmaster, SeatGeek, City of Toronto, Toronto Public
+#     Library, Luma, DICE, Instagram); every other source keeps its events from the last run (MERGE=1).
 #   Monday, 06:23 UTC: every source (Meetup alone takes about 35 minutes).
 # The times are off the hour on purpose: GitHub delays scheduled jobs at :00 the most. Expect them to start late anyway.
+#
+# Which branch runs it: GitHub only runs the two schedules above from the default branch (main). Until this file is on
+# main, imports run from the claude/dazzling-brahmagupta-4ldxu4 branch instead:
+#   - on every push to that branch that changes the import code (sketch-1/import/**, sketch-1/lib/**) or this file:
+#     a full import of every source (ONLY and MERGE are empty for a push);
+#   - by hand: Actions tab -> Import events -> Run workflow -> pick that branch under "Use workflow from".
+# Runs share one concurrency group: a new run waits for the one in progress, and a newer push replaces an older one
+# that's still waiting (GitHub keeps at most one pending run per group), so pushes never pile up.
+#
 # This workflow never uses the AI (AI=off), so it never touches a paid API key.
-# Secrets (GitHub: Settings → Secrets and variables → Actions):
+# Secrets (GitHub: Settings -> Secrets and variables -> Actions):
 #   needed: SUPABASE_URL, SUPABASE_SECRET_KEY, TICKETMASTER_API_KEY
+#   optional: SEATGEEK_CLIENT_ID (SeatGeek's Platform API; without it SeatGeek is skipped).
 #   optional: INSTAGRAM_USER_ID and INSTAGRAM_ACCESS_TOKEN (Instagram Graph API; see sketch-1/import/README-instagram.md).
 #     Without them, Instagram uses the events saved by the last by-hand `node sketch-1/import/instagram.js`.
+# Venue coordinates that are missing or in the lake are looked up on OpenStreetMap's Nominatim (GEOCODE=1: one request
+# a second, the generic User-Agent "SideQuest-class-project", answers cached between runs by actions/cache).
 # If you change a cron line, change the same string in the ONLY/MERGE lines below (and in sketch-1/test/import-pipeline.js).
 
 name: Import events
@@ -18,7 +30,14 @@ on:
   schedule:
     - cron: "17 7 * * 0,2-6" # daily quick sources (not Monday)
     - cron: "23 6 * * 1" # Monday: every source
-  workflow_dispatch: # "Run workflow" button on the Actions tab
+  push:
+    branches:
+      - claude/dazzling-brahmagupta-4ldxu4
+    paths:
+      - "sketch-1/import/**"
+      - "sketch-1/lib/**"
+      - ".github/workflows/import-events.yml"
+  workflow_dispatch: # "Run workflow" button on the Actions tab (pick the branch under "Use workflow from")
     inputs:
       only:
         description: "Only these sources, comma-separated (empty = all); the rest keep their last events"
@@ -49,17 +68,28 @@ jobs:
         with:
           node-version: 20
 
+      # OpenStreetMap lookups, kept between runs so a venue is looked up once (Nominatim's usage policy asks for caching)
+      - name: Geocode cache
+        uses: actions/cache@v4
+        with:
+          path: sketch-1/data/geocode.json
+          key: geocode-${{ github.run_id }}
+          restore-keys: geocode-
+
       - name: Import
         working-directory: sketch-1
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
+          SEATGEEK_CLIENT_ID: ${{ secrets.SEATGEEK_CLIENT_ID }}
           INSTAGRAM_USER_ID: ${{ secrets.INSTAGRAM_USER_ID }}
           INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
           AI: "off"
           UPLOAD: "1"
-          # The daily run, or a hand-picked set of sources, keeps everyone else's events from the last run
-          ONLY: ${{ github.event.schedule == '17 7 * * 0,2-6' && 'Ticketmaster,City of Toronto,Toronto Public Library,Luma,DICE,Instagram' || inputs.only }}
+          GEOCODE: "1"
+          # The daily run, or a hand-picked set of sources, keeps everyone else's events from the last run.
+          # A push (or "Run workflow" with nothing typed) has neither, so it's a full import.
+          ONLY: ${{ github.event.schedule == '17 7 * * 0,2-6' && 'Ticketmaster,SeatGeek,City of Toronto,Toronto Public Library,Luma,DICE,Instagram' || inputs.only }}
           MERGE: ${{ (github.event.schedule == '17 7 * * 0,2-6' || inputs.only) && '1' || '' }}
         run: node import/run.js

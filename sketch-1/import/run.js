@@ -5,7 +5,8 @@
 //   ONLY=Ticketmaster,Instagram MERGE=1 node import/run.js
 //                                 (fetch just those sources and keep everyone else's events from last time)
 // Sources, in the order they win a tie between duplicates:
-//   Ticketmaster (official Discovery API, needs TICKETMASTER_API_KEY), Instagram (the Graph API with
+//   Ticketmaster (official Discovery API, needs TICKETMASTER_API_KEY), SeatGeek (official Platform API, needs
+//   SEATGEEK_CLIENT_ID; skipped without it), Instagram (the Graph API with
 //   INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN, read by saved AI readings and caption rules, else the events saved by
 //   the last `node import/instagram.js`; no AI unless IG_AI=1), then the sites: DICE (published sitemaps + event pages),
 //   Meetup (Toronto groups' event pages), Luma (Toronto discover list), City of Toronto and Toronto Public Library
@@ -37,6 +38,11 @@ const eventsTable = require("../lib/events-table");
 const { fetchDice } = require("./sources/dice");
 const { fetchEventbrite } = require("./sources/eventbrite");
 const { fetchTicketmaster } = require("./sources/ticketmaster");
+const { fetchSeatGeek } = require("./sources/seatgeek");
+const locate = require("./locate");
+const { inGTA } = require("../lib/gta");
+// Venues with missing or bad coordinates are looked up on OpenStreetMap (GEOCODE=1; see import/locate.js)
+const geocoder = process.env.GEOCODE === "1" ? require("../lib/geocode") : null;
 const { fetchMeetup } = require("./sources/meetup");
 const { fetchLuma } = require("./sources/luma");
 const { fetchToronto } = require("./sources/toronto");
@@ -46,12 +52,13 @@ const { fetchICS } = require("./sources/ics");
 const { fetchOntario } = require("./sources/ontario");
 
 const DAYS = Number(process.env.DAYS || 92);
-const OUT = path.join(__dirname, "..", "seed", "events.json");
+const OUT = process.env.IMPORT_OUT || path.join(__dirname, "..", "seed", "events.json"); // tests write elsewhere
 const log = (...a) => console.log(...a);
 
 // In priority order. Each source works on a different site, so they run side by side; limits mean "all"
 const SOURCES = [
   ["Ticketmaster", fetchTicketmaster, Number(process.env.TICKETMASTER_MAX || 5000)],
+  ["SeatGeek", fetchSeatGeek, Number(process.env.SEATGEEK_MAX || 3000)],
   ["Instagram", fetchInstagram, Number(process.env.INSTAGRAM_MAX || 5000)],
   ["DICE", fetchDice, Number(process.env.DICE_MAX || 5000)],
   ["Meetup", fetchMeetup, Number(process.env.MEETUP_MAX || 10000)],
@@ -96,6 +103,7 @@ async function previousImport() {
   const report = {};
   const dropped = {}; // why listings were left out ("beyond-toronto", "appointment") -> count
   const found = {}; // source -> events, put together in priority order below
+  const located = {}; // source -> what import/locate.js did with its venues' coordinates
   await Promise.all(
     RUN.map(async ([name, fn, max]) => {
       log(`${name}: starting`);
@@ -106,7 +114,10 @@ async function previousImport() {
         const raw = await fn({ start, end, max, log, previous: prevEvents });
         if (Array.isArray(raw)) {
           fetched = raw.length;
-          events = raw.map(toEvent).filter((e) => e && inWindow(e) && e.venue.lat > 43.35 && e.venue.lat < 44.15 && e.venue.lng > -80.1 && e.venue.lng < -78.8);
+          // Coordinates the map can trust: wrong ones looked up again, or the event kept off the map (never a guess)
+          const loc = await locate.fix(raw, { geocode: geocoder && geocoder.geocode, log: (m) => log(`  ${name} ${m.trim()}`) });
+          located[name] = loc;
+          events = raw.map(toEvent).filter((e) => e && inWindow(e) && (e.venue.noPin || inGTA(e.venue.lat, e.venue.lng)));
           // Outside Toronto, or an appointment rather than an event: counted, then left out
           for (const e of events) {
             const why = dropReason(e);
@@ -173,6 +184,8 @@ async function previousImport() {
   const lines = [`Wrote ${events.length} events (${all.length - events.length} duplicates merged${previous ? `, ${events.length - prevEvents.length >= 0 ? "+" : ""}${events.length - prevEvents.length} since last run` : ""}) to ${where}`];
   if (tableLine) lines.push(tableLine);
   for (const [name] of SOURCES) if (report[name]) lines.push(`  ${name}: ${report[name].kept} kept${report[name].note ? ` (${report[name].note})` : ""}`);
+  const fixedLoc = Object.values(located).reduce((t, c) => ({ geocoded: t.geocoded + c.geocoded, swapped: t.swapped + c.swapped, noPin: t.noPin + c.noPin, lookups: t.lookups + c.lookups }), { geocoded: 0, swapped: 0, noPin: 0, lookups: 0 });
+  lines.push(`  Locations: ${fixedLoc.geocoded} venues looked up on OpenStreetMap (${fixedLoc.lookups} lookups${geocoder ? "" : "; GEOCODE is off"}), ${fixedLoc.swapped} swapped back, ${fixedLoc.noPin} kept off the map; ${events.filter((e) => e.venue.noPin).length} listed without a pin`);
   const missing = { price: events.filter((e) => e.price == null).length, image: events.filter((e) => !e.image).length, description: events.filter((e) => e.description === NA).length };
   lines.push(`  N/A counts: ${Object.entries(missing).map(([k, n]) => `${k} ${n}`).join(", ")}`);
   lines.push(`  With a price: ${events.length - missing.price} of ${events.length} (${Math.round((100 * (events.length - missing.price)) / events.length)}%); no vibe: ${events.filter((e) => !e.vibes.length).length}`);

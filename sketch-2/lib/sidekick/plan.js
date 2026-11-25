@@ -12,9 +12,13 @@ const SLOTS = {
   nos: { label: "Avoid", multi: true, private: true, options: [["West End", "West End"], ["Downtown", "Downtown"], ["East End", "East End"], ["North York", "North York"], ["Scarborough", "Scarborough"], ["Etobicoke", "Etobicoke"]] },
   // Only asked when the call has places as well as events (Google Places on, and under its usage cap)
   kind: { label: "Plan", multi: false, private: false, options: [["events", "A ticketed event"], ["places", "Just somewhere good"], ["either", "Either works"]] },
+  // What people asked for in their own words ("Chinese skewers", "karaoke with private rooms"): free text, never
+  // asked as a question, public (cleaned by lib/search/want.js so no amount, number or area gets through)
+  want: { label: "Looking for", multi: true, private: false, free: true },
 };
 const placesOpen = require("./places").openAt;
 const rank = require("../search/rank");
+const want = require("../search/want");
 // A representative hour for each time of night, to check a place is open then
 const BUCKET_HOUR = { early: 15, evening: 19, late: 21 };
 // Asked in this order of importance when nothing else decides it; nos is only asked on the join card
@@ -30,7 +34,7 @@ const bucket = (h) => (h >= 20 || h < 4 ? "late" : h >= 17 ? "evening" : h >= 11
 
 function optionsFor(slot, room) {
   if (slot === "night") return room.nights.map((d) => [d, nightLabel(d)]);
-  return SLOTS[slot].options;
+  return SLOTS[slot].options || [];
 }
 function nightLabel(d) {
   return new Date(d + "T12:00:00").toLocaleDateString("en-CA", { weekday: "short", month: "short", day: "numeric", timeZone: "America/Toronto" });
@@ -76,6 +80,13 @@ function groupFact(room, slot) {
     out.known = got.length >= need(room);
     return out;
   }
+  if (slot === "want") {
+    // Everyone's specifics, the most-asked first ("Chinese skewers" from two people beats "rooftop" from one)
+    for (const x of got) for (const v of [].concat(x.a.value)) out.supporters[v] = [...(out.supporters[v] || []), x.person.name];
+    out.value = Object.entries(out.supporters).sort((a, b) => b[1].length - a[1].length).map(([v]) => v).slice(0, 3);
+    out.known = out.value.length > 0;
+    return out;
+  }
   if (slot === "origin") {
     out.value = [...new Set(got.map((x) => x.a.value))];
     got.forEach((x) => (out.supporters[x.a.value] = [...(out.supporters[x.a.value] || []), x.person.name]));
@@ -113,6 +124,22 @@ function facts(room) {
 // Events that fit what's known so far. `f` can be a simulated set of facts.
 // f.relax (a Set) loosens one constraint when nothing fits: "time", "night", "area" or "budget".
 const TIERS = [20, 30, 50];
+// The search plan for the crew's want (memoised per wording), or null when nobody said anything specific
+const wantPlans = new Map();
+function wantPlan(f) {
+  const w = f.want && f.want.known ? f.want.value : null;
+  if (!w || !w.length) return null;
+  const key = w.join("|");
+  if (!wantPlans.has(key)) { wantPlans.set(key, want.plan(w)); if (wantPlans.size > 200) wantPlans.delete(wantPlans.keys().next().value); }
+  return wantPlans.get(key);
+}
+// How well a listing matches the want, 0 to 1 (events by their title, tags and description words)
+function wantFit(e, f) {
+  const wanted = wantPlan(f);
+  if (!wanted) return 0;
+  if (e.type === "place") return want.relevance(e, wanted);
+  return want.relevance({ title: e.title, types: [], categories: [...(e.tags || []), ...(e.vibes || [])], summary: e.description || "" }, { ...wanted, food: false });
+}
 function filterEvents(events, room, f) {
   const relax = f.relax || new Set();
   const nights = f.night.known && !relax.has("night") ? f.night.value : room.nights;
@@ -122,9 +149,12 @@ function filterEvents(events, room, f) {
   const avoid = relax.has("area") ? [] : f.nos.value || [];
   const origins = Array.isArray(f.origin.value) ? f.origin.value : [];
   const kinds = f.kind && f.kind.known ? f.kind.value : ["events", "places"];
+  const wanted = wantPlan(f);
   return events.filter((e) => {
     if (e.type === "place") {
       if (!kinds.includes("places") || e.area === "Beyond Toronto") return false;
+      // A specific want: a place has to show it (types, name, summary), so a skewer request can't return a cocktail bar
+      if (wanted && want.relevance(e, wanted) < want.MIN_RELEVANCE) return false;
       const open = nights.some((d) => (times || ["evening"]).some((b) => placesOpen(e.hours, new Date(d + "T12:00:00").getDay(), BUCKET_HOUR[b]) !== false));
       if (!open) return false;
       if (max != null && e.price != null && e.price > max) return false;
@@ -182,6 +212,10 @@ function score(e, room, f) {
   if (e.price == null && f.budget.value != null && f.budget.value !== "any") s -= 4;
   if (room.context) s += rank.contextBonus(e, { ...room.context, crewSize: crew(room).length, night: f.night.known && f.night.value.length ? f.night.value[0] : room.nights[0] }).bonus;
   if (room.shown) s += rank.seenPenalty(e.id, room.shown, room.now || Date.now());
+  // What they asked for, in their words: a place that shows it ranks well above one that only clears the bar;
+  // an event that matches it ("karaoke night") gets a lift too
+  const w = wantFit(e, f);
+  if (w) s += w * (e.type === "place" ? 30 : 12);
   return s;
 }
 
@@ -299,4 +333,4 @@ function budgetLabel(f, room) {
 // How Sidekick may describe a loosened constraint out loud: never names a private answer
 const RELAX_WORDS = { time: "a different start time", night: "another night", area: "a wider range of areas", budget: "stretching the spend a little" };
 
-module.exports = { SLOTS, VIBES, ASKABLE, optionsFor, labelOf, nightLabel, facts, groupFact, filterEvents, ranked, nextQuestion, readiness, budgetLabel, bestRelax, RELAX_WORDS, answersFor, crew, need, localDay, crewFits, score };
+module.exports = { SLOTS, VIBES, ASKABLE, optionsFor, labelOf, nightLabel, facts, groupFact, filterEvents, ranked, nextQuestion, readiness, budgetLabel, bestRelax, RELAX_WORDS, answersFor, crew, need, localDay, crewFits, score, wantPlan, wantFit };

@@ -95,7 +95,7 @@ const response = (status, body, headers = {}) => new Response(typeof body === "s
     const weekly = { schedule: "23 6 * * 1", only: "" };
     const byHand = { schedule: "", only: "Ticketmaster,City of Toronto" };
     const byHandAll = { schedule: "", only: "" };
-    assert.strictEqual(evaluate(only, daily), "Ticketmaster,City of Toronto,Toronto Public Library,Luma,DICE,Instagram");
+    assert.strictEqual(evaluate(only, daily), "Ticketmaster,SeatGeek,City of Toronto,Toronto Public Library,Luma,DICE,Instagram");
     assert.strictEqual(evaluate(merge, daily), "1");
     assert.strictEqual(evaluate(only, weekly), "");
     assert.strictEqual(evaluate(merge, weekly), "");
