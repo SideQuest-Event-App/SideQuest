@@ -289,7 +289,7 @@ const INIT = () => {
 
       // The minute cap is reached between opening the page and the tap: the route says no, quietly
       const C = await plannerPage();
-      await C.page.goto(`${base}/sk`);
+      await C.page.goto(`${base}/sk?quick=1`); // the one-page start screen
       await C.page.waitForSelector("#go");
       const left = (await usage.status()).elevenlabs_minutes;
       await usage.reserve("elevenlabs_minutes", left.limits.day - left.used.day); // use up the day
