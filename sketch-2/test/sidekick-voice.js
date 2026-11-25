@@ -392,7 +392,8 @@ const INIT = () => {
         assert.deepStrictEqual(client.map((t) => t.name).sort(), ["accept_relax", "get_next_move", "get_picks", "get_plan_state", "record_facts", "show_private_card"]);
         assert(client.every((t) => t.description && t.expects_response === true), "each tool has a description and waits for the app");
         const rec = client.find((t) => t.name === "record_facts").parameters;
-        assert.deepStrictEqual(rec.properties.updates.items.properties.slot.enum, ["night", "time", "origin", "vibe", "kind"], "record_facts can't take private slots");
+        assert.deepStrictEqual(rec.properties.updates.items.properties.slot.enum, ["night", "time", "origin", "vibe", "kind", "want"], "record_facts takes public slots only");
+        assert(!["budget", "nos"].some((s) => rec.properties.updates.items.properties.slot.enum.includes(s)), "record_facts can't take private slots");
         assert(p.built_in_tools.skip_turn && p.ignore_default_personality === true);
         assert.strictEqual(c.conversation_config.tts.model_id, "eleven_flash_v2");
         assert.strictEqual(c.conversation_config.turn.turn_eagerness, "normal");
