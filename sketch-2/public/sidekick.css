@@ -546,3 +546,33 @@ body.sk-live #say:empty,body.sk-live #ticks:empty{display:none}
 #appFrame{flex:1;width:100%;border:0;background:var(--base)}
 .pf-oncall .pf-hero{gap:16px}
 .pf-oncall .oc-note{color:var(--t2)}
+
+/* Sidekick's voice status: a pill in the call's top row (only when there's something to say), the "Tap to turn on
+   sound" bar, and the "Sidekick's voice" sheet. Amber is used only here, for "it works, but not fully". */
+:root{--amb-t:#4a3a14;--amb-x:#f2c46d}
+.vpill{flex:0 1 auto;min-width:0;min-height:44px;display:inline-flex;align-items:center;gap:6px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;line-height:16px;white-space:nowrap;overflow:hidden}
+.vpill .vp-t{overflow:hidden;text-overflow:ellipsis}
+.vpill .vp-m{font-weight:500;text-decoration:underline;text-underline-offset:2px;flex:none}
+.vpill i{width:8px;height:8px;border-radius:999px;background:currentColor;flex:none}
+.vpill.pri{background:var(--pri-t);color:var(--acc)}
+.vpill.ok{background:var(--ok-t);color:var(--ok)}
+.vpill.amb{background:var(--amb-t);color:var(--amb-x)}
+.vpill.hot{background:var(--hot-t);color:var(--hot-x)}
+.vpill.connecting i{animation:vpulse 1.2s ease-in-out infinite}
+.vpill.dot{width:44px;padding:0;justify-content:center;background:none}
+.vpill.dot i{width:10px;height:10px;box-shadow:0 0 0 3px var(--ok-t)}
+@keyframes vpulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.vpill.connecting i{animation:none}}
+.vpill:focus-visible,.sound-bar:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+.sound-bar{width:100%;min-height:44px;margin-top:8px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:14px;background:var(--hot-t);color:var(--hot-x);text-align:left}
+.sound-bar b{font-weight:600;flex:1}
+.sound-bar .small{color:var(--hot-x);opacity:.85}
+.vrows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.vrow{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bs)}
+.vrow:last-child{border-bottom:0}
+.vr-t{display:flex;flex-direction:column;gap:2px}
+.vr-r{display:flex;flex-direction:column;align-items:flex-end;text-align:right;gap:2px;font-weight:600;font-size:14px;color:var(--t2);max-width:55%}
+.vr-r.good{color:var(--ok)}
+.vr-r.bad{color:var(--hot-x)}
+.vr-r .small{font-weight:400}
+.vtip{color:var(--t2)}

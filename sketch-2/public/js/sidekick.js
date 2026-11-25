@@ -1000,6 +1000,12 @@
       retries = 0;
       setConn(true);
       view = JSON.parse(e.data);
+      if (voiceRelevant() || (view.me && view.me.planner && !STUDY)) {
+        loadVoiceSetup();
+        // The opening line, fetched as soon as the call is up, so the first words don't wait on ElevenLabs
+        const first = view.sidekick && view.sidekick.slice(-1)[0];
+        if (first && !first.system && view.me.planner && aloud && !Tts.prefetched) { Tts.prefetched = true; Tts.prefetch(first.text, view.voice && view.voice.slot); }
+      }
       if (view.boot && me.boot !== view.boot) { me.boot = view.boot; store.set(`sk:${roomId}`, me); }
       render();
       readAloud();
@@ -1148,7 +1154,7 @@
     const rowLabel = `People: ${view.people.length} in the call${waiting.length ? `, ${waiting.length} invited` : ""}. Invite friends`;
     const html = `<div class="ctop"><button class="icon-btn min-btn" id="minBtn" aria-label="Minimize call">${ICON.down}</button>
       <button class="people-row" id="peopleBtn" aria-haspopup="dialog" aria-expanded="${sheetOpen}" aria-controls="sheet" aria-label="${esc(rowLabel)}"><span class="row avs" aria-hidden="true">${people.replace(/ role="img" aria-label="[^"]*"/g, "")}</span>${plus}</button>
-      <div class="row schips">${pill}${modeTag}</div></div>`;
+      ${voicePillHTML()}<div class="row schips">${pill}${modeTag}</div></div>${soundBarHTML()}`;
     const top = document.getElementById("top");
     if (top.dataset.html === html) return;
     const focused = document.activeElement && top.contains(document.activeElement) ? document.activeElement.id : null;
@@ -1997,7 +2003,7 @@
       if (agentStarting) return;
       agentPref = !agent;
       store.set("sk:agentVoice", agentPref);
-      if (agent) { stopAgent(); if (view.me.mode === "voice" && !micOn) startMic(); } else startAgent();
+      if (agent) { stopAgent(); vset("agent", "off"); if (view.me.mode === "voice" && !micOn) startMic(); } else startAgent();
       return;
     }
     if (t.closest("#audioBtn")) return void (Audio.on ? Audio.stop() : Audio.start().then(() => { if (Audio.on && !micOn) startMic(); }));
@@ -2091,6 +2097,7 @@
     if (agent || agentStarting || agentCapped || !me || STUDY) return;
     agentStarting = true;
     agentDropped = false;
+    vset("agent", "connecting");
     if (phase) renderDock();
     let reserved = false;
     const hadMic = micOn;
@@ -2099,7 +2106,8 @@
       sdk.catch(() => {}); // a failed load is handled below (when it's awaited); not an unhandled rejection meanwhile
       const s = await api(`/api/sk/rooms/${roomId}/voice-agent`, { p: me.person });
       reserved = true;
-      const { Conversation } = await sdk;
+      let Conversation;
+      try { ({ Conversation } = await sdk); } catch { throw Object.assign(new Error("The voice code didn't load"), { vreason: "sdk" }); }
       if (micOn) stopMic();
       if ("speechSynthesis" in window) speechSynthesis.cancel();
       // Mark everything already on screen as passed on, so the agent only gets what happens next
@@ -2126,10 +2134,14 @@
       if (s.signedUrl) tries.push({ signedUrl: s.signedUrl, connectionType: "websocket" });
       let lastErr = new Error("No way to connect");
       for (const t of tries) {
-        try { session = await Conversation.startSession({ ...opts, ...t }); break; } catch (err) { lastErr = err; }
+        try {
+          session = await Promise.race([Conversation.startSession({ ...opts, ...t }), new Promise((_, no) => setTimeout(() => no(Object.assign(new Error("timeout"), { vreason: "timeout" })), 15000))]);
+          break;
+        } catch (err) { lastErr = err; }
       }
-      if (!session) throw lastErr;
+      if (!session) throw Object.assign(lastErr, { vreason: lastErr.vreason || (lastErr.name === "NotAllowedError" || /permission|not allowed/i.test(lastErr.message || "") ? "mic" : "network") });
       agent = session;
+      vset("agent", "live");
       agentMuted = false;
       agentStart = Date.now();
       releasePrimedMic();
@@ -2141,6 +2153,8 @@
       releasePrimedMic();
       if (a) { try { await a.endSession(); } catch {} }
       if (err && err.data && err.data.capped) agentCapped = true;
+      const why = (err && (err.vreason || (err.data && err.data.reason))) || "network";
+      vset("agent", agentCapped || why === "limit" ? "capped" : /^(no-key|no-agent|off)$/.test(why) ? `not-set-up:${why}` : `failed:${why}`);
       if (reserved) api(`/api/sk/rooms/${roomId}/voice-agent/end`, { p: me.person, seconds: 0 }).catch(() => {});
       // Quietly carry on with the built-in voice. A tap on the switch gets a short note; the automatic start doesn't.
       if (!auto) toast(agentCapped ? "Sidekick's natural voice is resting for now. The built-in voice carries on." : "Couldn't start Sidekick's natural voice. The built-in voice carries on.");
@@ -2154,6 +2168,7 @@
   function agentFallback() {
     if (!agent) return;
     stopAgent();
+    vset("agent", "failed:disconnected");
     if (!agentDropped) { agentDropped = true; toast("Switched to Sidekick's built-in voice."); }
     if (me && me.mode === "voice" && !micOn && (phase === "call" || phase === "picks")) startMic();
   }
@@ -2535,6 +2550,179 @@
     setTimeout(resume, 6000 + Voice.speakable(last.text).split(/\s+/).length * 600); // some phones never fire the end
   }
 
+  // ---------- Sidekick's voice status: can anyone hear it, and if not, why ----------
+  // Three ways Sidekick is heard, tried in order, each with a specific result:
+  //   agent (the natural voice): connecting / live / failed:<reason> / capped / not-set-up:<no-key|no-agent|off> / off
+  //   backup (ElevenLabs reads each line, POST /api/sk/tts): ok / not-set-up / limit / refused:<401|403|5xx> / timeout / error
+  //   phone (speechSynthesis): ok / blocked / unavailable
+  // plus playBlocked: the phone refused to play sound (NotAllowedError) until someone taps. A pill in the top row says
+  // it in a few words, the "Sidekick's voice" sheet in plain words, and each failure is reported to the server log
+  // (path, reason and a short platform like "iPhone Safari": nothing personal).
+  const VS = { agent: null, backup: null, phone: null, playBlocked: false, setup: null, last: null, onAt: 0, reported: new Set(), asked: false };
+  const voiceRelevant = () => Boolean(view && view.me && !STUDY && (view.me.planner || Audio.on) && (phase === "call" || phase === "picks"));
+  function uaShort() {
+    const u = navigator.userAgent;
+    const dev = /iPhone/.test(u) ? "iPhone" : /iPad/.test(u) || (IOS && /Mac/.test(u)) ? "iPad" : /Android/.test(u) ? "Android" : /Mac/.test(u) ? "Mac" : /Windows/.test(u) ? "Windows" : /Linux/.test(u) ? "Linux" : "Other";
+    const br = /Edg\//.test(u) ? "Edge" : /CriOS|Chrome\//.test(u) ? "Chrome" : /FxiOS|Firefox\//.test(u) ? "Firefox" : /Safari\//.test(u) ? "Safari" : "Browser";
+    return `${dev} ${br}`;
+  }
+  const failed = (path, v) => (path === "agent" ? /^(failed|capped)/.test(v || "") || (/^not-set-up/.test(v || "") && Boolean(VS.setup && VS.setup.key)) : path === "backup" ? v && v !== "ok" : path === "phone" ? v === "blocked" || v === "unavailable" : Boolean(v));
+  function voiceReport(path, reason) {
+    const k = `${path}:${reason}`;
+    if (VS.reported.has(k) || !me || !roomId) return;
+    VS.reported.add(k);
+    api(`/api/sk/rooms/${roomId}/voice-report`, { p: me.person, path, reason: String(reason), ua: uaShort() }).catch(() => {});
+  }
+  function vset(path, value) {
+    if (VS[path] === value) return;
+    VS[path] = value;
+    if (path === "agent" && value === "live") VS.onAt = Date.now();
+    if (failed(path, value)) voiceReport(path, path === "playBlocked" ? "NotAllowedError" : value);
+    renderVoice();
+  }
+  let voiceTimer = null;
+  function renderVoice() {
+    if (phase !== "call" && phase !== "picks") return;
+    renderTop();
+    if (voiceOpen) renderVoiceSheet();
+  }
+  // What the server has: the key and agent (yes or no only) and what's left on the meters
+  async function loadVoiceSetup() {
+    if (VS.asked || !me) return;
+    VS.asked = true;
+    try {
+      const st = await api(`/api/sk/rooms/${roomId}/voice-setup`, { p: me.person });
+      VS.setup = st;
+      if (!st.key) { if (!VS.agent) VS.agent = "not-set-up:no-key"; if (!VS.backup) VS.backup = "not-set-up"; }
+      else {
+        if (!VS.agent && (st.off || !st.agent)) VS.agent = `not-set-up:${st.off ? "off" : "no-agent"}`;
+        if (!VS.backup && st.ttsOff) VS.backup = "not-set-up";
+        if (!VS.backup && st.tts && st.tts.capped) VS.backup = "limit";
+        if (!VS.agent && st.minutes && st.minutes.capped) VS.agent = "capped";
+      }
+      for (const k of ["agent", "backup"]) if (failed(k, VS[k])) voiceReport(k, VS[k]);
+      renderVoice();
+    } catch {}
+  }
+  // The pill: only when there's something to say (or for 3 s once the natural voice is on, then a green dot)
+  function voicePill() {
+    const a = VS.agent || "", b = VS.backup, ph = VS.phone;
+    if (VS.playBlocked) return "nosound";
+    if (a === "connecting") return "connecting";
+    if (a === "live") return "on";
+    const agentDown = /^(failed|capped)/.test(a) || (/^not-set-up/.test(a) && Boolean(VS.setup && VS.setup.key && VS.setup.agent));
+    if (b === "ok") return agentDown ? "backup" : "on";
+    if (b === "limit" && ph !== "blocked" && ph !== "unavailable") return "limit";
+    if (ph === "blocked" || ph === "unavailable") return "nosound";
+    if (ph === "ok") return "backup";
+    return null;
+  }
+  const PILL = { connecting: ["Connecting voice…", "pri"], on: ["Voice on", "ok"], backup: ["Backup voice", "amb", "Why?"], limit: ["Voice limit reached", "amb", "Why?"], nosound: ["No sound", "hot", "Tap to fix"] };
+  function voicePillHTML() {
+    if (!voiceRelevant()) return "";
+    const st = voicePill();
+    if (!st) return "";
+    const [label, tone, more] = PILL[st];
+    const dot = st === "on" && VS.onAt && Date.now() - VS.onAt > 3000;
+    if (st === "on" && VS.onAt && !dot) { clearTimeout(voiceTimer); voiceTimer = setTimeout(renderVoice, 3000 - (Date.now() - VS.onAt) + 30); }
+    return `<button class="vpill ${tone} ${st}${dot ? " dot" : ""}" id="voicePill" aria-haspopup="dialog" aria-expanded="${voiceOpen}" aria-controls="voiceSheet" aria-label="${esc(`${label}. Sidekick's voice details`)}" data-vstate="${st}"><i aria-hidden="true"></i>${dot ? "" : `<span class="vp-t">${esc(label)}</span>${more ? `<span class="vp-m">${esc(more)}</span>` : ""}`}</button>`;
+  }
+  const soundBarHTML = () => (voiceRelevant() && VS.playBlocked ? `<button class="sound-bar" id="soundBar"><span aria-hidden="true">🔊</span><b>Tap to turn on sound</b><span class="small">${IOS ? "iPhone blocked it" : "The browser blocked it"}</span></button>` : "");
+
+  // The "Sidekick's voice" sheet: the three ways, in plain words, the tips, and "Try sound again"
+  let voiceOpen = false;
+  const AGENT_WORDS = { "no-key": "Not set up", "no-agent": "Not set up", off: "Switched off", "upstream-401": "No permission for this key", "upstream-403": "No permission for this key", "upstream-429": "Daily limit reached", limit: "Daily limit reached", "upstream-5xx": "ElevenLabs is having trouble", network: "Couldn't connect", mic: "Microphone blocked", sdk: "Couldn't load the voice", timeout: "Took too long to connect", disconnected: "Dropped, switched to backup" };
+  const AGENT_WHY = { "no-key": "The server has no ElevenLabs key.", "no-agent": "The server has no agent ID for this voice.", off: "Switched off on the server.", "upstream-401": "ElevenLabs refused the key (401).", "upstream-403": "ElevenLabs refused the key (403).", "upstream-429": "ElevenLabs says the limit is reached (429).", limit: "Today's allowance is used up.", mic: "The phone didn't allow the microphone.", sdk: "The voice code didn't load on this phone." };
+  function voiceWords(path) {
+    const v = VS[path];
+    if (path === "agent") {
+      if (!v) return ["Not tried", ""];
+      if (v === "connecting") return ["Connecting…", ""];
+      if (v === "live") return ["Working", ""];
+      if (v === "off") return ["Turned off", "Natural voice is switched off in the Sidekick menu."];
+      if (v === "capped") return ["Daily limit reached", AGENT_WHY.limit];
+      const r = v.split(":")[1] || "";
+      return [AGENT_WORDS[r] || "Couldn't connect", AGENT_WHY[r] || ""];
+    }
+    if (path === "backup") {
+      return ({ ok: ["Working", ""], "not-set-up": ["Not set up", "The server has no ElevenLabs key."], limit: ["Daily limit reached", "Today's ElevenLabs allowance is used up."], "refused:401": ["No permission for this key", "ElevenLabs refused the key (401)."], "refused:403": ["No permission for this key", "ElevenLabs refused the key (403)."], "refused:5xx": ["ElevenLabs is having trouble", ""], timeout: ["Took too long", ""], error: ["Couldn't connect", ""] })[v] || ["Not tried", ""];
+    }
+    return ({ ok: ["Working", ""], blocked: [IOS ? "Blocked by iPhone" : "Blocked by the browser", ""], unavailable: ["Not available on this phone", ""] })[v] || ["Not needed", ""];
+  }
+  function voiceSheetHTML() {
+    const row = (path, title, sub) => { const [w, why] = voiceWords(path); const good = w === "Working"; return `<li class="vrow"><span class="vr-t"><b>${esc(title)}</b><span class="small">${esc(sub)}</span></span><span class="vr-r ${good ? "good" : w === "Not tried" || w === "Not needed" ? "" : "bad"}" data-vpath="${path}">${esc(w)}${why ? `<span class="small">${esc(why)}</span>` : ""}</span></li>`; };
+    const blocked = VS.playBlocked || VS.phone === "blocked";
+    const notSet = /^not-set-up/.test(VS.agent || "") || VS.backup === "not-set-up";
+    return `<ul class="vrows">${row("agent", "Natural voice", "Talks and listens live")}${row("backup", "Backup voice", "Reads each line in the ElevenLabs voice")}${row("phone", "Phone's voice", "Last resort")}</ul>
+      ${VS.playBlocked ? `<p class="small vtip"><b>Sound is blocked on this phone.</b> One tap below plays the line again.</p>` : ""}
+      ${blocked || IOS ? `<p class="small vtip">Turn off the silent switch and turn the volume up. Tap the button below to try again.</p>` : ""}
+      ${notSet ? `<p class="small vtip">“Not set up” means the server is missing the ElevenLabs settings.</p>` : ""}
+      <p class="small vtip">Still nothing? Sidekick's lines keep showing on screen, and the call works by tapping.</p>`;
+  }
+  function openVoiceSheet() {
+    voiceOpen = true;
+    renderVoiceSheet();
+    const b = document.getElementById("voicePill");
+    if (b) b.setAttribute("aria-expanded", "true");
+    const f = document.querySelector("#voiceSheet .sheet-panel button");
+    if (f) f.focus();
+  }
+  function closeVoiceSheet(restore = true) {
+    voiceOpen = false;
+    const s = document.getElementById("voiceSheet");
+    if (s) s.remove();
+    const b = document.getElementById("voicePill");
+    if (b) { b.setAttribute("aria-expanded", "false"); if (restore) b.focus(); }
+  }
+  function renderVoiceSheet() {
+    let s = document.getElementById("voiceSheet");
+    if (!s) {
+      s = document.createElement("div");
+      s.id = "voiceSheet";
+      s.className = "sheet-wrap";
+      s.innerHTML = `<div class="sheet-scrim" data-vclose></div><div class="sheet-panel voice-sheet" role="dialog" aria-modal="true" aria-labelledby="voiceTitle" tabindex="-1">
+        <div class="row sb"><h2 id="voiceTitle">Sidekick's voice</h2><button class="icon-btn" data-vclose aria-label="Close">${ICON.x}</button></div>
+        <div id="voiceBody" class="stack" style="gap:10px"></div><button class="btn pri" id="voiceRetry">Try sound again</button></div>`;
+      document.body.appendChild(s);
+    }
+    const body = document.getElementById("voiceBody");
+    const html = voiceSheetHTML();
+    if (body.dataset.html !== html) { body.innerHTML = html; body.dataset.html = html; }
+  }
+  // "Try sound again" (and the sound bar): runs inside the tap, so the phone lets sound play. Unlock again, retry the
+  // natural voice where it should be on, and say the last line again.
+  function retrySound({ agentToo = true } = {}) {
+    unlocked = false;
+    unlockAudio();
+    Tts.off = false;
+    VS.playBlocked = false;
+    if (VS.phone === "blocked") VS.phone = null;
+    if (VS.backup && VS.backup !== "ok" && VS.backup !== "not-set-up") VS.backup = null;
+    VS.reported.clear();
+    const agentAgain = agentToo && view && view.me.planner && view.voiceAgent && agentPref && !agent && !agentStarting && !agentCapped && VS.setup && VS.setup.key && VS.setup.agent;
+    if (agentAgain) startAgent({ auto: false });
+    else if (VS.last) speakLine(VS.last.text, VS.last.persona, VS.last.builtIn);
+    renderVoice();
+  }
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#voicePill")) return void (voiceOpen ? closeVoiceSheet() : openVoiceSheet());
+    if (e.target.closest("[data-vclose]")) return void closeVoiceSheet();
+    if (e.target.closest("#voiceRetry")) { retrySound(); return; }
+    if (e.target.closest("#soundBar")) { retrySound({ agentToo: false }); }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!voiceOpen) return;
+    if (e.key === "Escape") { e.preventDefault(); closeVoiceSheet(); return; }
+    if (e.key === "Tab") {
+      const items = [...document.querySelectorAll("#voiceSheet .sheet-panel button")].filter((b) => b.offsetParent);
+      if (!items.length) return;
+      const [first, last] = [items[0], items[items.length - 1]];
+      if (!document.getElementById("voiceSheet").contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+
   // ---------- Sidekick's ElevenLabs voices (POST /api/sk/tts) ----------
   // Every spoken line plays in the persona's ElevenLabs voice (both study arms alike). Played through one audio
   // element that the first tap unlocks (iPhones). If the line can't come (no key, the cap, a failure, a slow
@@ -2560,13 +2748,8 @@
       try {
         let url = this.urls.get(key);
         if (!url) {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 4000);
-          const r = await fetch("/api/sk/tts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: line, persona }), signal: ctrl.signal }).finally(() => clearTimeout(timer));
-          if (!r.ok) { if (r.status === 429 || r.status === 503) this.off = true; return false; }
-          if (!/audio/.test(r.headers.get("content-type") || "")) return false;
-          url = URL.createObjectURL(await r.blob());
-          this.urls.set(key, url);
+          url = await this.fetch(line, persona);
+          if (!url) return false;
         }
         this.stop();
         if ("speechSynthesis" in window) speechSynthesis.cancel();
@@ -2578,25 +2761,65 @@
         this.done = finish;
         a.onended = finish;
         a.onerror = finish;
-        await a.play();
+        try { await a.play(); } catch (err) {
+          // The phone refused to play (iPhones until a tap): say so, and keep the line for "Tap to turn on sound"
+          if (err && err.name === "NotAllowedError") { VS.playBlocked = true; voiceReport("play", "NotAllowedError"); vset("backup", "ok"); renderVoice(); }
+          throw err;
+        }
         window.__skTts = (window.__skTts || 0) + 1; // lines played in the ElevenLabs voice (for the tests)
+        VS.playBlocked = false;
+        vset("backup", "ok");
         if (onstart) onstart();
         return true;
       } catch {
         return false;
       }
     },
+    // The line's audio as an object URL, or null with the reason recorded (8 s before giving up on ElevenLabs)
+    async fetch(line, persona) {
+      const key = `${persona}|${line}`;
+      if (this.urls.has(key)) return this.urls.get(key);
+      let r;
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        r = await fetch("/api/sk/tts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: line, persona }), signal: ctrl.signal }).finally(() => clearTimeout(timer));
+      } catch (err) {
+        vset("backup", err && err.name === "AbortError" ? "timeout" : "error");
+        return null;
+      }
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        const reason = d.reason || (r.status === 429 ? "limit" : r.status === 503 ? "no-key" : "error");
+        const st = reason === "no-key" || reason === "off" ? "not-set-up" : reason === "limit" || reason === "upstream-429" ? "limit" : /^upstream-(401|403|5xx)$/.test(reason) ? `refused:${reason.split("-")[1]}` : reason === "timeout" ? "timeout" : "error";
+        if (["not-set-up", "limit", "refused:401", "refused:403"].includes(st)) this.off = true; // it won't work until something changes
+        vset("backup", st);
+        return null;
+      }
+      if (!/audio/.test(r.headers.get("content-type") || "")) { vset("backup", "error"); return null; }
+      const url = URL.createObjectURL(await r.blob());
+      this.urls.set(key, url);
+      return url;
+    },
+    // Fetch a line ahead of time (Sidekick's opening line, as soon as the call is up), without playing it
+    prefetch(text, persona) { if (!this.off && text) this.fetch(Voice.speakable(text), persona).catch(() => {}); },
   };
   // One line: the ElevenLabs voice, or the phone's own voice when that can't play
   function speakLine(text, persona, builtIn, { onstart, onend } = {}) {
+    VS.last = { text, persona, builtIn }; // for "Try sound again" and "Tap to turn on sound"
     return Tts.play(text, persona, { onstart, onend }).then((ok) => {
-      if (ok || !("speechSynthesis" in window)) { if (!ok && onend) onend(); return ok; }
+      if (ok) return ok;
+      if (!("speechSynthesis" in window)) { vset("phone", "unavailable"); if (onend) onend(); return ok; }
       try {
         const u = Voice.say(text, builtIn);
         const tail = u.chunks[u.chunks.length - 1];
-        if (onstart) u.onstart = onstart;
-        if (onend) { tail.onend = onend; for (const c of u.chunks) c.onerror = onend; }
-      } catch { if (onend) onend(); }
+        let started = false;
+        u.onstart = () => { started = true; vset("phone", "ok"); if (onstart) onstart(); };
+        for (const c of u.chunks) c.onerror = (e) => { if (e && /not-allowed/.test(e.error || "")) vset("phone", "blocked"); if (onend) onend(); };
+        if (onend) tail.onend = onend;
+        // Some phones neither speak nor say why: nothing started in 3 s means it was blocked
+        setTimeout(() => { if (!started && !speechSynthesis.speaking && VS.phone !== "ok") vset("phone", "blocked"); }, 3000);
+      } catch { vset("phone", "unavailable"); if (onend) onend(); }
       return false;
     });
   }

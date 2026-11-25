@@ -784,6 +784,23 @@ async function endAgent(room, seconds) {
   room.nextMove = null;
   room.agentNotes = [];
 }
+// Sidekick's voice in the server log (Render): one line each, "[voice]" and a short room id. Never a key, a name,
+// a transcript or a location.
+const vlog = (room, msg) => console.log(`[voice] room=${String(room.id).slice(0, 4)} ${msg}`);
+async function voiceSetup(room) {
+  const st = await usage.status().catch(() => ({}));
+  const meter = (k) => { const m = st[k]; if (!m) return null; const left = Math.max(0, Math.min(m.limits.day - m.used.day, m.limits.month - m.used.month)); return { left, capped: m.off || left <= 0 }; };
+  return {
+    key: Boolean(process.env.ELEVENLABS_API_KEY),
+    agent: Boolean(AGENTS()[room.persona]),
+    off: process.env.SIDEKICK_ELEVENLABS_OFF === "1",
+    ttsOff: process.env.ELEVENLABS_TTS_OFF === "1",
+    tts: meter("elevenlabs_tts_chars"),
+    minutes: meter("elevenlabs_minutes"),
+    minutesPerCall: AGENT_MAX_MIN(),
+  };
+}
+
 // The agent's first words (its first message, so it speaks the moment it connects, with no AI wait)
 function openingSlot(room) {
   if (room.status !== "live" || room.picks || room.mode === "sidelines") return null;
@@ -1877,6 +1894,16 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       sendSignal(room, to.id, { from: person.id, kind: body.kind, data });
       return sendJSON(res, 200, { ok: true });
     }
+    // The phone's voice status: what's set up on the server (yes/no only, never a key) and what's left on the meters
+    if (action === "voice-setup") return sendJSON(res, 200, await voiceSetup(room));
+    // A phone says one of Sidekick's voices failed: one line in the server log (Render), nothing personal
+    if (action === "voice-report") {
+      const pathOk = ["agent", "backup", "phone", "play"].includes(body.path) ? body.path : "other";
+      const reason = String(body.reason || "unknown").replace(/[^\w:.-]/g, "").slice(0, 40) || "unknown";
+      const ua = String(body.ua || "").replace(/[^\w .-]/g, "").slice(0, 30) || "unknown";
+      vlog(room, `report path=${pathOk} reason=${reason} ua="${ua}" role=${person.role === "planner" ? "planner" : "friend"}`);
+      return sendJSON(res, 200, { ok: true });
+    }
     if (action === "ask") {
       acceptOffer(room);
       room.addressed = { pid: person.id, name: person.name, text: "Sidekick, what do you suggest?", at: now() };
@@ -1887,15 +1914,23 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     if (action === "voice-agent" && !parts[5]) {
       if (person.role !== "planner") return sendJSON(res, 403, { error: "Only the planner's phone runs Sidekick's voice." });
       const agentId = agentIdFor(room);
-      if (!agentId) return sendJSON(res, 400, { error: "Sidekick's voice agent isn't set up yet.", fallback: true });
+      const hasKey = Boolean(process.env.ELEVENLABS_API_KEY);
+      const hasAgent = Boolean(AGENTS()[room.persona]);
+      vlog(room, `agent requested key=${hasKey ? "yes" : "no"} agent=${hasAgent ? "yes" : "no"}${process.env.SIDEKICK_ELEVENLABS_OFF === "1" ? " off=yes" : ""}`);
+      if (!agentId) return sendJSON(res, 400, { error: "Sidekick's voice agent isn't set up yet.", fallback: true, reason: !hasKey ? "no-key" : !hasAgent ? "no-agent" : "off" });
       const minutes = AGENT_MAX_MIN();
       const ok = await usage.reserve("elevenlabs_minutes", minutes);
-      if (!ok.ok) return sendJSON(res, 429, { error: "Sidekick's voice has hit its usage limit for now. The built-in voice will carry on.", fallback: true, capped: true });
+      if (!ok.ok) {
+        vlog(room, `agent blocked by the meter (${ok.reason})`);
+        return sendJSON(res, 429, { error: "Sidekick's voice has hit its usage limit for now. The built-in voice will carry on.", fallback: true, capped: true, reason: "limit" });
+      }
       try {
         // Both ways in, fetched at once: a WebRTC token (what ElevenLabs' own page uses) and a websocket URL
         const q = `agent_id=${encodeURIComponent(agentId)}`;
-        const get = (p) => fetch(`https://api.elevenlabs.io/v1/convai/conversation/${p}?${q}`, { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY } }).then(async (r) => (r.ok ? r.json() : Promise.reject(new Error(`ElevenLabs refused the session (${r.status})`))));
+        const get = (p) => fetch(`${tts.base()}/v1/convai/conversation/${p}?${q}`, { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY } }).then(async (r) => (r.ok ? r.json() : Promise.reject(Object.assign(new Error(`ElevenLabs refused the session (${r.status})`), { upstream: r.status }))));
         const [tok, url] = await Promise.allSettled([AGENT_CONNECTION() === "websocket" ? Promise.reject(new Error("off")) : get("token"), get("get-signed-url")]);
+        const res1 = (x) => (x.status === "fulfilled" ? "ok" : x.reason && x.reason.upstream ? String(x.reason.upstream) : x.reason && x.reason.message === "off" ? "skipped" : "network");
+        vlog(room, `agent session token=${res1(tok)} signed_url=${res1(url)}`);
         if (tok.status !== "fulfilled" && url.status !== "fulfilled") throw url.reason;
         room.agent = { startedAt: now(), reserved: minutes, live: false };
         const slot = openingSlot(room);
@@ -1911,13 +1946,15 @@ async function handle(req, res, url, { readBody, sendJSON }) {
         await usage.release("elevenlabs_minutes", minutes);
         room.agent = null;
         const why = /fetch failed|abort|ENOTFOUND|ECONN/i.test(err.message) ? "Couldn't reach ElevenLabs" : err.message;
-        return sendJSON(res, 502, { error: `${why}. The built-in voice will carry on.`, fallback: true });
+        const up = err && err.upstream;
+        return sendJSON(res, 502, { error: `${why}. The built-in voice will carry on.`, fallback: true, reason: up ? (up >= 500 ? "upstream-5xx" : `upstream-${up}`) : "network" });
       }
     }
     // The session connected on the phone: from now on the agent leads and the engine stays quiet
     if (action === "voice-agent" && parts[5] === "live") {
       if (person.role !== "planner" || !room.agent) return sendJSON(res, 409, { error: "Sidekick's voice isn't starting." });
       room.agent.live = true;
+      vlog(room, "agent live");
       room.agentMode = true;
       room.agentNotes = [];
       room.nextMove = null;
@@ -1933,6 +1970,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     }
     if (action === "voice-agent" && parts[5] === "end") {
       const wasLive = room.agentMode;
+      if (room.agent) vlog(room, `agent ended secs=${Math.round(Number(body.seconds) > 0 ? Number(body.seconds) : (now() - room.agent.startedAt) / 1000)}${wasLive ? "" : " (never went live)"}`);
       // A page that lost track of its session (a reload) sends 0: count the time since it went live instead
       await endAgent(room, Number(body.seconds) > 0 || !wasLive ? body.seconds : (now() - room.agent.startedAt) / 1000);
       // Back to the built-in voice: let it say the open question out loud, since only the agent heard it
