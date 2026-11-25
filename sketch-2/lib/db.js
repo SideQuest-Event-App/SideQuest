@@ -275,6 +275,14 @@ function saveNow() {
   return done;
 }
 
+// An account deleted by its owner: gone from memory (the caller removes it from db.data) and from the accounts table,
+// written straight away so a restart can't bring it back
+async function forget(id) {
+  savedAccounts.delete(id);
+  if (useSupabase && accountsTable) await sb(`sketch2_accounts?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+  await saveNow();
+}
+
 async function reset() {
   data = seed(await seedEvents());
   replaceEvents = true;
@@ -292,6 +300,7 @@ module.exports = {
   save,
   saveNow,
   reset,
+  forget,
   fetchAccount,
   refresh,
   FRIENDS,

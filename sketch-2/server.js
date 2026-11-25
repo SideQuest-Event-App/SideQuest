@@ -35,6 +35,7 @@ const discover = require("./lib/search/discover"); // feed order (variety, seen 
 const freshness = require("./lib/freshness"); // the daily import's 36-hour staleness warning
 const weather = require("./lib/search/weather"); // Open-Meteo, cached hourly, skipped when unreachable
 const rank = require("./lib/search/rank");
+const tabs = require("./lib/tabs"); // Squads, the Sidequests wallet, Profile, Stats and Taste (designs TB2, TB3 D1)
 
 const PORT = process.env.PORT || 3001; // Sketch 1 uses 3000, so both can run at once
 
@@ -219,7 +220,7 @@ function tasteProfile(user) {
 function feedKey(user) {
   const { pool } = applyLimits({ budget: user.budget, origins: user.origin ? [user.origin] : [], maxMinutes: user.maxMinutes });
   const w = taste.weights(user);
-  const key = JSON.stringify([tasteProfile(user), user.maxMinutes, pool.map((e) => e.id), Object.entries(w.vibes).map(([v, x]) => [v, Math.round(x)]), user.areas || [], user.whenOut || [], Math.floor(now().getTime() / 3600000)]);
+  const key = JSON.stringify([tasteProfile(user), user.maxMinutes, pool.map((e) => e.id), Object.entries(w.vibes).map(([v, x]) => [v, Math.round(x)]), taste.prefsKey(user), user.areas || [], user.whenOut || [], Math.floor(now().getTime() / 3600000)]);
   return crypto.createHash("md5").update(key).digest("hex").slice(0, 12);
 }
 
@@ -301,7 +302,7 @@ function view(userId, hostId) {
     friends: db.FRIENDS,
     dataHealth: discover.dataHealth(d.eventsImportedAt, now().getTime()), // "data is more than 8 days old" on the admin side
     eventsFeed: eventsFeed(), // where the events came from (table, Storage file or seed) and the 36-hour daily-import check
-    user: user && { ...user, shown: undefined, taste: taste.summary(user), feedKey: feedKey(user), friendList: friendList(user), highlights: highlights(user), friendRequests: requestsFor(user), pendingFriends: sentTo(user).map(person).filter(Boolean) },
+    user: user && { ...user, shown: undefined, tasteUndo: undefined, tasteFresh: undefined, ...tabs.view(user), taste: taste.summary(user), feedKey: feedKey(user), friendList: friendList(user), highlights: highlights(user), friendRequests: requestsFor(user), pendingFriends: sentTo(user).map(person).filter(Boolean) },
     party: user && { ...d.parties[user.id], blendKey: blendKey(user) },
     host,
     organizers: organizerList(),
@@ -763,6 +764,7 @@ A.attended = (ctx, { eventId, attended }) => {
   const l = u.log[Number(eventId)];
   if (!l) throw new Error("This quest isn't in your log.");
   l.status = attended ? "went" : "missed";
+  if (attended) tabs.went(u, findEvent(eventId)); // going, confirmed, counts for taste (+3) even without a rating
   if (!attended) db.data.logs.attended.push({ time: new Date().toISOString(), eventId: Number(eventId), attended: false, userId: u.id });
 };
 A.rate = (ctx, { eventId, stars, tags, details, with: withWho, photos }) => {
@@ -779,12 +781,11 @@ A.rate = (ctx, { eventId, stars, tags, details, with: withWho, photos }) => {
   l.with = (Array.isArray(withWho) ? withWho : []).map((x) => clean(x, 30)).filter(Boolean).slice(0, 12);
   l.photos = (Array.isArray(photos) ? photos : []).filter((x) => typeof x === "string" && /^data:image\/jpeg;base64,/.test(x) && x.length < 300000).slice(0, 3);
   db.data.logs.attended.push({ time: new Date().toISOString(), eventId: e.id, attended: true, rating: n, tags: l.tags, userId: u.id });
-  if (n >= 4) taste.record(u, "love", e);
-  else if (n <= 2) taste.record(u, "dislike", e);
-  // A great night teaches the taste avatar
-  const learned = n >= 4 ? (e.vibes || []).filter((v) => !u.vibes.includes(v)) : [];
-  u.vibes.push(...learned);
-  return { learned };
+  // A great night teaches the taste avatar through the fading "love" signal (+4) only. It used to also push the
+  // event's vibes into u.vibes, the sign-up picks, which never fade: that counted it twice and labelled those vibes
+  // "From sign-up" on the Taste page (tabs.migrate takes them back out of older accounts).
+  tabs.rated(u, e, n);
+  return { learned: [] };
 };
 A.eventChat = (ctx, { eventId, text, channel }) => {
   const u = needUser(ctx);
@@ -800,6 +801,7 @@ A.checkIn = (ctx, { eventId, how }) => {
   if (!u.log[e.id]) A.accept(ctx, { eventId: e.id });
   u.log[e.id].checkedIn = u.log[e.id].checkedIn || now().toISOString();
   u.log[e.id].checkInBy = how === "qr" ? "qr" : "location";
+  tabs.went(u, e);
 };
 
 // --- host registration ---
@@ -1342,6 +1344,9 @@ A.flagInfo = (ctx, { eventId, field, note }) => {
   return { flags: e.flags.length };
 };
 
+// Squads, the wallet, Profile settings, Stats and Taste (lib/tabs)
+tabs.register(A, { db, needUser, findEvent, isOver, isDemo, person, friendKeys, clean, now: () => now().getTime(), poolFor: (u) => applyLimits({ budget: u.budget, origins: u.origin ? [u.origin] : [], maxMinutes: u.maxMinutes }).pool });
+
 A.reset = async () => {
   await db.reset();
   return { reset: true };
@@ -1882,7 +1887,8 @@ const server = http.createServer(async (req, res) => {
       const fn = Object.prototype.hasOwnProperty.call(A, type) && A[type];
       if (!fn) return sendJSON(res, 400, { error: `Unknown action: ${type}` });
       const user = db.data.users[userId] || null;
-      const ctx = { user, party: user && db.data.parties[user.id], host: db.data.hosts[hostId] || null };
+      // args.squad picks which squad a party action (vote, chat, lock in…) is for; the first squad otherwise
+      const ctx = { user, party: user && ((args && args.squad && tabs.squads.find(db, user, String(args.squad))) || db.data.parties[user.id]), host: db.data.hosts[hostId] || null };
       let result;
       try {
         result = (await fn(ctx, args || {})) || {};
@@ -1967,6 +1973,7 @@ const server = http.createServer(async (req, res) => {
       const seen = screen === "quest" && findEvent(eventId);
       if (seen && !(db.data.hosts[hostId] && seen.organizer.name === db.data.hosts[hostId].name)) { // a host looking at their own listing isn't a view
         (db.data.logs.views = db.data.logs.views || []).push({ time: now().toISOString(), eventId: Number(eventId), userId: userId || null });
+        tabs.opened(db.data.users[userId], seen); // opening the details is a small taste signal (+0.5)
         db.save();
       }
       res.writeHead(204);
