@@ -84,7 +84,7 @@ For each item, list every event it announces with a specific date. Rules:
 - An item can announce several events (a monthly lineup, a tour stop list); list each one.
 - If the poster and the caption disagree on a detail, trust the poster.
 - Work out relative dates ("this Friday", "tomorrow") from the item's postedAt date (or today if it has none). A date with no year is the next one on or after that date.
-- No time given: use the venue's usual start for that kind of event if it's clear, else 20:00.
+- No time given: use the venue's usual start for that kind of event if it's clear, else 20:00, and set "timeGiven": false. When the poster or caption states the start time, "timeGiven": true.
 - Venue: the name on the poster or caption; else the account's homeVenue; else empty. address: the street address if one is shown, else empty.
 - Recurring events ("every Wednesday trivia") count: list their dates for the 4 weeks after the post date.
 - Skip items that only promote food, drinks, merch, hotel stays, contests, hiring or past events, and anything online-only.
@@ -94,7 +94,7 @@ For each item, list every event it announces with a specific date. Rules:
 - description: one or two plain sentences from what's written (lineup, what to expect), no hashtags or emoji.
 - posterText: the legible text on the item's images, in reading order, at most 400 characters; empty if the images have no text.
 
-Reply with JSON only: {"items":[{"id":"<item id>","posterText":"","events":[{"title":"","start":"YYYY-MM-DDTHH:MM","end":"YYYY-MM-DDTHH:MM or null","venue":"","address":"","price":null,"organizer":"","ticketUrl":"","description":""}]}]}
+Reply with JSON only: {"items":[{"id":"<item id>","posterText":"","events":[{"title":"","start":"YYYY-MM-DDTHH:MM","timeGiven":true,"end":"YYYY-MM-DDTHH:MM or null","venue":"","address":"","price":null,"organizer":"","ticketUrl":"","description":""}]}]}
 Times are Toronto local time. Include every item id, with "events": [] when it announces none.
 
 Items:

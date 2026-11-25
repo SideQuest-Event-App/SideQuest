@@ -25,7 +25,7 @@ const BRANCHES = "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/f5aa9b
 const ADULTS = /\badults?\b/i;
 const OUTINGS = /Culture|Arts|Crafts|Hobbies|Games|Book Clubs|Writ|Film|Music|Science|Garden|Cook|History|Author|Performance|Concert|Lecture|Talk/i;
 const NOT_OUTINGS = /Computer Basics|Conversation Circles|Settlement|Housing|Recovery|WRAP|Tax|Legal|Employment|Job|ESL|Citizenship|Technology Help/i;
-const PER_PROGRAM = 4; // dates of one recurring program at one branch
+const PER_PROGRAM = 2; // dates of one recurring program at one branch
 
 // First field present under any of these names
 const pick = (r, ...names) => {

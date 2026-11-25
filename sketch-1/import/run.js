@@ -73,6 +73,12 @@ const NOT_IMPORTED = {
 };
 const SHRUNK = 0.5; // under half of last run's events counts as broken
 const MIN_FOR_CHECK = 20; // sources this small vary too much week to week to judge
+// A source that skips itself (off on purpose, Eventbrite blocked from GitHub) is only a warning, except these
+const REQUIRED = new Set(["Ticketmaster"]);
+const OFF_ON_PURPOSE = new Set(["Venue calendars", "Ontario open data"]);
+// Problems that fail the run once everything is saved (so GitHub emails), and warnings that only show in the summary
+const alerts = [];
+const warnings = [];
 
 async function previousImport() {
   try {
@@ -102,8 +108,9 @@ async function previousImport() {
       let events = [];
       let note = null;
       let fetched = 0;
+      let threw = false;
       try {
-        const raw = await fn({ start, end, max, log, previous: prevEvents });
+        const raw = await fn({ start, end, max, log, previous: prevEvents, alert: (m) => alerts.push(`${name}: ${m}`), warn: (m) => warnings.push(`${name}: ${m}`) });
         if (Array.isArray(raw)) {
           fetched = raw.length;
           events = raw.map(toEvent).filter((e) => e && inWindow(e) && e.venue.lat > 43.35 && e.venue.lat < 44.15 && e.venue.lng > -80.1 && e.venue.lng < -78.8);
@@ -116,11 +123,16 @@ async function previousImport() {
         } else note = raw.skipped;
       } catch (err) {
         note = (err && err.message) || String(err);
+        threw = true;
         log(`${name} failed: ${note}`);
       }
       // A source that broke this week keeps last week's events rather than vanishing from the app
       const before = prevOf(name);
       const shrank = before.length >= MIN_FOR_CHECK && events.length < before.length * SHRUNK;
+      if (threw) alerts.push(`${name}: failed (${note})`);
+      else if (note && REQUIRED.has(name)) alerts.push(`${name}: skipped (${note})`);
+      else if (note && !OFF_ON_PURPOSE.has(name)) warnings.push(`${name}: skipped (${note})`);
+      else if (shrank) alerts.push(`${name}: only ${events.length} events, under half of last run's ${before.length}`);
       if ((note || shrank) && before.length) {
         report[name] = { fetched, kept: before.length, note: `kept last run's ${before.length} events: ${note || `only ${events.length} this time`}` };
         found[name] = before;
@@ -146,6 +158,7 @@ async function previousImport() {
   const events = deduped.map((e) => tags.apply(retag(e), saved)); // retag: last run's kept events get today's keyword rules
   if (!events.length) {
     log("\nNo events imported; leaving the last import as it was.");
+    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Event import failed\n\nNo events imported; the last import was left as it was.\n\n${alerts.map((a) => `- ${a}`).join("\n")}\n`);
     process.exit(1);
   }
 
@@ -183,4 +196,12 @@ async function previousImport() {
   // In GitHub Actions, the same summary shows on the run's page
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Event import\n\n\`\`\`\n${lines.join("\n")}\n\`\`\`\n`);
   if (!process.env.UPLOAD) log("\nRestart `node server.js` to load them (or run with UPLOAD=1 to send them to Supabase).");
+  // Everything is saved by now. Problems fail the run, so GitHub marks it failed and emails; warnings don't
+  if (warnings.length) log(`\nWarnings:\n${warnings.map((w) => `  ${w}`).join("\n")}`);
+  if (alerts.length) log(`\nProblems (this run is marked failed):\n${alerts.map((a) => `  ${a}`).join("\n")}`);
+  if (process.env.GITHUB_STEP_SUMMARY && (alerts.length || warnings.length)) {
+    const md = [alerts.length && `#### Problems\n\n${alerts.map((a) => `- ${a}`).join("\n")}`, warnings.length && `#### Warnings\n\n${warnings.map((w) => `- ${w}`).join("\n")}`].filter(Boolean).join("\n\n");
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${md}\n`);
+  }
+  if (alerts.length) process.exitCode = 1;
 })();

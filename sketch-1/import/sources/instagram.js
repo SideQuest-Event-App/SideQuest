@@ -59,6 +59,9 @@ const IMAGES_PER_POST = 2; // a carousel's first slides carry the poster and the
 const MAX_CALLS = Number(process.env.IG_MAX_CALLS || 40); // AI calls per run, at most
 const PAUSE_AFTER = 20; // posts read with no event in them before an account is paused
 const STALE_DAYS = 8; // the scheduled import warns when the Instagram events are older than this
+const RECHECK_DAYS = 30; // a paused account gets its newest posts read again this often (by hand runs)
+const RECHECK_POSTS = 3; // how many of its newest unread posts
+const PAUSED_FILE = path.join(__dirname, "..", "instagram-paused.json"); // handle -> when it was last rechecked
 const BATCH_POSTS = 12; // per AI call: up to 12 posts or 12 images, whichever comes first
 const BATCH_IMAGES = 12;
 const PARALLEL = 3;
@@ -310,6 +313,17 @@ async function buildInstagram({ start, end, log }) {
       posts.push({ id: m.id, handle, paused: skip.includes(handle), account: `${a.name} (@${handle})`, homeVenue: acct.venue, postedAt: m.timestamp, caption: (m.caption || "").slice(0, 1500), url: m.permalink, media: m });
     }
   }
+  // Once a month, a paused account's newest unread posts are read anyway; an event among them unpauses it
+  const checked = readJSON(PAUSED_FILE, {});
+  const due = skip.filter((h) => !checked[h] || Date.now() - Date.parse(checked[h]) > RECHECK_DAYS * 86400000);
+  for (const h of due) {
+    const newest = posts.filter((p) => p.handle === h && !done[p.id]).sort((a, b) => Date.parse(b.postedAt) - Date.parse(a.postedAt)).slice(0, RECHECK_POSTS);
+    for (const p of newest) p.paused = false;
+    checked[h] = new Date().toISOString();
+  }
+  for (const h of Object.keys(checked)) if (!skip.includes(h)) delete checked[h]; // unpaused or dropped from the list
+  if (due.length) log(`  instagram: rechecking ${due.length} paused accounts (newest ${RECHECK_POSTS} unread posts each): ${due.map((h) => `@${h}`).join(", ")}`);
+  fs.writeFileSync(PAUSED_FILE, JSON.stringify(checked, null, 2) + "\n");
   const toRead = posts.filter((p) => !p.paused && !done[p.id]);
   await downloadImages(toRead, log);
   done = await extract(posts.filter((p) => !p.paused && (p.caption || imagesOf(p.id).length)), log);
@@ -344,12 +358,18 @@ async function buildInstagram({ start, end, log }) {
 async function toEvents({ posts, readings, accounts, raw, known, start, end, log, geocodeNew = true }) {
   const out = [];
   let unplaced = 0;
+  let noTime = 0;
   for (const p of posts) {
     const acct = accounts[p.handle];
     const reading = readings[p.id];
     for (const [i, ev] of ((reading && reading.events) || []).entries()) {
       const startsAt = torontoISO(ev.start);
       if (!ev.title || !startsAt || Date.parse(startsAt) < start.getTime() || Date.parse(startsAt) > end.getTime()) continue;
+      // Minimum bar: a stated start time (the caption rules mark a guessed one timeGuessed, the AI timeGiven: false)
+      if (ev.timeGuessed || ev.timeGiven === false) {
+        noTime++;
+        continue;
+      }
       // The account's own venue, another venue we already know, or one the poster gives an address for
       const home = acct.venue && (!ev.venue || sameVenue(ev.venue, acct.venue)) ? { name: acct.venue, address: acct.address, lat: acct.lat, lng: acct.lng } : null;
       let venue = home || known.get(norm(ev.venue));
@@ -381,6 +401,7 @@ async function toEvents({ posts, readings, accounts, raw, known, start, end, log
     }
   }
   if (unplaced) log(`  instagram: ${unplaced} events left out (no venue or address we can place on the map)`);
+  if (noTime) log(`  instagram: ${noTime} events left out (no start time stated)`);
   return out;
 }
 // A known venue (an account's own, or one from the last import) named in a caption, longest name first
@@ -468,7 +489,7 @@ async function autoInstagram({ start, end, log, previous = [] }) {
 }
 
 // The scheduled import: automated with the Graph API secrets, else the events the last run saved (no AI either way)
-async function fetchInstagram({ start, end, max, log, previous }) {
+async function fetchInstagram({ start, end, max, log, previous, alert = () => {}, warn = () => {} }) {
   const inWindow = (e) => Date.parse(e.startsAt) >= start.getTime() && Date.parse(e.startsAt) <= end.getTime();
   if (process.env.INSTAGRAM_USER_ID && process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_AUTO !== "off") {
     try {
@@ -476,8 +497,12 @@ async function fetchInstagram({ start, end, max, log, previous }) {
       return file.events.filter(inWindow).slice(0, max);
     } catch (err) {
       log(`  instagram: automated read failed (${redact(err.message).slice(0, 160)}); using the last saved events`);
+      alert(`automated read failed, so it used the last saved events. The access token may have expired. (${redact(err.message).slice(0, 160)})`);
     }
-  } else log("  instagram: no INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN (GitHub secrets), so using the last saved events; setup: sketch-1/import/README-instagram.md");
+  } else {
+    if (process.env.GITHUB_ACTIONS) alert("no INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN secrets, so it used the last saved events");
+    log("  instagram: no INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN (GitHub secrets), so using the last saved events; setup: sketch-1/import/README-instagram.md");
+  }
   let file = null;
   try {
     file = await store.get("instagram-events.json");
@@ -487,7 +512,10 @@ async function fetchInstagram({ start, end, max, log, previous }) {
   file = file || readJSON(EVENTS, null);
   if (!file) return { skipped: "No Instagram events saved yet: add the INSTAGRAM_USER_ID and INSTAGRAM_ACCESS_TOKEN secrets (sketch-1/import/README-instagram.md), or run `node import/instagram.js`" };
   const days = (Date.now() - Date.parse(file.builtAt)) / 86400000;
-  if (days > STALE_DAYS) log(`  instagram: the saved events are ${Math.floor(days)} days old; run \`node import/instagram.js\` to read new posts`);
+  if (days > STALE_DAYS) {
+    log(`  instagram: the saved events are ${Math.floor(days)} days old; run \`node import/instagram.js\` to read new posts`);
+    warn(`the saved events are ${Math.floor(days)} days old; run \`node import/instagram.js\` to read new posts`);
+  }
   return file.events.filter(inWindow).slice(0, max);
 }
 
