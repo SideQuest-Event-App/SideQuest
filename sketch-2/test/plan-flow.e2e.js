@@ -287,9 +287,12 @@ async function until(fn, ms, what) {
       assert.deepStrictEqual(v.expected.map((x) => x.name), ["Ravi"]);
       assert.strictEqual(v.me.name, "Asia");
       assert.strictEqual(v.voice.slot, "friend", "the intro's persona");
-      await page.waitForSelector("#invitedLine");
-      assert(/Ravi invited/.test(await page.textContent("#invitedLine")));
-      await page.waitForSelector(".invite #copy"); // the existing call screen, with its invite card
+      // The call screen: "+1" on the people row for Ravi, and the People sheet (opened once by itself while the
+      // planner is alone) lists him as invited, with the link and Copy
+      await page.waitForSelector("#peopleBtn .plus-n");
+      assert.strictEqual((await page.textContent("#peopleBtn .plus-n")).trim(), "+1");
+      await page.waitForSelector("#sheet #copy");
+      assert(/Ravi\s*invited/.test(await page.textContent("#sheet .pp-list")));
       await shot(page, "375-call.png");
       await callPage.ctx.close();
     });

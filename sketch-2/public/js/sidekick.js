@@ -24,6 +24,8 @@
   const studyApi = (action, body) => api(`/api/sk/study/${encodeURIComponent(STUDY)}/${action}`, { t: store.get(`study:${STUDY}:tid`), ...body });
   const ICON = {
     mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+    down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
+    chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     micOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 11.5 5.4M19 11c0 .7-.1 1.4-.3 2M12 18v3M4 4l16 16"/></svg>',
     send: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
@@ -1049,7 +1051,12 @@
       phase = next;
       landed = phase === "picks" && Boolean(lastThinking); // the steps give way to the cards
       app.innerHTML = `<div id="top"></div><div id="say"></div><div id="body" class="stack"></div><div id="ticks" class="stack"></div><p class="sr" id="thinkLive" aria-live="polite"></p><div class="dock" id="dock"></div>`;
-      callNav(true);
+      // A live call is full screen (the app's tabs come back when it ends); the voice study keeps its own layout
+      const live = phase === "call" || phase === "picks";
+      callNav(!live);
+      document.body.classList.toggle("sk-live", live && !STUDY);
+      if (!live && chatOpen) closeChat(false);
+      if (!live && sheetOpen) closeSheet(false);
       watchDock();
       renderDock();
     }
@@ -1062,6 +1069,13 @@
     if (phase === "picks") renderPicks();
     if (phase === "locked" || phase === "ended") renderDone();
     if (sheetOpen) renderSheet();
+    if (chatOpen) renderChat();
+    renderMin();
+    // Right after the planner starts alone, the People sheet (with the invite link) opens once by itself
+    if (phase === "call" && !STUDY && view.me.planner && view.people.length < 2 && !sheetOpen && !orbOpen && !minimized && !store.get(`sk:people:${roomId}`)) {
+      store.set(`sk:people:${roomId}`, true);
+      openSheet("peopleBtn");
+    }
   }
 
   // The dock is fixed to the bottom; the page gets padding of the dock's height so nothing hides under it
@@ -1093,7 +1107,19 @@
     // The people picked in the Plan tab who haven't joined yet
     const waiting = (view.expected || []).filter((x) => !x.joined && !x.link).map((x) => x.name);
     const invited = waiting.length ? `<p class="small" id="invitedLine">${view.people.length} checked in · ${esc(waiting.length > 3 ? `${waiting.slice(0, 3).join(", ")} and ${waiting.length - 3} more` : waiting.join(", "))} invited</p>` : "";
-    document.getElementById("top").innerHTML = `<div class="row sb"><div class="row avs">${people}</div><div class="row schips">${pill}${modeTag}</div></div>${invited}`;
+    if (STUDY) { document.getElementById("top").innerHTML = `<div class="row sb"><div class="row avs">${people}</div><div class="row schips">${pill}${modeTag}</div></div>${invited}`; return; }
+    // ⌄ minimizes; the people row (with "+N" for invited people who haven't joined) opens the People sheet
+    const plus = waiting.length ? `<span class="plus-n" aria-hidden="true">+${waiting.length}</span>` : "";
+    const rowLabel = `People: ${view.people.length} in the call${waiting.length ? `, ${waiting.length} invited` : ""}. Invite friends`;
+    const html = `<div class="ctop"><button class="icon-btn min-btn" id="minBtn" aria-label="Minimize call">${ICON.down}</button>
+      <button class="people-row" id="peopleBtn" aria-haspopup="dialog" aria-expanded="${sheetOpen}" aria-controls="sheet" aria-label="${esc(rowLabel)}"><span class="row avs" aria-hidden="true">${people.replace(/ role="img" aria-label="[^"]*"/g, "")}</span>${plus}</button>
+      <div class="row schips">${pill}${modeTag}</div></div>`;
+    const top = document.getElementById("top");
+    if (top.dataset.html === html) return;
+    const focused = document.activeElement && top.contains(document.activeElement) ? document.activeElement.id : null;
+    top.innerHTML = html;
+    top.dataset.html = html;
+    if (focused) { const again = document.getElementById(focused); if (again) again.focus(); }
   }
 
   function boardHead(extra = "") {
@@ -1165,34 +1191,170 @@
     return `<div class="priv invite"><p style="font-weight:600">Invite your crew</p><p class="small">${esc(to)}Anyone with the link can join from a browser. No app or account needed.</p>${shareHTML()}${practice}</div>`;
   }
 
+  // The People sheet: who's in the call and who's invited, then the invite link and the share buttons. A dialog
+  // like the orb sheet: focus kept inside, Escape closes it, focus goes back to what opened it.
   let sheetOpen = false;
-  function openSheet() {
+  let sheetFrom = null;
+  function openSheet(from) {
     sheetOpen = true;
+    sheetFrom = from || (document.activeElement && document.activeElement.id) || null;
     renderSheet();
+    const pb = document.getElementById("peopleBtn");
+    if (pb) pb.setAttribute("aria-expanded", "true");
     const first = document.querySelector("#sheet .sheet-panel button, #sheet .sheet-panel a");
     (first || document.getElementById("sheet")).focus();
   }
-  function closeSheet() {
+  function closeSheet(restore = true) {
     sheetOpen = false;
     const s = document.getElementById("sheet");
     if (s) s.remove();
-    const back = document.getElementById("invitePill") || document.getElementById("orbBtn");
+    const pb = document.getElementById("peopleBtn");
+    if (pb) pb.setAttribute("aria-expanded", "false");
+    if (!restore) return;
+    const back = (sheetFrom && document.getElementById(sheetFrom)) || document.getElementById("peopleBtn") || document.getElementById("orbBtn");
     if (back) back.focus();
+  }
+  function peopleListHTML() {
+    if (!view) return "";
+    const inCall = view.people.map((p) => `<li class="pp"><span class="av ${colour(p.id)}" aria-hidden="true">${esc(p.initial)}</span><span class="pp-n">${esc(p.name)}${p.id === view.me.id ? " (you)" : ""}</span><span class="pp-s on">${p.mode === "form" ? "answered by form" : "in the call"}</span></li>`);
+    const invited = (view.expected || []).filter((x) => !x.joined && !x.link).map((x) => `<li class="pp"><span class="av xs unk" aria-hidden="true">${esc(String(x.name || "?")[0])}</span><span class="pp-n">${esc(x.name)}</span><span class="pp-s">invited</span></li>`);
+    return `<ul class="pp-list" aria-label="People">${[...inCall, ...invited].join("")}</ul>`;
   }
   function renderSheet() {
     let s = document.getElementById("sheet");
-    const fresh = !s;
-    if (fresh) {
+    if (!s) {
       s = document.createElement("div");
       s.id = "sheet";
       s.className = "sheet-wrap";
+      s.innerHTML = `<div class="sheet-scrim" data-close></div><div class="sheet-panel people-sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" tabindex="-1">
+        <div class="row sb"><h2 id="sheetTitle">People</h2><button class="icon-btn" data-close aria-label="Close">${ICON.x}</button></div>
+        <div id="ppBody"></div><p class="small">Anyone with the link can join from a browser. No app or account needed.</p>${shareHTML()}</div>`;
       document.body.appendChild(s);
     }
-    if (!fresh) return; // the link doesn't change; don't steal focus by redrawing
-    s.innerHTML = `<div class="sheet-scrim" data-close></div><div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" tabindex="-1">
-      <div class="row sb"><h2 id="sheetTitle">Invite to the call</h2><button class="icon-btn" data-close aria-label="Close">${ICON.x}</button></div>
-      <p class="small">Anyone with the link can join from a browser. No app or account needed.</p>${shareHTML()}</div>`;
+    const body = document.getElementById("ppBody");
+    const html = peopleListHTML();
+    if (body.dataset.html !== html) { body.innerHTML = html; body.dataset.html = html; } // the list only; the link and buttons stay put under a finger
   }
+
+  // The chat sheet: everything said and typed on the call, Sidekick included, and "Type a message…". It scrolls
+  // inside itself; the main screen keeps only Sidekick's latest line. An unread dot sits on the bar's chat button.
+  let chatOpen = false;
+  let chatSeen = Number(store.get(`sk:chatSeen:${roomId}`)) || 0;
+  const chatItems = () => (view && view.chat ? view.chat : []).filter((m) => m.sk || m.kind === "typed" || capsShown);
+  const unread = () => chatItems().some((m) => m.at > chatSeen && m.pid !== (view && view.me.id));
+  function openChat() {
+    chatOpen = true;
+    renderChat();
+    const b = document.getElementById("chatBtn");
+    if (b) b.setAttribute("aria-expanded", "true");
+    const i = document.getElementById("chatLine");
+    if (i) i.focus();
+  }
+  function closeChat(restore = true) {
+    chatOpen = false;
+    const s = document.getElementById("chatSheet");
+    if (s) s.remove();
+    const b = document.getElementById("chatBtn");
+    if (b) { b.setAttribute("aria-expanded", "false"); if (restore) b.focus(); }
+  }
+  function renderChat() {
+    if (!view) return;
+    let s = document.getElementById("chatSheet");
+    if (!s) {
+      s = document.createElement("div");
+      s.id = "chatSheet";
+      s.className = "sheet-wrap";
+      s.innerHTML = `<div class="sheet-scrim" data-chatclose></div><div class="sheet-panel chat-sheet" role="dialog" aria-modal="true" aria-labelledby="chatTitle" tabindex="-1">
+        <div class="row sb"><h2 id="chatTitle">Chat</h2><button class="icon-btn" data-chatclose aria-label="Close">${ICON.x}</button></div>
+        <div id="chatBody" class="chat-body"></div>
+        <form class="compose" id="chatForm"><label class="sr" for="chatLine">Message the call</label><input class="in" id="chatLine" autocomplete="off" placeholder="Type a message…" maxlength="300"><button class="send" aria-label="Send">${ICON.send}</button></form></div>`;
+      document.body.appendChild(s);
+    }
+    const body = document.getElementById("chatBody");
+    const items = chatItems();
+    const html = chatHTML(items);
+    if (body.dataset.html !== html) {
+      body.innerHTML = html;
+      body.dataset.html = html;
+      const th = body.querySelector(".thread");
+      if (th) th.scrollTop = th.scrollHeight;
+    }
+    const newest = Math.max(chatSeen, ...items.map((m) => m.at || 0));
+    if (newest !== chatSeen) { chatSeen = newest; store.set(`sk:chatSeen:${roomId}`, chatSeen); }
+    const dot = document.querySelector("#chatBtn .udot");
+    if (dot) dot.remove();
+  }
+
+  // Minimize: back to the app without leaving the call. This page stays mounted (the mic, Sidekick and the voice
+  // agent keep running) and the app opens over it in a frame, under a slim "On call · Return" bar.
+  let minimized = false;
+  function appHome() {
+    let demo = false;
+    try { demo = sessionStorage.getItem("sq2.demo") === "1"; } catch {}
+    return userId() && !demo ? "/sk" : "/";
+  }
+  function minimize() {
+    if (minimized) return;
+    if (orbOpen) closeOrb(false);
+    if (sheetOpen) closeSheet(false);
+    if (chatOpen) closeChat(false);
+    minimized = true;
+    const home = appHome();
+    if (home === "/") ss.set("sq2.screen", "discover");
+    const w = document.createElement("div");
+    w.id = "minWrap";
+    w.className = "min-wrap";
+    w.innerHTML = `<div class="oncall" role="region" aria-label="Ongoing call"><span class="orb sm live" aria-hidden="true"></span><span class="oc-t" id="onCallText"></span><button class="btn sm pri" id="returnCall">Return</button></div><iframe id="appFrame" title="SideQuest" src="${home}"></iframe>`;
+    document.body.appendChild(w);
+    app.setAttribute("inert", "");
+    app.setAttribute("aria-hidden", "true");
+    renderMin();
+    document.getElementById("returnCall").focus();
+  }
+  function restore() {
+    if (!minimized) return;
+    minimized = false;
+    const w = document.getElementById("minWrap");
+    if (w) w.remove();
+    app.removeAttribute("inert");
+    app.removeAttribute("aria-hidden");
+    const b = document.getElementById("minBtn");
+    if (b) b.focus();
+  }
+  function renderMin() {
+    if (!minimized) return;
+    // The bar goes when the call ends: stay where they are in the app, as a normal page
+    if (!view || view.status !== "live") {
+      const f = document.getElementById("appFrame");
+      let to = "/";
+      try { to = f.contentWindow.location.pathname + f.contentWindow.location.search; } catch {}
+      leaveQuietly();
+      location.assign(to);
+      return;
+    }
+    const t = document.getElementById("onCallText");
+    const text = `On call · ${view.crew}`;
+    if (t && t.textContent !== text) t.textContent = text;
+  }
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#minBtn")) return void minimize();
+    if (e.target.closest("#returnCall")) return void restore();
+    if (e.target.closest("#peopleBtn")) return void openSheet("peopleBtn");
+    if (e.target.closest("#chatBtn")) return void (chatOpen ? closeChat() : openChat());
+    if (e.target.closest("[data-chatclose]")) return void closeChat();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!chatOpen) return;
+    if (e.key === "Escape") { e.preventDefault(); closeChat(); return; }
+    if (e.key === "Tab") {
+      const items = [...document.querySelectorAll("#chatSheet .sheet-panel button, #chatSheet .sheet-panel input")].filter((b) => b.offsetParent);
+      if (!items.length) return;
+      const [first, last] = [items[0], items[items.length - 1]];
+      if (!document.getElementById("chatSheet").contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
   document.addEventListener("keydown", (e) => {
     if (!orbOpen || sheetOpen) return;
     if (e.key === "Escape") { e.preventDefault(); closeOrb(); return; }
@@ -1209,10 +1371,11 @@
     if (!sheetOpen) return;
     if (e.key === "Escape") { e.preventDefault(); closeSheet(); return; }
     if (e.key === "Tab") { // keep focus inside the sheet
-      const items = [...document.querySelectorAll("#sheet .sheet-panel button, #sheet .sheet-panel a, #sheet .sheet-panel input")];
+      const items = [...document.querySelectorAll("#sheet .sheet-panel button, #sheet .sheet-panel a, #sheet .sheet-panel input")].filter((b) => b.offsetParent);
       if (!items.length) return;
       const [first, last] = [items[0], items[items.length - 1]];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      if (!document.getElementById("sheet").contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
   });
@@ -1297,7 +1460,7 @@
         ? `<div class="priv"><span class="lock">${ICON.lock}Only Sidekick sees this</span><p class="muted">Thanks. Waiting on the others.</p></div>`
         : `<div class="priv"><span class="lock">${ICON.lock}Just for you · nobody else sees this</span><h2>${esc(card.prompt)}</h2>${card.options.map((o) => `<button class="ans" data-answer="${esc(o.value)}" data-private="1"><span class="grow">${esc(o.label)}</span></button>`).join("")}<p class="small">The group only sees one limit, never whose it is.</p></div>`;
     }
-    const invite = view.me.planner && view.people.length < 2 ? invitePanel() : "";
+    const invite = STUDY && view.me.planner && view.people.length < 2 ? invitePanel() : ""; // elsewhere it's in the People sheet
     const formNote = form ? `<p class="small">Fill it in together. Sidekick suggests two picks once everyone's in.</p>` : "";
     // The card fades in once, when it first shows (not on every update)
     const cardKey = card && `${card.slot}:${card.at}`;
@@ -1382,12 +1545,14 @@
     if (left > 0) { cardTimer = setTimeout(() => view && phase === "call" && renderCall(), left + 20); return true; }
     return false;
   }
-  let boardOpen = store.get("sk:boardOpen") !== false; // open unless this phone folded it
+  // The full plan: folded by default in the full-screen call (the voice study keeps it open unless folded)
+  let boardOpen = STUDY ? store.get("sk:boardOpen") !== false : store.get("sk:boardOpen") === true;
 
   function renderTicks() {
     const t = document.getElementById("ticks");
     if (!t || !view) return;
     if (phase !== "call") { t.innerHTML = ""; return; }
+    if (!STUDY) { t.innerHTML = ""; renderChatDot(); return; } // captions and the chat are in the chat sheet
     if (chatMode()) { t.innerHTML = chatHTML(); const th = t.querySelector(".thread"); if (th) th.scrollTop = th.scrollHeight; return; }
     if (!capsShown) { t.innerHTML = ""; return; }
     t.innerHTML = view.captions.slice(-2).map((c) => `<div class="tick"><b>${esc(c.name)}${c.kind === "typed" ? " · typed" : ""}</b><span>${esc(c.text)}</span></div>`).join("") + (interim ? `<div class="tick me"><b>You</b><span>${esc(interim)}</span></div>` : "");
@@ -1396,8 +1561,8 @@
   // Typing: the call reads like a group chat. Sidekick's replies are the shorter text versions, and its
   // latest question has quick replies under it (a tap answers and posts it in the thread).
   const chatMode = () => view && view.me && (view.me.mode === "text" || typing || capsOff);
-  function chatHTML() {
-    const items = view.chat || [];
+  function chatHTML(list) {
+    const items = list || view.chat || [];
     // Quick replies stay under Sidekick's latest question while that question is still open
     const lastSk = [...items].reverse().find((m) => m.sk);
     const open = view.card && !view.card.form && !view.card.private ? view.card.slot : null;
@@ -1407,7 +1572,7 @@
       return `<li class="msg ${m.sk ? "sk" : mine ? "me" : "them"}"><span class="msg-who">${m.sk ? "Sidekick" : mine ? "You" : esc(m.who)}${!m.sk && m.kind === "spoken" ? " · said" : ""}</span><span class="msg-t">${esc(m.text)}</span></li>`;
     }).join("");
     const chips = quick ? `<div class="chips quick" role="group" aria-label="Quick replies">${quick.options.map((o) => `<button class="chip" data-quick="${esc(quick.slot)}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join("")}</div>` : "";
-    return `<section class="chat" aria-label="Call chat"><ol class="thread" aria-live="polite">${bubbles || '<li class="msg sys"><span class="msg-t">Type to the call. Sidekick replies here.</span></li>'}</ol>${chips}</section>`;
+    return `<section class="chat" aria-label="Call chat"><ol class="thread" aria-live="polite">${bubbles || '<li class="msg sys"><span class="msg-t">Nothing yet. What everyone says and types shows here.</span></li>'}</ol>${chips}</section>`;
   }
 
   // The Wildcard: labelled, outside what the crew asked for, shown for a look (the vote stays between the two picks)
@@ -1597,10 +1762,22 @@
       <form class="compose" id="compose" ${showCompose ? "" : "hidden"}><label class="sr" for="line">Message the call</label><input class="in" id="line" autocomplete="off" placeholder="${voice ? "Type instead…" : "Type to the call…"}" maxlength="300"><button class="send" aria-label="Send">${ICON.send}</button></form>
       <div class="ctrls">
         ${voice ? `<button class="ctrl" id="mic" aria-pressed="${micLive}" aria-label="${micLive ? "Mute" : "Unmute"}">${micLive ? ICON.mic : ICON.micOff}</button>` : '<span class="ctrl-sp" aria-hidden="true"></span>'}
+        ${STUDY ? "" : `<button class="ctrl" id="chatBtn" aria-haspopup="dialog" aria-expanded="${chatOpen}" aria-controls="chatSheet" aria-label="Chat${unread() ? ", new messages" : ""}">${ICON.chat}${unread() && !chatOpen ? '<span class="udot" aria-hidden="true"></span>' : ""}</button>`}
         <button class="ctrl orb-ctrl" id="orbBtn" aria-haspopup="dialog" aria-expanded="${orbOpen}" aria-controls="orbSheet" aria-label="Sidekick options"><span class="orb ${orbState()}"></span></button>
         <button class="ctrl end" id="leave" aria-label="${view.me.planner ? "End the call" : "Leave the call"}">${ICON.x}</button>
       </div>`;
     if (orbOpen) renderOrb();
+  }
+
+  // The unread dot on the chat button, without redrawing the bar
+  function renderChatDot() {
+    const b = document.getElementById("chatBtn");
+    if (!b) return;
+    const on = unread() && !chatOpen;
+    const dot = b.querySelector(".udot");
+    if (on && !dot) b.insertAdjacentHTML("beforeend", '<span class="udot" aria-hidden="true"></span>');
+    if (!on && dot) dot.remove();
+    b.setAttribute("aria-label", `Chat${on ? ", new messages" : ""}`);
   }
 
   // A one-time hint that Sidekick takes voice commands (once per phone)
@@ -1660,7 +1837,7 @@
       <div class="ogroup">${audio}${osw("capsBtn", "Captions", "Live words from the call", capsShown)}${natural}${readAloud}
         ${osw("learnBtn", "Don't learn from this plan", "This call won't change your taste", view.me.noLearn)}</div>
       <div class="ogroup acts">
-        ${voice ? oact("kb", typing ? "Hide the text box" : "Type instead", '<span class="oi" aria-hidden="true">Aa</span>') : ""}
+        ${voice && STUDY ? oact("kb", typing ? "Hide the text box" : "Type instead", '<span class="oi" aria-hidden="true">Aa</span>') : ""}
         ${oact("inviteBtn", "Invite friends", ICON.invite, 'aria-haspopup="dialog"')}
         ${phase === "call" ? oact("ask", "Ask Sidekick for picks now", '<span class="orb sm" aria-hidden="true"></span>') : ""}
       </div>
@@ -1694,6 +1871,7 @@
   function localCommand(text) {
     if (CMD_INVITE.test(text)) {
       if (orbOpen) closeOrb(false);
+      if (chatOpen) closeChat(false);
       openSheet();
       toast("Here's the invite link to share.");
       return true;
@@ -1720,7 +1898,7 @@
     if (t.closest("#invitePill")) return void openSheet();
     if (t.closest("#orbBtn")) return void (orbOpen ? closeOrb() : openOrb());
     if (t.closest("[data-orbclose]")) return void closeOrb();
-    if (t.closest("#inviteBtn")) { closeOrb(false); return void openSheet(); }
+    if (t.closest("#inviteBtn")) { closeOrb(false); return void openSheet("orbBtn"); }
     if (t.closest("#capsBtn")) { capsShown = !capsShown; store.set("sk:captions", capsShown); renderTicks(); renderOrb(); toast(capsShown ? "Captions on." : "Captions off on this phone."); return; }
     if (t.closest("#muteBtn")) return void (micOn ? stopMic() : startMic());
     if (t.closest("#learnBtn")) {
@@ -1812,7 +1990,7 @@
     }
   }
   app.addEventListener("click", onTap);
-  document.addEventListener("click", (e) => { if (e.target.closest("#sheet") || e.target.closest("#orbSheet")) onTap(e); });
+  document.addEventListener("click", (e) => { if (e.target.closest("#sheet") || e.target.closest("#orbSheet") || e.target.closest("#chatSheet")) onTap(e); });
   // Arrow keys move between the two segments of the mode switch
   document.addEventListener("keydown", (e) => {
     const r = e.target.closest && e.target.closest(".seg [role=radio]");
@@ -1822,10 +2000,10 @@
     other.focus();
     other.click();
   });
-  app.addEventListener("submit", (e) => {
-    if (e.target.id !== "compose") return;
+  document.addEventListener("submit", (e) => {
+    if (e.target.id !== "compose" && e.target.id !== "chatForm") return;
     e.preventDefault();
-    const input = document.getElementById("line");
+    const input = document.getElementById(e.target.id === "chatForm" ? "chatLine" : "line");
     const text = input.value.trim();
     if (!text) return;
     input.value = "";

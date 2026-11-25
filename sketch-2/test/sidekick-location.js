@@ -264,6 +264,10 @@ const leaks = (label, text) => DIGITS.filter((d) => String(text).includes(d)).ma
       for (let i = 0; i < 30 && !(r.answers[r.people[0].id] || {}).origin; i++) await wait(100);
       const a = r.answers[r.people[0].id];
       assert.deepStrictEqual([a.location.lat, a.location.lng, a.origin.value, a.origin.near], [43.66, -79.42, "union", "near Koreatown"]);
+      // The board's "Starting from" row, in the full plan (folded by default; the People sheet opens first for a planner alone)
+      await page.waitForSelector("#planToggle");
+      if (await page.$("#sheet")) await page.keyboard.press("Escape");
+      if ((await page.getAttribute("#planToggle", "aria-expanded")) !== "true") await page.click("#planToggle");
       await page.waitForSelector("text=near you");
       ui = { ctx, page, room: r };
     });
@@ -278,6 +282,8 @@ const leaks = (label, text) => DIGITS.filter((d) => String(text).includes(d)).ma
       await page.click("[data-mode=text]");
       await page.waitForSelector("#dock");
       await ui.page.waitForSelector("text=near North York Centre");
+      await page.waitForSelector("#planToggle");
+      if ((await page.getAttribute("#planToggle", "aria-expanded")) !== "true") await page.click("#planToggle");
       await page.waitForSelector("text=near Koreatown");
       ui.friend = { ctx, page };
     });

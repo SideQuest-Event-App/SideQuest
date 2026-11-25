@@ -221,14 +221,25 @@ function filterEvents(events, room, f) {
 function personFit(e, room, x) {
   const p = x.person;
   if (typeof p.fit === "function") return p.fit(e);
-  const asked = [].concat(x.a.value);
+  const asked = x.a ? [].concat(x.a.value) : [];
   const hit = asked.filter((v) => vibeMatch(e, v)).length;
-  return { fit: hit ? 0.75 + (0.25 * hit) / asked.length : 0, strongDislike: false };
+  // What they asked for in their own words counts as a full match for them ("Chinese skewers")
+  const own = room.answers[p.id] && room.answers[p.id].want;
+  const wantHit = own && [].concat(own.value).length && ownWantFit(e, [].concat(own.value)) >= want.MIN_RELEVANCE;
+  return { fit: wantHit ? 1 : hit ? 0.75 + (0.25 * hit) / asked.length : 0, strongDislike: false };
+}
+function ownWantFit(e, wants) {
+  const pl = want.plan(wants);
+  if (!pl) return 0;
+  if (e.type === "place") return want.relevance(e, pl);
+  return want.relevance({ title: e.title, types: [], categories: [...(e.tags || []), ...(e.vibes || [])], summary: e.description || "" }, { ...pl, food: false });
 }
 // Everyone's fit for an event: { avg, fits: { personId: 0..1 }, misery }. Average without misery: anyone's strong
 // dislike takes it out of the running (see score); otherwise the crew's fit is the average.
-function crewFits(e, room) {
-  const members = answersFor(room, "vibe").map((x) => ({ id: x.person.id, name: x.person.name, fit: () => personFit(e, room, x) }));
+// withWant: everyone who said a vibe or a want (for "who it's for" on a pick card); else the vibe answers only
+function crewFits(e, room, { withWant = false } = {}) {
+  const xs = withWant ? crew(room).map((p) => ({ person: p, a: room.answers[p.id] && room.answers[p.id].vibe })).filter((x) => x.a || (room.answers[x.person.id] && room.answers[x.person.id].want)) : answersFor(room, "vibe");
+  const members = xs.map((x) => ({ id: x.person.id, name: x.person.name, fit: () => personFit(e, room, x) }));
   return rank.blend(e, members);
 }
 

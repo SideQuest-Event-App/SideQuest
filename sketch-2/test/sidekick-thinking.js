@@ -235,8 +235,12 @@ const PRIVATE = /\$\s?\d|\bdollars?\b|\bbucks\b|\btwenty\b|\bthirty\b|under \$|e
       // The engine's own top two, ranked by its score (one event, one place when both fit)
       const ranked = P.ranked([...T.upcoming(), ...C.room.places], C.room, Object.assign(P.facts(C.room), { relax: C.room.relax }));
       assert.strictEqual(C.room.picks[0].id, ranked[0].id, "the engine's top pick first (not the AI's)");
-      const other = ranked.find((e) => (e.type === "place") !== (ranked[0].type === "place"));
-      assert.strictEqual(C.room.picks[1].id, (other || ranked[1]).id, "then its best of the other kind");
+      // ...that fits someone's vibe or want too (a place nobody asked for never comes in just for balance)
+      const f = Object.assign(P.facts(C.room), { relax: C.room.relax });
+      const fits = (e) => P.fitsSomeone(e, C.room, f);
+      const enough = ranked.filter(fits).length >= 2;
+      const other = ranked.find((e) => (e.type === "place") !== (ranked[0].type === "place") && (!enough || fits(e)));
+      assert.strictEqual(C.room.picks[1].id, (other || ranked[1]).id, "then its best of the other kind that fits");
       assert(C.room.picks.every((p) => !p.reason), "no AI write-up on the cards");
       // Every hard limit: night, time, budget ($20 is the lowest), areas avoided, trip length
       const ok = allowed(C.room);

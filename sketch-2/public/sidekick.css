@@ -507,3 +507,36 @@ body.call-nav .toast{bottom:calc(var(--dock-h,0px) + var(--nav-h) + 16px)}
 .pf-last{color:var(--t2)}
 .pf-switch{display:flex;align-items:center;gap:12px;min-height:56px;padding:10px 14px;border-radius:16px;background:var(--surf);border:1px solid var(--bs);width:100%;text-align:left}
 .pf-decide .chip[aria-checked=true]{background:var(--hot-t);color:var(--hot-x);box-shadow:inset 0 0 0 1.5px #b04a85}
+
+/* The full-screen call (not the voice study): the page never scrolls. People, Sidekick's line and the bar stay put;
+   only the card area (a tall question, the picks) scrolls inside itself, and the chat sheet scrolls inside itself. */
+body.sk-live main{height:100dvh;min-height:0;overflow:hidden;padding-top:max(12px,env(safe-area-inset-top));padding-bottom:calc(var(--dock-h,0px) + 12px);gap:10px}
+body.sk-live #body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;border-radius:22px}
+body.sk-live #ticks{display:none}
+body.sk-live #say:empty,body.sk-live #ticks:empty{display:none}
+.ctop{display:flex;align-items:center;gap:8px;min-width:0}
+.min-btn{flex:none}
+.people-row{flex:1;min-width:0;min-height:44px;display:flex;align-items:center;gap:6px;padding:0 6px;border-radius:999px;text-align:left}
+.people-row:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+.people-row .avs{flex-wrap:nowrap;overflow:hidden}
+.plus-n{flex:none;min-width:30px;height:30px;padding:0 8px;border-radius:999px;display:grid;place-items:center;font:600 12px var(--m);color:var(--acc);background:var(--pri-t);box-shadow:inset 0 0 0 1.5px var(--pri-e)}
+.ctop .schips{flex:none}
+.pp-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;max-height:30dvh;overflow-y:auto}
+.pp{display:flex;align-items:center;gap:10px;min-height:36px}
+.pp .av{width:32px;height:32px}
+.pp-n{flex:1;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-s{font-size:13px;color:var(--t2)}
+.pp-s.on{color:var(--ok)}
+.av.unk{background:var(--raise);color:var(--t2)}
+.people-sheet,.chat-sheet{max-height:88dvh}
+.chat-sheet{height:72dvh}
+.chat-body{flex:1;min-height:0;display:flex;flex-direction:column}
+.chat-body .chat{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px}
+.chat-body .thread{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;max-height:none}
+#chatBtn{position:relative}
+.udot{position:absolute;top:8px;right:8px;width:10px;height:10px;border-radius:999px;background:#f28dc8;box-shadow:0 0 0 2px var(--raise)}
+.min-wrap{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;background:var(--base)}
+.oncall{flex:none;display:flex;align-items:center;gap:10px;min-height:52px;padding:4px 12px 4px 16px;padding-top:max(4px,env(safe-area-inset-top));background:var(--ok-t);color:var(--t1);border-bottom:1px solid var(--bs)}
+.oc-t{flex:1;min-width:0;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oncall .btn{min-height:44px}
+#appFrame{flex:1;width:100%;border:0;background:var(--base)}

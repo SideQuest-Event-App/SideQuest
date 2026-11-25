@@ -175,6 +175,7 @@ const INIT = () => {
       assert(A.requests.includes(`/api/sk/rooms/${rid}/voice-agent`) && A.requests.includes(`/api/sk/rooms/${rid}/voice-agent/live`));
       // The switch lives in the orb sheet now; the bar shows a "Natural voice" status chip
       assert.strictEqual((await A.page.textContent("#chipVoice")).trim(), "Natural voice", "a status chip says the natural voice is on");
+      if (await A.page.$("#sheet")) await A.page.keyboard.press("Escape"); // the People sheet a planner sees on starting alone
       await A.page.click("#orbBtn");
       assert.strictEqual(await A.page.getAttribute("#orbSheet #agent", "aria-checked"), "true", "the switch is on");
       assert.match(await A.page.textContent("#orbSheet #agent"), /Turn off for the built-in voice/, "the switch says how to get back to the built-in voice");
@@ -271,6 +272,7 @@ const INIT = () => {
       const toasts = await D.page.evaluate(() => window.__toasts.slice());
       assert(toasts.length <= 1, `at most one note, got ${JSON.stringify(toasts)}`);
       assert(await D.page.evaluate(() => window.__el.sessions[0].ended), "the session was ended");
+      if (await D.page.$("#sheet")) await D.page.keyboard.press("Escape"); // the People sheet a planner sees on starting alone
       await D.page.click("#orbBtn");
       assert.strictEqual(await D.page.getAttribute("#orbSheet #agent", "aria-checked"), "false", "the switch offers the natural voice again");
       assert.match(await D.page.textContent("#orbSheet #agent"), /built-in voice is reading/);
@@ -312,6 +314,7 @@ const INIT = () => {
       await wait(500);
       assert.strictEqual(await session(C.page), 0, "no session past the cap");
       assert.deepStrictEqual(await C.page.evaluate(() => window.__toasts.slice()), [], "no toast at the cap");
+      if (await C.page.$("#sheet")) await C.page.keyboard.press("Escape"); // the People sheet a planner sees on starting alone
       await C.page.click("#orbBtn");
       await C.page.waitForSelector("#orbSheet [role=dialog]");
       assert.strictEqual(await C.page.$("#agent"), null, "the natural-voice switch is hidden for the rest of the call");

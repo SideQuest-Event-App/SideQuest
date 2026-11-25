@@ -1434,11 +1434,11 @@ async function pickTwo(room, list, deadline) {
   await speak(room, "picks", { kinds, story, why: picks.map(whyOf), short: picks.map(spokenName), picks: picks.map((p) => `${p.title} (${p.when}, ${p.price || "price TBC"}, ${p.where})`), events: pool.filter((e) => picks.some((p) => p.id === e.id)), deadline, late, lateKey: "fallback" });
   if (room.status !== "live") return;
   // Who each pick is for and a crew match %, from each person's own vibe answers (never budgets or areas)
-  const members = P.answersFor(room, "vibe").map((x) => ({ id: x.person.id, name: x.person.name }));
+  const members = P.crew(room).filter((p) => room.answers[p.id] && (room.answers[p.id].vibe || room.answers[p.id].want)).map((p) => ({ id: p.id, name: p.name }));
   for (const p of picks) {
     const e = pool.find((x) => x.id === p.id);
     if (!e || !members.length) continue;
-    const fits = P.crewFits(e, room).fits;
+    const fits = P.crewFits(e, room, { withWant: true }).fits;
     room.history.push({ fits });
     p.who = rank.whoFor(fits, members);
     p.crewMatch = rank.crewMatch(fits);
@@ -1620,7 +1620,7 @@ function viewFor(room, pid) {
     // "What I heard": public facts that just landed from speech or typing, with an undo (never a private answer)
     heard: (room.heard || []).filter((h) => !h.undone && !h.here && (h.source === "call_speech" || h.source === "call_text") && now() - h.at < 15000).slice(-4).map((h) => ({ id: h.id, name: h.name, label: h.label, age: now() - h.at, canUndo: Boolean(me && (me.id === h.pid || me.role === "planner")) })),
     // The typed chat thread: captions and Sidekick's lines (the shorter text version), oldest first
-    chat: [...room.lines.slice(-8).map((l) => ({ id: l.id, who: l.name, pid: l.pid, text: l.text, kind: l.kind, at: l.at })), ...room.said.filter((x) => !x.system && !["progress", "still"].includes(x.move)).slice(-6).map((x) => ({ id: x.id, sk: true, text: x.chat || x.text, at: x.at, quick: x.quick || null }))].sort((a, b) => a.at - b.at).slice(-8),
+    chat: [...room.lines.slice(-20).map((l) => ({ id: l.id, who: l.name, pid: l.pid, text: l.text, kind: l.kind, at: l.at })), ...room.said.filter((x) => !x.system && !["progress", "still"].includes(x.move)).slice(-12).map((x) => ({ id: x.id, sk: true, text: x.chat || x.text, at: x.at, quick: x.quick || null }))].sort((a, b) => a.at - b.at).slice(-20),
     captions: room.lines.slice(-5).map((l) => ({ id: l.id, pid: l.pid, name: l.name, text: l.text, kind: l.kind })),
     agentNotes: me && me.role === "planner" && room.agentMode ? room.agentNotes.slice(-8) : [],
     voiceAgent: Boolean(me && me.role === "planner" && agentIdFor(room)),

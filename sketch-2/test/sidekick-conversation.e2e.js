@@ -42,7 +42,8 @@ async function a11y(page, where) {
     window.scrollTo(0, document.scrollingElement.scrollHeight);
     const dock = document.getElementById("dock");
     const dockTop = dock && !dock.hidden ? dock.getBoundingClientRect().top : window.innerHeight;
-    const content = [...document.querySelectorAll("#body > *, #ticks > *")].filter((e) => e.offsetParent);
+    // The full-screen call's card area scrolls inside itself: measure the area, not what's inside it
+    const content = [...document.querySelectorAll(document.body.classList.contains("sk-live") ? "#body" : "#body > *, #ticks > *")].filter((e) => e.offsetParent);
     const bottom = Math.max(0, ...content.map((e) => e.getBoundingClientRect().bottom));
     const els = [...document.querySelectorAll("#app *")].filter((e) => e.offsetParent && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && !e.closest(".sr"));
     const sizes = els.map((e) => parseFloat(getComputedStyle(e).fontSize));
@@ -133,12 +134,13 @@ async function a11y(page, where) {
       const prog = await asia.textContent(".bh .prog");
       assert(/Night\s*·\s*Vibe\s*·\s*Picks/.test(prog.replace(/\s+/g, " ")), `progress: ${prog}`);
       assert.strictEqual(await asia.locator(".bh .dots").count(), 0, "no slot checklist dots");
-      assert(await asia.locator("#planRows").isVisible(), "the full board is there");
-      await asia.click("#planToggle");
-      assert(await asia.locator("#planRows").isHidden(), "it folds away");
+      // Folded by default in the full-screen call, one tap away
+      assert(await asia.locator("#planRows").isHidden(), "the full board starts folded");
       assert.strictEqual(await asia.getAttribute("#planToggle", "aria-expanded"), "false");
       await asia.click("#planToggle");
-      assert(await asia.locator("#planRows").isVisible(), "and opens again");
+      assert(await asia.locator("#planRows").isVisible(), "it opens");
+      await asia.click("#planToggle");
+      assert(await asia.locator("#planRows").isHidden(), "and folds away again");
     });
 
     await test("(a) A spoken fact shows as a chip ('Maya: Saturday') with an undo that takes Maya's answer back", async () => {
@@ -162,8 +164,9 @@ async function a11y(page, where) {
       await asia.waitForFunction(() => !document.querySelector(".hc"), null, { timeout: 9000 });
     });
 
-    await test("(c) Typing reads like a group chat: Sidekick's replies inline, with quick replies that answer", async () => {
-      await jayPage.waitForSelector(".chat .thread .msg.sk", { timeout: 4000 });
+    await test("(c) Typing reads like a group chat: Sidekick's replies in the chat sheet, with quick replies that answer", async () => {
+      await jayPage.click("#chatBtn");
+      await jayPage.waitForSelector("#chatSheet .chat .thread .msg.sk", { timeout: 4000 });
       await jayPage.waitForSelector(".chips.quick .chip", { timeout: 4000 });
       const sk = await jayPage.locator(".chat .msg.sk .msg-t").last().textContent();
       const spoken = room.said.filter((x) => !x.system).slice(-1)[0];

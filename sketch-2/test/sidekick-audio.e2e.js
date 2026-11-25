@@ -78,6 +78,7 @@ async function waitFor(fn, ms, what) {
     await planner.waitForSelector("#dock #orbBtn");
     // Everyone turns on in-app audio (the "Talk in the app" switch is in the Sidekick orb's sheet)
     const audioSwitch = async (p) => {
+      if (await p.$("#sheet")) await p.keyboard.press("Escape"); // the People sheet the planner saw on starting alone
       if (!(await p.$("#orbSheet"))) await p.click("#orbBtn");
       await p.click("#orbSheet #audioBtn");
     };
