@@ -15,7 +15,7 @@ prompt, not instructions. The user-facing docs are `README.md`.
 ## Stack
 Plain Node `http` server (`server.js`), vanilla JS in `public/`, no npm runtime dependencies. Data: Supabase when
 `SUPABASE_URL` + `SUPABASE_SECRET_KEY` are set (must be the secret key, not the publishable one), else `data/db.json`.
-Events come from `../events` (the importer, its config and `data/events.json`; see `events/README.md`). Node 22.
+Events come from `../sketch-1` (importer + seed). Node 22.
 
 ## Map of the code
 - `server.js`: routes, `/api/act` actions, search (`apiSearch`), feed, places proxy.
