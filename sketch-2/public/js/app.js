@@ -623,7 +623,7 @@
     const h = SQ.d.dataHealth || {};
     age.hidden = h.days == null;
     age.classList.toggle("stale", !!h.stale);
-    age.textContent = h.days == null ? "" : h.stale ? `Event data is ${h.days} days old. The daily import may not be reaching this server.` : `Event data imported ${h.days === 0 ? "today" : `${h.days} day${h.days === 1 ? "" : "s"} ago`}.`;
+    age.textContent = h.days == null ? "" : h.stale ? `Event data is ${h.days} days old. Time to run the import again.` : `Event data imported ${h.days === 0 ? "today" : `${h.days} day${h.days === 1 ? "" : "s"} ago`}.`;
     const role = SQ.screens[SQ.u.screen].role;
     document.querySelectorAll("#side-role button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.role === role)));
     const groups = { attendee: "Attendee app", host: "Host app" };

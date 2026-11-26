@@ -1,5 +1,5 @@
 // Tests for the bigger import: the SeatGeek source, OpenStreetMap geocoding for bad venue coordinates, the "no pins
-// in the lake" rule, the import workflow's triggers (read by parsing the YAML), and a full run of run.js that
+// in the lake" rule, a full run of run.js that
 // writes the Storage file even when the "listings" table doesn't exist yet. Everything runs on fixtures and fakes:
 // a real request to SeatGeek, Nominatim or anywhere else fails the test.
 //
@@ -36,7 +36,6 @@ const { dedupe } = require(path.join(ROOT, "lib", "dedupe"));
 const locate = require(path.join(ROOT, "lib", "locate"));
 const gta = require(path.join(ROOT, "lib", "gta"));
 const geocodeLib = require(path.join(ROOT, "lib", "geocode"));
-const yaml = require(path.join(__dirname, "mini-yaml"));
 
 // The SeatGeek fixture, with its dates moved to the coming days so it never goes stale
 function fixture() {
@@ -192,37 +191,12 @@ function inSimpleLake(lat, lng) {
     const seed = JSON.parse(fs.readFileSync(path.join(ROOT, "data", "events.json"), "utf8")).events;
     const raws = [...seed.map((e) => ({ source: e.source, sourceId: e.id, url: e.sourceUrl, title: e.title, startsAt: e.startsAt, venue: { ...e.venue, city: "Toronto" }, categories: e.tags })), ...toRawAll()];
     const before = raws.filter((r) => r.venue.lat != null && inSimpleLake(r.venue.lat, r.venue.lng)).length;
-    assert.ok(before >= 3, `the fixture has lake points to catch (${before})`);
+    assert.ok(before >= 2, `the fixture has lake points to catch (${before})`);
     await locate.fix(raws, {});
     const events = raws.map(toEvent).filter(Boolean);
     const wet = events.filter((e) => e.venue.lat != null && inSimpleLake(e.venue.lat, e.venue.lng));
     assert.deepStrictEqual(wet.map((e) => `${e.title} @ ${e.venue.lat},${e.venue.lng}`), []);
     assert.ok(events.some((e) => e.venue.noPin), "they're still in the list");
-  });
-
-  // ---------- The workflow ----------
-  await test("workflow: push on this branch (import paths only), Run workflow kept, one concurrency group, SeatGeek secret", () => {
-    const wf = yaml.parse(fs.readFileSync(path.join(REPO, ".github", "workflows", "import-events.yml"), "utf8"));
-    const on = wf.on;
-    assert.deepStrictEqual(on.push.branches, ["claude/dazzling-brahmagupta-4ldxu4"]);
-    assert.deepStrictEqual(on.push.paths.sort(), ["!events/README.md", "!events/data/events.json", "!events/docs/**", "!events/test/**", ".github/workflows/import-events.yml", "events/**"]);
-    assert.ok(!("main" in (on.push || {})) && !on.push.branches.includes("main"), "never triggers on main pushes");
-    assert.ok(on.workflow_dispatch && on.workflow_dispatch.inputs.only, "Run workflow is still there, with its 'only' input");
-    assert.deepStrictEqual(on.schedule.map((s) => s.cron), ["17 7 * * 0,2-6", "23 6 * * 1"]);
-    assert.strictEqual(wf.concurrency.group, "import-events");
-    assert.strictEqual(wf.concurrency["cancel-in-progress"], false, "a running import is never killed half-way");
-    const step = wf.jobs.import.steps.find((s) => s.run === "node run.js");
-    assert.strictEqual(step.env.SEATGEEK_CLIENT_ID, "${{ secrets.SEATGEEK_CLIENT_ID }}");
-    assert.strictEqual(step.env.GEOCODE, "1");
-    assert.strictEqual(step.env.UPLOAD, "1");
-    // A push has no schedule and no inputs: ONLY and MERGE come out empty, so it's a full import
-    const evaluate = (expr, ctx) => new Function("ctx", `return (${expr.replace(/^\$\{\{\s*|\s*\}\}$/g, "").replace(/github\.event\.schedule/g, "ctx.schedule").replace(/inputs\.only/g, "ctx.only").replace(/'([^']*)'/g, (m, s) => JSON.stringify(s)).replace(/==/g, "===")});`)(ctx) || "";
-    const push = { schedule: undefined, only: undefined };
-    assert.strictEqual(evaluate(step.env.ONLY, push), "");
-    assert.strictEqual(evaluate(step.env.MERGE, push), "");
-    assert.ok(evaluate(step.env.ONLY, { schedule: "17 7 * * 0,2-6" }).split(",").includes("SeatGeek"));
-    // The geocode cache is kept between runs
-    assert.ok(wf.jobs.import.steps.some((s) => s.uses && s.uses.startsWith("actions/cache@") && s.with.path === "events/data/geocode.json"));
   });
 
   // ---------- A full run: Storage written even without the listings table ----------

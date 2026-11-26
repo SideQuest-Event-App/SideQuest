@@ -1,6 +1,6 @@
 // Qualities: what an event is like beyond its vibe. The premise ("phones down"), the crowd ("queer", "Desi"), the rules
 // ("19+", "dress code"), the format ("DJ sets", "hands-on") and the feel ("late night", "intimate"). Plain rules, no AI,
-// so the scheduled import tags every listing. The hand-run AI tagger (tag.js) may add more from the same list.
+// so every import tags every listing. The AI tagger (lib/tagger.js) may add more from the same list.
 //
 //   qualitiesOf(e)   the labels that fit an event, from its title, categories, description, details, venue and organizer
 //   wordsFor(labels) the words each label stands for, so a search for "offline" or "no phones" finds "Phone-free"

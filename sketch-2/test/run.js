@@ -18,7 +18,7 @@ const { spawn, execSync } = require("child_process");
 
 const S2 = path.join(__dirname, "..");
 const REPO = path.join(S2, "..");
-const HELPERS = new Set(["fake-supabase", "mini-yaml"]); // modules other tests require, not tests
+const HELPERS = new Set(["fake-supabase"]); // modules other tests require, not tests
 // Tests that measure real time (a 300 ms window, a 3 s line) run on their own after the rest, so a busy CPU can't fail them
 const ALONE = new Set(["sketch-2/sidekick-thinking", "sketch-2/sidekick-tts", "sketch-2/launch.e2e"]);
 const TIMINGS = path.join(__dirname, ".timings.json");

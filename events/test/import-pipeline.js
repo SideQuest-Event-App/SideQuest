@@ -1,4 +1,4 @@
-// Tests for the event import pipeline: the workflow's schedule and its ONLY/MERGE mapping (read from the YAML),
+// Tests for the event import pipeline: no workflow runs it (it's run by hand),
 // the events-table upsert against a fake PostgREST (batching, request shape, changed-only, removals, a missing
 // table), the Eventbrite parser on fixture pages and its clear "blocked" stop, the automated Instagram path with a
 // mocked Graph API and its fallback to the saved file, and that no key or token ever reaches a log line.
@@ -57,57 +57,13 @@ async function test(name, fn) {
 const response = (status, body, headers = {}) => new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers });
 
 (async () => {
-  // ---------- 1. Workflow: schedule and ONLY/MERGE mapping ----------
-  await test("workflow: daily quick-source cron and weekly full run, off the hour, no Thursday", () => {
-    const yml = fs.readFileSync(path.join(REPO, ".github", "workflows", "import-events.yml"), "utf8");
-    const crons = [...yml.matchAll(/^\s*-\s*cron:\s*"([^"]+)"/gm)].map((m) => m[1]);
-    assert.deepStrictEqual(crons, ["17 7 * * 0,2-6", "23 6 * * 1"]);
-    for (const c of crons) {
-      const [min, hour, dom, mon, dow] = c.split(" ");
-      assert.notStrictEqual(min, "0", `${c} is on the hour`);
-      assert.ok(Number(min) > 0 && Number(min) < 60 && Number(hour) < 24 && dom === "*" && mon === "*");
-      assert.ok(!/(^|,)4(,|$)/.test(dow) || dow.includes("-"), "no Thursday-only line");
+  // ---------- 1. Imports run by hand only ----------
+  await test("no GitHub workflow runs the import (imports are run by hand, with the tagger, on your computer)", () => {
+    const dir = path.join(REPO, ".github", "workflows");
+    for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+      const yml = fs.readFileSync(path.join(dir, f), "utf8");
+      assert.ok(!/node\s+(events\/)?run\.js|import\/run\.js|events\/tag\.js|node\s+tag\.js/.test(yml), `${f} runs the import or the tagger`);
     }
-    assert.ok(!/\* \* 4"/.test(yml), "Thursday run removed");
-    // Every github.event.schedule comparison names a cron line that exists
-    const compared = [...yml.matchAll(/github\.event\.schedule == '([^']+)'/g)].map((m) => m[1]);
-    assert.ok(compared.length >= 2);
-    for (const c of compared) assert.ok(crons.includes(c), `compared schedule ${c} is not a cron line`);
-    assert.match(yml, /AI: "off"/);
-    assert.match(yml, /UPLOAD: "1"/);
-    assert.match(yml, /INSTAGRAM_ACCESS_TOKEN: \$\{\{ secrets\.INSTAGRAM_ACCESS_TOKEN \}\}/);
-  });
-
-  await test("workflow: ONLY/MERGE evaluate right for the daily, weekly and hand-started runs", () => {
-    const yml = fs.readFileSync(path.join(REPO, ".github", "workflows", "import-events.yml"), "utf8");
-    const only = yml.match(/^\s*ONLY: \$\{\{ (.+) \}\}$/m)[1];
-    const merge = yml.match(/^\s*MERGE: \$\{\{ (.+) \}\}$/m)[1];
-    // A tiny evaluator for GitHub's expression syntax as used here: ==, &&, ||, (), 'strings', github.event.schedule, inputs.only
-    const evaluate = (expr, ctx) => {
-      const js = expr
-        .replace(/github\.event\.schedule/g, "ctx.schedule")
-        .replace(/inputs\.only/g, "ctx.only")
-        .replace(/'([^']*)'/g, (m, s) => JSON.stringify(s))
-        .replace(/==/g, "===");
-      // eslint-disable-next-line no-new-func
-      return new Function("ctx", `return (${js});`)(ctx) || "";
-    };
-    const daily = { schedule: "17 7 * * 0,2-6", only: "" };
-    const weekly = { schedule: "23 6 * * 1", only: "" };
-    const byHand = { schedule: "", only: "Ticketmaster,City of Toronto" };
-    const byHandAll = { schedule: "", only: "" };
-    assert.strictEqual(evaluate(only, daily), "Ticketmaster,SeatGeek,City of Toronto,Toronto Public Library,Luma,DICE,Instagram,TOREVENT,Showpass,YOHOMO,Venue websites");
-    assert.strictEqual(evaluate(merge, daily), "1");
-    assert.strictEqual(evaluate(only, weekly), "");
-    assert.strictEqual(evaluate(merge, weekly), "");
-    assert.strictEqual(evaluate(only, byHand), "Ticketmaster,City of Toronto");
-    assert.strictEqual(evaluate(merge, byHand), "1");
-    assert.strictEqual(evaluate(only, byHandAll), "");
-    assert.strictEqual(evaluate(merge, byHandAll), "");
-    // Every daily source is a real source name in run.js (case-insensitive, as run.js matches them)
-    const runJs = fs.readFileSync(path.join(ROOT, "run.js"), "utf8");
-    const names = [...runJs.matchAll(/^\s*\["([^"]+)", fetch\w+/gm)].map((m) => m[1].toLowerCase());
-    for (const n of evaluate(only, daily).split(",")) assert.ok(names.includes(n.toLowerCase()), `${n} is not a source in run.js`);
   });
 
   // ---------- 2. Events table upsert against a fake PostgREST ----------

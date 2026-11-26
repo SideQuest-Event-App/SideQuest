@@ -50,11 +50,24 @@
 - Uploaded a new import to Supabase: TOREVENT, Showpass, YOHOMO and venue websites, with the other sources kept. That's 3,528 events, including 100 Black Eagle dates, in 414 recurring series.
 - The events-table upload first failed: a description was cut in the middle of a "bold" Unicode letter. Text is now never cut mid-character, and every string is cleaned before upload.
 
+## Imports run by hand, with automatic tagging
+- **Scheduled imports are off.** The GitHub import workflow is deleted: no daily, Monday or on-push imports. A test fails if any workflow runs the import or the tagger again.
+- **No paid API key in the importer.** Its AI is Claude Code on your Claude plan only. The API code and the `TAG_WITH_API` option are gone, and a test checks they stay gone. The tagger refuses to run on GitHub.
+- **Tagging is part of every import.** `cd events && UPLOAD=1 GEOCODE=1 node run.js` fetches, then tags what's new (`lib/tagger.js`, one date per recurring night), then uploads once.
+  - The import is saved locally before tagging starts, and tags are saved every 30 listings, so stopping loses nothing.
+  - If the plan's usage limit is hit, it stops tagging and uploads what it has.
+  - `TAG=0` skips tagging, `TAG_MAX=200` caps it, and `node tag.js` tags without importing.
+- **Tried on 30 Black Eagle listings:** 27 got tags, covering 77 of the 100 Black Eagle dates through their recurring nights.
+- **Stale-data warning:** the app now warns when events are more than a week old (it was 36 hours), and the warning shows the command to run.
+- Docs updated for imports run by hand. Instagram keys now go in `.env` instead of GitHub secrets.
+
 ## Tests
-- New test files: `events/test/vibe-sources.js` (14 checks), `events/test/series.js` (10) and `sketch-2/test/search-suggest.e2e.js` (6, run in a browser).
-- All logic test files pass (17 of 17), and the suggestions browser test passes.
+- New test files: `events/test/vibe-sources.js` (14 checks), `events/test/series.js` (12) and `sketch-2/test/search-suggest.e2e.js` (6, run in a browser).
+- 16 of the 17 logic test files pass, and the suggestions browser test passes.
+- The failure is Sidekick's conversation eval: average line length is 25.0 words against a target under 25. It counts event titles in Sidekick's lines, so it passes on October's events file (24.8) and fails on today's.
 
 ## Still to do
-- **Eventbrite** is blocked from GitHub. Run it from home: `cd events && UPLOAD=1 ONLY=Eventbrite MERGE=1 node run.js`.
-- **The AI tagger** (`node events/tag.js`) hasn't been run yet. It writes the premises and fixes keyword mistakes.
+- **Eventbrite** blocks cloud servers, so run it from home: `cd events && UPLOAD=1 ONLY=Eventbrite MERGE=1 node run.js`.
+- **First tagging run:** about 2,400 listings are waiting. The first import will tag them; `TAG_MAX=300` spreads the work over a few runs.
+- Decide whether Sidekick's conversation eval should use a fixed set of events.
 - Discover can still show several dates of the same weekly night.

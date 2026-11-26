@@ -5,12 +5,10 @@
 // Two ways in:
 //   - buildInstagram (run by hand: `node instagram.js`, using Claude Code) downloads new posts, has the AI read
 //     them with their posters, and saves the events to instagram-events.json and to Supabase Storage.
-//   - fetchInstagram (the scheduled import, every day). With INSTAGRAM_USER_ID and INSTAGRAM_ACCESS_TOKEN (GitHub
-//     secrets; setup: events/docs/instagram-setup.md) it downloads the accounts' recent posts through the Graph API's
+//   - fetchInstagram (every `node run.js`). With INSTAGRAM_USER_ID and INSTAGRAM_ACCESS_TOKEN (in .env; setup: events/docs/instagram-setup.md) it downloads the accounts' recent posts through the Graph API's
 //     Business Discovery, uses the AI readings already saved (instagram-extracted.json, and its copy in Storage) for
 //     posts read before, and reads new posts' captions with plain rules (lib/instagram-rules.js). The AI reads them
-//     instead only when IG_AI=1 and an AI is available, at most IG_MAX_CALLS calls (never in the scheduled workflow,
-//     which sets AI=off). Without the secrets, or when the Graph API fails, it picks up the events the last run saved.
+//     instead only when IG_AI=1 and an AI is available, at most IG_MAX_CALLS calls (Claude Code only). Without the secrets, or when the Graph API fails, it picks up the events the last run saved.
 // Only the official Graph API is used: no logged-out page scraping, which Instagram's terms forbid.
 //
 // The accounts are the list in events/config/instagram-accounts.md (add a row to add one). Each venue's
@@ -58,7 +56,7 @@ const POST_DAYS = 60; // older posts are about events that have already happened
 const IMAGES_PER_POST = 2; // a carousel's first slides carry the poster and the lineup
 const MAX_CALLS = Number(process.env.IG_MAX_CALLS || 40); // AI calls per run, at most
 const PAUSE_AFTER = 20; // posts read with no event in them before an account is paused
-const STALE_DAYS = 8; // the scheduled import warns when the Instagram events are older than this
+const STALE_DAYS = 8; // the import warns when the Instagram events are older than this
 const BATCH_POSTS = 12; // per AI call: up to 12 posts or 12 images, whichever comes first
 const BATCH_IMAGES = 12;
 const PARALLEL = 3;
@@ -159,7 +157,7 @@ async function extract(posts, log) {
   const done = readJSON(EXTRACTED, {});
   const todo = posts.filter((p) => !done[p.id] || (done[p.id].v !== READ_VERSION && imagesOf(p.id).length));
   if (todo.length && mode() === "keywords") {
-    log(`  instagram: no AI available, ${todo.length} posts can't be read (set ANTHROPIC_API_KEY or install Claude Code)`);
+    log(`  instagram: no AI available, ${todo.length} posts can't be read (install Claude Code and sign in to your Claude plan)`);
     return done;
   }
   const batches = [];
@@ -435,7 +433,7 @@ async function autoInstagram({ start, end, log, previous = [] }) {
     }
   }
 
-  // The AI only when asked for (IG_AI=1) and available, within IG_MAX_CALLS calls; never in the scheduled workflow
+  // The AI only when asked for (IG_AI=1) and available, within IG_MAX_CALLS calls; Claude Code only
   if (process.env.IG_AI === "1") {
     if (mode() === "keywords") log("  instagram: IG_AI=1 but no AI is available (AI=off, no key, no Claude Code), so new posts are read by the caption rules");
     else {
@@ -467,7 +465,7 @@ async function autoInstagram({ start, end, log, previous = [] }) {
   return file;
 }
 
-// The scheduled import: automated with the Graph API secrets, else the events the last run saved (no AI either way)
+// Every import: automated with the Graph API values in .env, else the events the last run saved (no AI either way)
 async function fetchInstagram({ start, end, max, log, previous }) {
   const inWindow = (e) => Date.parse(e.startsAt) >= start.getTime() && Date.parse(e.startsAt) <= end.getTime();
   if (process.env.INSTAGRAM_USER_ID && process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_AUTO !== "off") {
@@ -477,7 +475,7 @@ async function fetchInstagram({ start, end, max, log, previous }) {
     } catch (err) {
       log(`  instagram: automated read failed (${redact(err.message).slice(0, 160)}); using the last saved events`);
     }
-  } else log("  instagram: no INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN (GitHub secrets), so using the last saved events; setup: events/docs/instagram-setup.md");
+  } else log("  instagram: no INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN (in .env), so using the last saved events; setup: events/docs/instagram-setup.md");
   let file = null;
   try {
     file = await store.get("instagram-events.json");

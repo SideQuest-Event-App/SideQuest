@@ -1,6 +1,6 @@
 // Tests for where Sketch 2's server gets its events and how fresh they are: the events table first (only upcoming
 // events), then the Storage file, then the repo's seed file, each with its "Events: ..." log line; the server
-// starting against a fake Supabase and reporting the source on /api/health; and the 36-hour staleness warning
+// starting against a fake Supabase and reporting the source on /api/health; and the one-week staleness warning
 // (server log and /api/health). Supabase is a local fake (events/test/fake-supabase.js) answering like PostgREST
 // and Storage; nothing reaches the internet.
 //
@@ -56,15 +56,15 @@ const since = (mark) => logs.slice(mark);
   const freshness = require(path.join(ROOT, "lib", "freshness"));
 
   // ---------- Staleness ----------
-  await test("freshness: warns only when the newest import is more than 36 hours old", () => {
+  await test("freshness: warns only when the newest import is more than a week old (imports are run by hand)", () => {
     const now = Date.parse("2026-11-24T12:00:00Z");
     const fresh = freshness.importAge("2026-11-24T07:30:00Z", now);
     assert.deepStrictEqual({ hours: fresh.hours, stale: fresh.stale }, { hours: 4, stale: false });
     assert.strictEqual(freshness.staleWarning(fresh), null);
-    assert.strictEqual(freshness.importAge("2026-11-23T00:30:00Z", now).stale, false); // 35 h
-    const old = freshness.importAge("2026-11-22T23:00:00Z", now); // 37 h
+    assert.strictEqual(freshness.importAge("2026-11-17T13:00:00Z", now).stale, false); // 167 h
+    const old = freshness.importAge("2026-11-17T11:00:00Z", now); // 169 h
     assert.strictEqual(old.stale, true);
-    assert.match(freshness.staleWarning(old, "events table"), /^WARNING: the newest event import is 37 hours old \(imported 2026-11-22T23:00:00Z, read from the events table\); the daily import should keep it under 36 hours/);
+    assert.match(freshness.staleWarning(old, "events table"), /^WARNING: the newest event import is 7 days old \(imported 2026-11-17T11:00:00Z, read from the events table\); time to run the import again: cd events && UPLOAD=1 GEOCODE=1 node run\.js/);
     assert.match(freshness.staleWarning(freshness.importAge("2026-10-15T04:29:11Z", now)), /40 days old/);
     assert.strictEqual(freshness.importAge("sample", now).stale, false);
     assert.strictEqual(freshness.staleWarning(freshness.importAge(undefined, now)), null);
@@ -165,18 +165,18 @@ const since = (mark) => logs.slice(mark);
     assert.strictEqual(health.events.importedAt, importedAt);
     assert.strictEqual(health.events.stale, false);
     assert.strictEqual(health.events.ageHours, 2);
-    assert.strictEqual(health.events.limitHours, 36);
+    assert.strictEqual(health.events.limitHours, 168);
     // The app's state carries the same block for the admin side
     const state = await (await realFetch(`${base}/api/state`)).json();
     assert.strictEqual(state.eventsFeed.source, "table");
   });
 
-  await test("server: an import over 36 hours old shows the warning on /api/health", async () => {
-    db.data.eventsImportedAt = iso(-40);
+  await test("server: an import over a week old shows the warning on /api/health", async () => {
+    db.data.eventsImportedAt = iso(-200);
     const h = await (await realFetch(`${base}/api/health`)).json();
     assert.strictEqual(h.events.stale, true);
-    assert.strictEqual(h.events.ageHours, 40);
-    assert.match(h.events.warning, /^WARNING: the newest event import is 40 hours old .*read from the events table/);
+    assert.strictEqual(h.events.ageHours, 200);
+    assert.match(h.events.warning, /^WARNING: the newest event import is 8 days old .*read from the events table/);
     db.data.eventsImportedAt = importedAt;
   });
 

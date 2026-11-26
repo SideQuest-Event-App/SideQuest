@@ -1,15 +1,13 @@
-// The importer's AI: reading posters and Instagram posts (events/instagram.js) and tagging listings (events/tag.js).
-// Both are run by hand, never by the scheduled import (AI=off there). It uses, in order: Claude Code (`claude` on your
-// PATH, on your Claude plan, no API bill) or, only when TAG_WITH_API=1 / AI=api says so, the paid API key in .env.
-//   mode()                    "claude-code", "api" or "keywords" (no AI)
+// The importer's AI: tagging listings (lib/tagger.js, run at the end of every `node run.js`), reading Instagram posts
+// and posters (instagram.js). It is Claude Code only (`claude` on your PATH, signed in to your Claude plan): no API
+// key is ever used here, so an import never bills the paid API. Without Claude Code, or with AI=off, there is no AI.
+//   mode()                    "claude-code" or "keywords" (no AI)
 //   askJSON(prompt, n, files) the AI's answer as JSON; files are images ([{ name, path }]) it may read
 
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFile, execFileSync } = require("child_process");
-
-const MODEL = process.env.MODEL || "claude-haiku-4-5-20251001";
 
 // Is the `claude` command installed? (checked once)
 let claudeCodeAvailable = false;
@@ -20,10 +18,7 @@ try {
 
 function mode() {
   if (process.env.AI === "off") return "keywords";
-  if (process.env.AI === "api") return process.env.ANTHROPIC_API_KEY ? "api" : "keywords"; // only when asked for by name
-  if (process.env.AI === "claude-code") return claudeCodeAvailable ? "claude-code" : "keywords"; // your plan only
-  // Not set (the apps' "Add from a poster"): Claude Code if it's here, else the key if there is one
-  return claudeCodeAvailable ? "claude-code" : process.env.ANTHROPIC_API_KEY ? "api" : "keywords";
+  return claudeCodeAvailable ? "claude-code" : "keywords";
 }
 
 // ---------- The two AI backends ----------
@@ -60,31 +55,11 @@ function askClaudeCode(prompt, extraArgs = [], files = []) {
   }).finally(() => dir && fs.rmSync(dir, { recursive: true, force: true }));
 }
 
-const MEDIA_TYPES = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif" };
-// Image files as content blocks, each labelled with its file name so the prompt can refer to it
-const imageBlocks = (files) => files.flatMap((f) => [
-  { type: "text", text: `Image file ${f.name}:` },
-  { type: "image", source: { type: "base64", media_type: MEDIA_TYPES[path.extname(f.name).toLowerCase()] || "image/jpeg", data: fs.readFileSync(f.path).toString("base64") } },
-]);
-
-// content is the prompt text, or an array of content blocks (an image plus text); tools are server tools like web search
-async function askAPI(content, maxTokens, tools) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages: [{ role: "user", content }], ...(tools ? { tools } : {}) }),
-  });
-  if (!res.ok) throw new Error(`AI request failed (${res.status}): ${await res.text()}`);
-  const data = await res.json();
-  return data.content.map((c) => c.text || "").join("");
-}
-
-// Ask whichever AI is available and parse its JSON answer. Throws if there's no AI or it fails.
+// Ask Claude Code and parse its JSON answer. Throws if there's no AI or it fails.
 // files: optional images ([{ name, path }]) for it to read; the prompt refers to them by name.
 async function askJSON(prompt, maxTokens = 2000, files = []) {
   const m = mode();
   if (m === "keywords") throw new Error("No AI available");
-  if (m === "api") return parseJSON(await askAPI(files.length ? [...imageBlocks(files), { type: "text", text: prompt }] : prompt, maxTokens));
   return parseJSON(await askClaudeCode(prompt, [], files));
 }
 function parseJSON(text) {
@@ -95,4 +70,4 @@ function parseJSON(text) {
   }
 }
 
-module.exports = { mode, MODEL, askJSON };
+module.exports = { mode, askJSON };

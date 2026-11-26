@@ -101,11 +101,11 @@ const raw = (title, description = "", extra = {}) => ({ source: "Test", sourceId
     assert.strictEqual(tags.needsTag(changed, saved), true);
     assert(/exact list/.test(tags.prompt([e])) && tags.prompt([e]).includes("Wellness"));
   });
-  await test("AI tags: the hand-run step refuses to run inside GitHub Actions", async () => {
+  await test("AI tags: the tagger refuses to run inside GitHub Actions", async () => {
     const { execFileSync } = require("child_process");
     let out = "";
     try { execFileSync(process.execPath, [path.join(EV, "tag.js")], { env: { ...process.env, GITHUB_ACTIONS: "true" }, stdio: "pipe" }); } catch (err) { out = String(err.stderr); }
-    assert(/hand-run step/.test(out), out);
+    assert(/only runs on your own computer/.test(out), out);
   });
 
   // ---------- 2. Prices ----------

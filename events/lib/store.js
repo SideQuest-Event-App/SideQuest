@@ -1,4 +1,4 @@
-// Import files in Supabase Storage: the scheduled importer (GitHub Actions) uploads the week's events here, and
+// Import files in Supabase Storage: `node run.js` with UPLOAD=1 uploads the events here, and
 // the app's server downloads them, so a fresh import needs no commit and no redeploy, and git doesn't grow.
 // Files go to a private bucket ("imports", created on first use), gzipped: events.json is ~6 MB, ~1 MB gzipped.
 // Needs SUPABASE_URL and SUPABASE_SECRET_KEY; without them every call does nothing (returns null / false).

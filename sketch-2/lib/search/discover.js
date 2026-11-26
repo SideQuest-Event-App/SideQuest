@@ -133,7 +133,7 @@ function dataHealth(importedAt, now = Date.now()) {
   return { importedAt, days, stale: days > STALE_DAYS, limit: STALE_DAYS };
 }
 function staleLine(h) {
-  return h && h.stale ? `WARNING: the event data is ${h.days} days old (imported ${h.importedAt}); more than ${h.limit} days means the scheduled import may not be reaching this server.` : null;
+  return h && h.stale ? `WARNING: the event data is ${h.days} days old (imported ${h.importedAt}); more than ${h.limit} days means it's time to run the import again (cd events && UPLOAD=1 GEOCODE=1 node run.js).` : null;
 }
 
 module.exports = { tagCounts, shortlistScore, order, wildcardFor, noteWildcard, crewView, fairOrder, weightsFromVibes, dataHealth, staleLine, context, AREA_POINTS, STALE_DAYS };

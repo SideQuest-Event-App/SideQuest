@@ -196,7 +196,7 @@ async function takeImport(fresh) {
   await write();
   return true;
 }
-// The server calls this every hour, so a new daily import shows up without a restart
+// The server calls this every hour, so a new import shows up without a restart
 async function checkImport() {
   if (!data || !store.configured()) return false;
   const before = lastSource && lastSource.from;

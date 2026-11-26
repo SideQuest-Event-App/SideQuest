@@ -1,9 +1,11 @@
 // Import real GTA events for the next three months into data/events.json (and, with UPLOAD=1, Supabase: the events
-// table "listings" and the Storage file, where the apps' servers pick it up). Runs every day by itself (quick sources;
-// every source on Mondays): .github/workflows/import-events.yml.
-//   node run.js            (from events/)
+// table "listings" and the Storage file, where the apps' servers pick it up). Run by hand on your computer; nothing
+// runs it on a schedule. At the end, the AI tagger reads the new listings with Claude Code on your plan (never an API
+// key; lib/tagger.js), so the upload has their vibes, premises and qualities.
+//   UPLOAD=1 GEOCODE=1 node run.js     (from events/; every source, then tag, then upload)
 //   ONLY=Ticketmaster,Instagram MERGE=1 node run.js
 //                                 (fetch just those sources and keep everyone else's events from last time)
+//   TAG=0 node run.js                  (skip the tagger this time; TAG_MAX=200 to read at most 200 listings)
 // Sources, in the order they win a tie between duplicates:
 //   Ticketmaster (official Discovery API, needs TICKETMASTER_API_KEY), SeatGeek (official Platform API, needs
 //   SEATGEEK_CLIENT_ID; skipped without it), Instagram (the Graph API with
@@ -14,9 +16,9 @@
 // Every site is read within its robots.txt (lib/fetch.js). Not imported: see NOT_IMPORTED.
 //
 // Guardrails: a source that fails, or brings back under half of last run's events, keeps last run's events
-// instead; nothing here uses the AI (AI=off in the scheduled run); only events in the window are kept.
+// instead; the only AI is the tagger (Claude Code, your own computer); only events in the window are kept.
 // Left out: listings outside Toronto ("Beyond Toronto") and appointment-style ones (in-store sales consultations),
-// counted in the summary. AI vibes come only from data/event-tags.json, written by the hand-run `node tag.js`.
+// counted in the summary. AI vibes come from data/event-tags.json, written by the tagger.
 
 const fs = require("fs");
 const path = require("path");
@@ -28,6 +30,7 @@ const { describe } = require("./lib/qualities");
 const tags = require("./lib/tags");
 const { dedupe } = require("./lib/dedupe");
 const series = require("./lib/series");
+const { tagNew } = require("./lib/tagger");
 const store = require("./lib/store");
 const eventsTable = require("./lib/events-table");
 const { fetchDice } = require("./sources/dice");
@@ -168,24 +171,35 @@ async function previousImport() {
   // Last run's events (kept for a source that broke) go through today's filters too
   const all = SOURCES.flatMap(([name]) => found[name] || []).filter((e) => !dropReason(e));
   const deduped = dedupe(all.map(series.unlend)).events;
-  // Vibes, format and setting saved by the last hand-run `node tag.js` (never the AI here)
-  const saved = tags.load();
-  // retag: last run's kept events get today's keyword rules. Then the dates of each recurring night are linked and
-  // share what's known about it (lib/series.js; the memory of earlier runs too). describe: qualities and the thin flag.
+  // The AI's saved tags (data/event-tags.json) are applied; retag: last run's kept events get today's keyword rules.
+  // Then the dates of each recurring night are linked and share what's known about it (lib/series.js; the memory of
+  // earlier runs too). describe: qualities and the thin flag.
   const memory = (await store.get("series.json").catch(() => null)) || series.readMemory();
-  const linked = series.link(deduped.map((e) => tags.apply(retag(e), saved)), memory);
-  const events = linked.events.map(describe);
+  const build = () => {
+    const saved = tags.load();
+    const l = series.link(deduped.map((e) => tags.apply(retag(e), saved)), memory);
+    return { linked: l, events: l.events.map(describe) };
+  };
+  let { linked, events } = build();
   if (!events.length) {
     log("\nNo events imported; leaving the last import as it was.");
     process.exit(1);
   }
+  const fileOf = (evs) => ({ importedAt: new Date().toISOString(), window: { from: start.toISOString(), to: end.toISOString() }, sources: report, notImported: NOT_IMPORTED, events: evs });
+  const writeLocal = (f) => { fs.mkdirSync(path.dirname(OUT), { recursive: true }); fs.writeFileSync(OUT, JSON.stringify(f, null, 0).replace(/\},\{"id"/g, '},\n{"id"') + "\n"); };
+
+  // The AI tagger reads what's new, with Claude Code on your plan (lib/tagger.js): on your own computer only, never
+  // with an API key. The import is saved locally first, so stopping during tagging never loses it; then the new tags
+  // are applied and shared across each recurring night before the upload.
+  writeLocal(fileOf(events));
+  const tagRun = await tagNew(events, { max: Number(process.env.TAG_MAX) || Infinity, log });
+  if (tagRun.done) ({ linked, events } = build());
 
   const nextMemory = series.remember(events, memory, new Date(), linked.keys);
   series.saveMemory(nextMemory);
   if (process.env.UPLOAD) await store.put("series.json", nextMemory).catch((err) => log(`  Series memory not uploaded (${err.message})`));
-  const file = { importedAt: new Date().toISOString(), window: { from: start.toISOString(), to: end.toISOString() }, sources: report, notImported: NOT_IMPORTED, events };
-  fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, JSON.stringify(file, null, 0).replace(/\},\{"id"/g, '},\n{"id"') + "\n");
+  const file = fileOf(events);
+  writeLocal(file);
   let where = "data/events.json";
   let tableLine = null;
   if (process.env.UPLOAD) {
@@ -214,7 +228,7 @@ async function previousImport() {
   lines.push(`  With a price: ${events.length - missing.price} of ${events.length} (${Math.round((100 * (events.length - missing.price)) / events.length)}%); no vibe: ${events.filter((e) => !e.vibes.length).length}`);
   if (Object.keys(dropped).length) lines.push(`  Left out: ${Object.entries(dropped).map(([k, n]) => `${n} ${k}`).join(", ")}`);
   const tagged = events.filter((e) => e.tagSource === "ai").length;
-  lines.push(`  AI tags applied from data/event-tags.json: ${tagged}; untagged listings: ${events.length - tagged} (run \`node tag.js\` by hand to tag them)`);
+  lines.push(`  AI tagger: ${tagRun.skipped ? `skipped (${tagRun.skipped}); ${tagRun.asked} listings waiting` : `${tagRun.done} of ${tagRun.asked} new listings tagged`}. AI tags on ${tagged} of ${events.length} events`);
   // Listings too thin to say what the night is like: flagged here (and on the event page), never filled in with guesses
   const thin = events.filter((e) => e.info === "thin");
   lines.push(`  Thin listings (too little to tag well): ${thin.length} of ${events.length}${thin.length ? `, e.g. ${thin.slice(0, 8).map((e) => `"${e.title.slice(0, 40)}" (${e.source})`).join(", ")}` : ""}`);

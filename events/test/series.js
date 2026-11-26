@@ -151,5 +151,37 @@ test("series: the dates' own pattern wins over one entry's rule (two alternating
   assert.strictEqual(events[0].series.rule, "Every Sunday");
 });
 
+test("tagger: one date per recurring night (the one that says the most), skipping nights already tagged", () => {
+  const T = require(path.join(ROOT, "lib", "tagger"));
+  const future = (d) => `2099-${d}T02:00:00.000Z`;
+  const a1 = mk("SLUR", "x", "V", { startsAt: future("01-02"), description: "short", series: { id: "s1" } });
+  const a2 = mk("SLUR", "x", "V", { startsAt: future("01-09"), description: "a much longer description of the night", series: { id: "s1" } });
+  const b1 = mk("BAD DOG", "x", "V", { startsAt: future("01-03"), series: { id: "s2" } });
+  const b2 = mk("BAD DOG", "x", "V", { startsAt: future("01-30"), series: { id: "s2" } });
+  const one = mk("One-off", "x", "V", { startsAt: future("01-05") });
+  const saved = { tags: { [b1.id]: { vibes: ["Dance"], fp: "old" } } };
+  const todo = T.todoFor([a1, a2, b1, b2, one], saved);
+  assert.strictEqual(todo.length, 2);
+  assert.ok(todo.some((e) => e.id === a2.id) && !todo.some((e) => e.id === a1.id), "the fuller SLUR date, once");
+  assert.ok(!todo.some((e) => e.series && e.series.id === "s2"), "BAD DOG already has a tagged date");
+  assert.ok(todo.some((e) => e.id === one.id));
+});
+
+test("tagger: never on GitHub's servers, never with an API key, and it says why it skipped", () => {
+  const T = require(path.join(ROOT, "lib", "tagger"));
+  process.env.GITHUB_ACTIONS = "true";
+  assert.match(T.unavailable(), /own computer/);
+  delete process.env.GITHUB_ACTIONS;
+  assert.strictEqual(T.unavailable(), "AI=off"); // this test runs with AI=off
+  process.env.TAG = "0";
+  assert.strictEqual(T.unavailable(), "TAG=0");
+  delete process.env.TAG;
+  // The importer's AI has no API path at all
+  for (const f of ["lib/ai.js", "lib/tagger.js", "tag.js", "run.js"]) {
+    const src = require("fs").readFileSync(path.join(ROOT, f), "utf8");
+    assert.ok(!/api\.anthropic\.com|x-api-key|ANTHROPIC_API_KEY|TAG_WITH_API/.test(src), `${f} mentions an API key path`);
+  }
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

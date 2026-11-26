@@ -186,21 +186,24 @@ The exceptions, each marked in the code with a `ponytail:` comment:
 - **Review.** There's no review team in this sketch, so submitting for review approves the host straight away.
 - **Scheduled announcements and sidequests** go out on the first app load after their time, not to the minute.
 
-## Where the events come from (automatic import)
+## Where the events come from (the import, run by hand)
 
-The importer (`events/`, see [its README](../events/README.md)) gathers the next three months of in-person GTA events. A GitHub Action (`.github/workflows/import-events.yml`) runs it on its own and puts the result in Supabase: one row per event in the `listings` table, and (during the switch) the whole import as a file in Storage. This server checks for a new import every hour, so you don't need to commit, redeploy or restart.
+The importer (`events/`, see [its README](../events/README.md)) gathers the next three months of in-person GTA events. Nothing runs it on a schedule: you run it on your own computer, and it uploads to Supabase (one row per event in the `listings` table, plus a file in Storage), where this server picks it up within the hour.
 
-- **Every day except Monday, about 07:17 UTC:** the quick sources (Ticketmaster, SeatGeek, City of Toronto, Toronto Public Library, Luma, DICE, Instagram); the others keep their last events. **Monday, about 06:23 UTC:** every source (Meetup alone takes about 35 minutes). GitHub often starts scheduled runs late, sometimes by hours.
-- **The daily and Monday schedules only run once the workflow file is on `main`.** GitHub runs scheduled workflows from the default branch only. Until then, the import runs from the `claude/dazzling-brahmagupta-4ldxu4` branch in two ways:
-  - **On a push** to that branch that changes the import code (`events/**`, except its output, docs and tests) or the workflow file. A push run imports every source.
-  - **By hand:** on GitHub, open **Actions**, click **Import events**, click **Run workflow**, pick `claude/dazzling-brahmagupta-4ldxu4` under "Use workflow from", and click the green **Run workflow** button.
-  - Runs wait for each other (one at a time), and a newer waiting run replaces an older one, so they never pile up.
+```
+cd events
+UPLOAD=1 GEOCODE=1 node run.js                       # every source, then the AI tagger, then the upload
+UPLOAD=1 GEOCODE=1 ONLY=Eventbrite MERGE=1 node run.js   # one source; everyone else keeps their last events
+```
+
+- **The AI tagger runs at the end of every import** (`lib/tagger.js`): Claude Code on your Claude plan reads the new listings (one date per recurring night) and writes their vibes, premise, qualities and keywords before the upload. It never uses an API key. `TAG=0` skips it; `TAG_MAX=200` caps it. Stopping it halfway keeps what's done, and the next run picks up from there.
+- **The app warns after a week** without a new import (server log, `/api/health`, the admin side).
 - **Order** (the earlier source wins a tie between duplicates): Ticketmaster, SeatGeek, Instagram, DICE, Meetup, Luma, City of Toronto, Toronto Public Library, Eventbrite.
-- **SeatGeek** (optional): the official Platform API, for Toronto-area concerts, comedy and theatre (no sports). Add the `SEATGEEK_CLIENT_ID` secret (a client id from [seatgeek.com/account/develop](https://seatgeek.com/account/develop)); without it SeatGeek is skipped. The same show on Ticketmaster and SeatGeek is kept once, as Ticketmaster's. SeatGeek's terms ask for SeatGeek attribution wherever its data is shown.
+- **SeatGeek** (optional): the official Platform API, for Toronto-area concerts, comedy and theatre (no sports). Add `SEATGEEK_CLIENT_ID` to `.env` (a client id from [seatgeek.com/account/develop](https://seatgeek.com/account/develop)); without it SeatGeek is skipped. The same show on Ticketmaster and SeatGeek is kept once, as Ticketmaster's. SeatGeek's terms ask for SeatGeek attribution wherever its data is shown.
 - **Map coordinates:** a venue with no coordinates, or with ones in Lake Ontario (often a Meetup venue that's only a plus code), is looked up on OpenStreetMap's Nominatim (one request a second, the generic User-Agent `SideQuest-class-project`, answers cached between runs). If nothing trustworthy is found, the event stays in the lists but gets no pin. The map also leaves off any pin in the lake or outside the GTA; it never places a guess.
 - **Where this server reads them from,** in order: the `listings` table (only events that haven't ended), the Storage file, then `events/data/events.json`. Its log says which, e.g. `Events: table (2319 upcoming, updated 2026-11-25T07:31:02.000Z)`. `/api/health` shows the same, plus how old the newest import is; over 36 hours, the log and `/api/health` carry a `WARNING: the newest event import is … old` line.
-- **Instagram is automatic once its two secrets are added** (`INSTAGRAM_USER_ID`, `INSTAGRAM_ACCESS_TOKEN`; step by step: [`events/docs/instagram-setup.md`](../events/docs/instagram-setup.md)). Each day it reads the accounts' recent posts through Instagram's official Graph API, uses what the AI already read, and reads new captions with plain rules (no AI). Without the secrets it uses the events saved by the last by-hand `node import/instagram.js` (from `sketch-1/`, with Claude Code), which still gives the best results because the AI reads the posters too. To add or drop an account, edit `reference/instagram-accounts.md`.
-- **Eventbrite is blocked from GitHub's servers** (since 19 Oct 2026 every listing page answers 405, Eventbrite's CAPTCHA). The import now says so in one line and keeps last run's Eventbrite events, if any. To bring them back, run it from a home connection: from `sketch-1/` with the Supabase keys in `.env`, `UPLOAD=1 ONLY=Eventbrite MERGE=1 node import/run.js`.
+- **Instagram is automatic once its two values are in `.env`** (`INSTAGRAM_USER_ID`, `INSTAGRAM_ACCESS_TOKEN`; step by step: [`events/docs/instagram-setup.md`](../events/docs/instagram-setup.md)). Each import reads the accounts' recent posts through Instagram's official Graph API, uses what the AI already read, and reads new captions with plain rules (no AI). Without the secrets it uses the events saved by the last by-hand `node import/instagram.js` (from `sketch-1/`, with Claude Code), which still gives the best results because the AI reads the posters too. To add or drop an account, edit `reference/instagram-accounts.md`.
+- **Eventbrite blocks cloud servers** (since 19 Oct 2026 every listing page answers 405, Eventbrite's CAPTCHA). The import now says so in one line and keeps last run's Eventbrite events, if any. To bring them back, run it from a home connection: from `sketch-1/` with the Supabase keys in `.env`, `UPLOAD=1 ONLY=Eventbrite MERGE=1 node import/run.js`.
 - **Not imported:** NOW Toronto (it turns automated visitors away), Resident Advisor, Partiful and blogTO (their robots.txt or terms rule it out).
 
 ### One-time setup: the events table
@@ -212,17 +215,17 @@ Do this once, in the Supabase project the app uses. Until you do, everything kee
 3. Open `sketch-2/supabase/schema.sql` from this repo, copy **all** of it, and paste it into the editor. (It's safe to run again: it only creates what's missing and doesn't touch `sketch2_events`, `sketch2_accounts` or `app_state`.)
 4. Click **Run**. It should say "Success. No rows returned".
 5. Check: in the left sidebar, click **Table Editor**. You should see two new tables, `listings` (empty for now) and `event_imports`.
-6. On GitHub, open the **Actions** tab, click **Import events**, then **Run workflow** (leave "only" empty for every source, or type `Ticketmaster,City of Toronto` for a quick test of about a minute). When it's done, the run's summary should say `... to seed/events.json and Supabase Storage and the events table` and show an `Events table: N new, ...` line.
+6. Run an import with the upload: `cd events && UPLOAD=1 GEOCODE=1 ONLY="Ticketmaster,City of Toronto" MERGE=1 node run.js` (about a minute). Its summary should say `... and the events table`.
 7. In the Table Editor, `listings` now has a row per event. In Render > sidequest-sidekick > Logs, within the hour (or right after a restart) you should see `Events: table (N upcoming, updated …)`.
 
 Past events can be deleted every night with `supabase/cleanup-past-events.sql` (it explains how to schedule it with pg_cron). It isn't switched on: the server only ever asks for upcoming events, so it isn't needed yet.
 
-One-time setup: on GitHub, go to Settings → Secrets and variables → Actions and add `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `TICKETMASTER_API_KEY` (the same values as in your `.env`), for SeatGeek `SEATGEEK_CLIENT_ID`, and, for automatic Instagram, `INSTAGRAM_USER_ID` and `INSTAGRAM_ACCESS_TOKEN`. Then on the Actions tab, open "Import events" and click "Run workflow" for the first import. Until that first import exists, the server uses `events/data/events.json`.
+Keys: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `TICKETMASTER_API_KEY`, optionally `SEATGEEK_CLIENT_ID` and the two Instagram values, in `sketch-2/.env` or `events/.env`.
 
 Guardrails:
 - Every site is read within its robots.txt, including its Crawl-delay. A site that answers 403 or 429 (blocked or rate-limited) isn't asked again that run.
 - If a source fails, or brings back under half of last run's events, it keeps last run's events.
-- The scheduled runs never use the AI (`AI=off`). The by-hand Instagram run (or a run with `IG_AI=1`) makes at most `IG_MAX_CALLS` AI calls per run (default 40), reads 2 images per post, and reads each post only once. It pauses accounts with 20 posts read and no events, and deletes downloaded images once they're read.
+- The only AI is Claude Code on your plan: the tagger at the end of each import, and Instagram posters when you ask. The by-hand Instagram run (or a run with `IG_AI=1`) makes at most `IG_MAX_CALLS` AI calls per run (default 40), reads 2 images per post, and reads each post only once. It pauses accounts with 20 posts read and no events, and deletes downloaded images once they're read.
 - Only events in the next three months are kept. Neither the import nor its download cache is committed to git.
 
 ## Kept from Sketch 1 beyond the design

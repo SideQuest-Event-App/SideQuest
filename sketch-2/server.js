@@ -34,7 +34,7 @@ const launch = require("./lib/launch"); // the launch map: "You · <neighbourhoo
 const mixed = require("./lib/search/mixed"); // search as one list of events and places, one score
 const taste = require("./lib/search/taste"); // per-person vibe weights learned from saves, accepts, ratings, "not for me"
 const discover = require("./lib/search/discover"); // feed order (variety, seen penalty), Wildcard, crew blend, data age
-const freshness = require("./lib/freshness"); // the daily import's 36-hour staleness warning
+const freshness = require("./lib/freshness"); // the import's one-week staleness warning
 const weather = require("./lib/search/weather"); // Open-Meteo, cached hourly, skipped when unreachable
 const rank = require("./lib/search/rank");
 const foryou = require("./lib/search/foryou"); // Discover's For you as vibe collections of events and places
@@ -87,7 +87,7 @@ function travelFor(area) {
 const now = () => new Date();
 const endsAt = (e) => (e.endsAt ? Date.parse(e.endsAt) : Date.parse(e.startsAt) + 2 * 3600 * 1000);
 const isOver = (e) => now().getTime() > endsAt(e);
-// Where the listings came from (lib/db.js seedEvents) and whether the newest import is over 36 hours old
+// Where the listings came from (lib/db.js seedEvents) and whether the newest import is over a week old
 const sourceName = (from) => ({ table: "events table", storage: "Storage file", seed: "seed file" })[from] || null;
 function eventsFeed() {
   const src = db.eventsSource || {};
@@ -309,7 +309,7 @@ function view(userId, hostId) {
     vocab: { VIBES, ORIGINS, AREAS, WHEN, WHEN_OUT, DAYS, CREW_SIZES, TRANSIT, RATE_TAGS, HOST_TYPES, PAST_SUGGESTIONS, FLAG_FIELDS },
     friends: db.FRIENDS,
     dataHealth: discover.dataHealth(d.eventsImportedAt, now().getTime()), // "data is more than 8 days old" on the admin side
-    eventsFeed: eventsFeed(), // where the events came from (table, Storage file or seed) and the 36-hour daily-import check
+    eventsFeed: eventsFeed(), // where the events came from (table, Storage file or seed) and the one-week freshness check
     user: user && { ...user, shown: undefined, tasteUndo: undefined, tasteFresh: undefined, ...tabs.view(user), taste: taste.summary(user), feedKey: feedKey(user), friendList: friendList(user), highlights: highlights(user), friendRequests: requestsFor(user), pendingFriends: sentTo(user).map(person).filter(Boolean) },
     party: user && { ...d.parties[user.id], blendKey: blendKey(user) },
     host,
@@ -2066,7 +2066,7 @@ db.load().then(() => sidekick.init({ events: () => db.data.events })).then(() =>
   const late = freshness.staleWarning(freshness.importAge(db.data.eventsImportedAt), db.eventsSource && sourceName(db.eventsSource.from));
   if (late) console.warn(late);
   track("server_start", { aiMode: m, events: db.data.events.length });
-  // The daily import lands in the events table (and Storage); look for a new one every hour
+  // An import lands in the events table (and Storage); look for a new one every hour
   setInterval(() => db.checkImport().then((took) => {
     if (took) console.log(`New import loaded (${db.data.eventsImportedAt})`);
     const line = discover.staleLine(discover.dataHealth(db.data.eventsImportedAt));

@@ -1,7 +1,7 @@
 // AI tags for listings: 1 to 3 of the app's 21 vibes, plus a format and a setting, chosen by Claude from fixed lists.
 // The AI step is `node tag.js`, run by hand (like instagram.js). It only reads new or changed
 // listings and saves its answers to data/event-tags.json, keyed by event id with a fingerprint of the listing.
-// The scheduled import (AI off) only applies what's saved here: it never calls the AI.
+// The import applies what's saved here; lib/tagger.js (at the end of `node run.js`, or `node tag.js`) writes it.
 //
 // Keyword vibes (normalize.js) stay as the fallback for every listing the AI hasn't read.
 
@@ -39,7 +39,7 @@ function load(file = FILE) {
   }
 }
 function save(saved, file = FILE) {
-  const out = { note: "Written by `node tag.js` (run by hand). Applied by the scheduled import without calling the AI.", updatedAt: new Date().toISOString(), tags: saved.tags };
+  const out = { note: "Written by the AI tagger (lib/tagger.js: at the end of `node run.js`, or `node tag.js`), with Claude Code. Applied by every import.", updatedAt: new Date().toISOString(), tags: saved.tags };
   fs.writeFileSync(file, JSON.stringify(out, null, 0).replace(/,"(\d+)":/g, ',\n"$1":') + "\n");
 }
 

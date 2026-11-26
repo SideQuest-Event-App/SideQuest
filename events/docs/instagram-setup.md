@@ -1,8 +1,8 @@
 # Turning on the automatic Instagram import
 
-Once two secrets are added on GitHub, the daily "Import events" run reads the recent posts of every account in
+Once two values are in `events/.env`, every `node run.js` reads the recent posts of every account in
 `events/config/instagram-accounts.md` by itself and turns the ones that announce events into listings. Until
-then it keeps using the events saved by the last by-hand `node instagram.js`.
+then it keeps using the events saved by the last `node instagram.js`.
 
 It uses Instagram's **official Graph API** ("Business Discovery"): Meta's supported way for an app to read another
 professional (business or creator) account's public posts. It doesn't log in as anyone, doesn't open instagram.com
@@ -12,9 +12,10 @@ permission; the Graph API, used under Meta's Platform Terms, *is* that permissio
 **What it can't do:** read personal (non-professional) accounts, private accounts, or age-gated accounts. Every
 account in our list is a venue's or promoter's business account, so that's fine. Stories aren't available either.
 
-**What it reads:** each account's last 40 posts, once a day (61 accounts = 61 calls a day; the Graph API allows far
+**What it reads:** each account's last 40 posts, once per import (61 accounts = 61 calls; the Graph API allows far
 more). New posts are read with plain rules (a date, a time, a price in the caption). Posts the AI already read (with
-their posters) keep the AI's reading. The AI never runs in the scheduled job.
+their posters) keep the AI's reading. The AI only reads posts when you ask (`node instagram.js`, or `IG_AI=1`),
+with Claude Code on your plan.
 
 ## What you need
 
@@ -83,37 +84,32 @@ lasts about 60 days, so you'd repeat this every two months. The import's log say
 4. Optional check: query `<that id>?fields=business_discovery.username(thegarrisonto){username,media_count}`. If it
    answers with `thegarrisonto`, everything works.
 
-### 6. Add the two secrets on GitHub
+### 6. Put the two values in `.env`
 
-1. Open the repository on GitHub → **Settings** → **Secrets and variables** → **Actions**.
-2. Click **New repository secret**. Name: `INSTAGRAM_USER_ID`, value: the id from step 5. **Add secret**.
-3. Click **New repository secret** again. Name: `INSTAGRAM_ACCESS_TOKEN`, value: the token from step 4. **Add secret**.
-
-That's all. GitHub hides secret values in logs, and the importer also masks the token in every line it prints.
-
-### 7. Try it
-
-1. On GitHub, open the **Actions** tab → **Import events** → **Run workflow**, type `Instagram` in "only", and run it.
-2. When it finishes, open the run's **Import** step. You should see lines like
-   `instagram: 61 accounts downloaded` and
-   `instagram: 1234 recent posts from 61 accounts (… read before by the AI, … read by the caption rules), N events`.
-3. If it says `automated read failed (…)` instead, the message says why (most often an expired token: make a new one
-   in step 4 and replace the `INSTAGRAM_ACCESS_TOKEN` secret). The run still uses the last saved events.
-
-## Running it on your own computer
-
-Put the same two values in `events/.env` (or `sketch-2/.env`):
+In `events/.env` (or `sketch-2/.env`), never in the code:
 
 ```
 INSTAGRAM_USER_ID=1784...
 INSTAGRAM_ACCESS_TOKEN=...
 ```
 
-- `ONLY=Instagram MERGE=1 node run.js` (from `events/`): the same automatic read as the daily run.
-- `node instagram.js`: the by-hand run with Claude Code, which also reads the posters (better results). What it
-  reads is saved in `data/instagram-extracted.json`; commit that file and the daily run uses those readings too.
-- `IG_AI=1 ONLY=Instagram MERGE=1 node run.js`: the automatic read, with the AI reading new posts (at most
-  `IG_MAX_CALLS` calls, default 40). Only when you choose to; the scheduled run never does.
+The importer masks the token in every line it prints.
+
+### 7. Try it
+
+1. `cd events && ONLY=Instagram MERGE=1 node run.js`
+2. You should see lines like `instagram: 61 accounts downloaded` and
+   `instagram: 1234 recent posts from 61 accounts (… read before by the AI, … read by the caption rules), N events`.
+3. If it says `automated read failed (…)` instead, the message says why (most often an expired token: make a new one
+   in step 4 and replace it in `.env`). The run still uses the last saved events.
+
+## Ways to run it
+
+- `ONLY=Instagram MERGE=1 node run.js` (from `events/`): the automatic read, as part of an import.
+- `node instagram.js`: Claude Code also reads the posters (better results). What it reads is saved in
+  `data/instagram-extracted.json`, and every import after uses those readings too.
+- `IG_AI=1 ONLY=Instagram MERGE=1 node run.js`: the automatic read, with Claude Code reading new posts (at most
+  `IG_MAX_CALLS` calls, default 40).
 
 ## Switches
 

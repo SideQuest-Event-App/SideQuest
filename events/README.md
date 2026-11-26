@@ -5,8 +5,8 @@ older `sketch-1`) read its output. Node 20+, nothing to install.
 
 ```
 events/
-  run.js          the import: every source, then cleanup, duplicates, recurring nights, qualities → data/events.json
-  tag.js          by hand: the AI reads new listings (one date per recurring night) → data/event-tags.json
+  run.js          the import: every source, cleanup, duplicates, recurring nights, qualities, AI tags → data/events.json
+  tag.js          the AI tagger on its own (run.js already runs it) → data/event-tags.json
   instagram.js    by hand: the AI reads venues' Instagram posts and posters → data/instagram-events.json
   sources/        one file per site or kind of site (each says how it reads it, and why that's allowed)
   lib/            the shared steps: fetch (polite, robots.txt, cache), normalize, locate, dedupe, series, qualities,
@@ -17,8 +17,25 @@ events/
   test/           node test/<file>.js, or all of them with node sketch-2/test/run.js from the repo root
 ```
 
-Keys go in `events/.env` (copy `.env.example`), or stay in `sketch-2/.env`: the importer reads both. The scheduled
-import (`.github/workflows/import-events.yml`) runs `node run.js` here with GitHub's secrets and uploads to Supabase.
+Keys go in `events/.env` (copy `.env.example`), or stay in `sketch-2/.env`: the importer reads both.
+
+## Running an import
+
+Nothing runs it on a schedule: you run it on your own computer.
+
+```
+cd events
+UPLOAD=1 GEOCODE=1 node run.js                           # every source, then the AI tagger, then the upload
+UPLOAD=1 GEOCODE=1 ONLY=Eventbrite MERGE=1 node run.js   # one source; the others keep their last events
+TAG=0 node run.js                                        # no tagging this time (TAG_MAX=200 caps it instead)
+node tag.js                                              # tag without importing (DRY=1 to preview)
+```
+
+The **AI tagger** runs at the end of every import: Claude Code on your Claude plan (`claude` on your PATH, signed in)
+reads the new listings, one date per recurring night, and writes their vibes, format, setting, premise, qualities and
+keywords to `data/event-tags.json` before the upload. No API key is ever used. The import is saved locally before
+tagging starts, and tags are saved after every batch of 30, so stopping halfway loses nothing: the next run picks up
+where it left off. Without Claude Code it says so and uploads without new tags.
 
 ## Adding a venue
 
