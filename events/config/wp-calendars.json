@@ -1,0 +1,7 @@
+{
+  "note": "Venue websites on WordPress with The Events Calendar, read by import/sources/wordpress.js through /wp-json/tribe/events/v1/events. Add a site only after checking its robots.txt allows it (fetch.js checks again on every request). venue: the building (these calendars often name a room); lat/lng optional (earlier imports or OpenStreetMap fill them in).",
+  "calendars": [
+    { "name": "Buddies in Bad Times", "site": "https://buddiesinbadtimes.com", "checked": "2026-11-26: robots.txt allows all; public events API", "venue": { "name": "Buddies in Bad Times Theatre", "address": "12 Alexander St, Toronto, ON M4Y 1B4" }, "categories": ["queer"] },
+    { "name": "Grossman's Tavern", "site": "https://grossmanstavern.com", "checked": "2026-11-26: robots.txt only disallows /wp-admin/; public events API", "venue": { "name": "Grossman's Tavern", "address": "379 Spadina Ave, Toronto, ON M5T 2G3" }, "categories": ["live music"] }
+  ]
+}

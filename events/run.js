@@ -1,58 +1,66 @@
-// Import real GTA events for the next three months into seed/events.json (and, with UPLOAD=1, Supabase: the events
+// Import real GTA events for the next three months into data/events.json (and, with UPLOAD=1, Supabase: the events
 // table "listings" and the Storage file, where the apps' servers pick it up). Runs every day by itself (quick sources;
 // every source on Mondays): .github/workflows/import-events.yml.
-//   node import/run.js            (from sketch-1/)
-//   ONLY=Ticketmaster,Instagram MERGE=1 node import/run.js
+//   node run.js            (from events/)
+//   ONLY=Ticketmaster,Instagram MERGE=1 node run.js
 //                                 (fetch just those sources and keep everyone else's events from last time)
 // Sources, in the order they win a tie between duplicates:
 //   Ticketmaster (official Discovery API, needs TICKETMASTER_API_KEY), SeatGeek (official Platform API, needs
 //   SEATGEEK_CLIENT_ID; skipped without it), Instagram (the Graph API with
 //   INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN, read by saved AI readings and caption rules, else the events saved by
-//   the last `node import/instagram.js`; no AI unless IG_AI=1), then the sites: DICE (published sitemaps + event pages),
+//   the last `node instagram.js`; no AI unless IG_AI=1), then the sites: DICE (published sitemaps + event pages),
 //   Meetup (Toronto groups' event pages), Luma (Toronto discover list), City of Toronto and Toronto Public Library
 //   (open data), Eventbrite (listing + event pages).
-// Every site is read within its robots.txt (import/fetch.js). Not imported: see NOT_IMPORTED.
+// Every site is read within its robots.txt (lib/fetch.js). Not imported: see NOT_IMPORTED.
 //
 // Guardrails: a source that fails, or brings back under half of last run's events, keeps last run's events
 // instead; nothing here uses the AI (AI=off in the scheduled run); only events in the window are kept.
 // Left out: listings outside Toronto ("Beyond Toronto") and appointment-style ones (in-store sales consultations),
-// counted in the summary. AI vibes come only from import/event-tags.json, written by the hand-run `node import/tag.js`.
+// counted in the summary. AI vibes come only from data/event-tags.json, written by the hand-run `node tag.js`.
 
 const fs = require("fs");
 const path = require("path");
 
-// Load .env for the Ticketmaster and Supabase keys (the scheduled run gets them from GitHub's secrets)
-const envPath = path.join(__dirname, "..", ".env");
-if (fs.existsSync(envPath)) {
-  for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
-    const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/);
-    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
-  }
-}
+require("./lib/paths").loadEnv();
 
-const { toEvent, dropReason, retag, NA } = require("./normalize");
-const tags = require("./tags");
-const { dedupe } = require("./dedupe");
-const store = require("../lib/store");
-const eventsTable = require("../lib/events-table");
+const { toEvent, dropReason, retag, NA } = require("./lib/normalize");
+const { describe } = require("./lib/qualities");
+const tags = require("./lib/tags");
+const { dedupe } = require("./lib/dedupe");
+const series = require("./lib/series");
+const store = require("./lib/store");
+const eventsTable = require("./lib/events-table");
 const { fetchDice } = require("./sources/dice");
 const { fetchEventbrite } = require("./sources/eventbrite");
 const { fetchTicketmaster } = require("./sources/ticketmaster");
 const { fetchSeatGeek } = require("./sources/seatgeek");
-const locate = require("./locate");
-const { inGTA } = require("../lib/gta");
-// Venues with missing or bad coordinates are looked up on OpenStreetMap (GEOCODE=1; see import/locate.js)
-const geocoder = process.env.GEOCODE === "1" ? require("../lib/geocode") : null;
+const locate = require("./lib/locate");
+const { inGTA } = require("./lib/gta");
+// Venues with missing or bad coordinates are looked up on OpenStreetMap (GEOCODE=1; see lib/locate.js)
+const geocoder = process.env.GEOCODE === "1" ? require("./lib/geocode") : null;
 const { fetchMeetup } = require("./sources/meetup");
 const { fetchLuma } = require("./sources/luma");
 const { fetchToronto } = require("./sources/toronto");
 const { fetchTPL } = require("./sources/tpl");
 const { fetchInstagram } = require("./sources/instagram");
 const { fetchICS } = require("./sources/ics");
+const { fetchTorevent } = require("./sources/torevent");
+const { fetchShowpass } = require("./sources/showpass");
+const { fetchYohomo } = require("./sources/yohomo");
+const { fetchWordpress } = require("./sources/wordpress");
+const { fetchVenuePages } = require("./sources/venue-pages");
+// Both kinds of venue website, as one source
+const { fetchElfsight } = require("./sources/elfsight");
+// Every kind of venue website, as one source: WordPress calendars, pages with schema.org events, Elfsight calendars
+async function fetchVenueWebsites(o) {
+  const all = [];
+  for (const f of [fetchWordpress, fetchVenuePages, fetchElfsight]) { const r = await f(o); if (Array.isArray(r)) all.push(...r); }
+  return all;
+}
 const { fetchOntario } = require("./sources/ontario");
 
 const DAYS = Number(process.env.DAYS || 92);
-const OUT = process.env.IMPORT_OUT || path.join(__dirname, "..", "seed", "events.json"); // tests write elsewhere
+const OUT = process.env.IMPORT_OUT || require("./lib/paths").EVENTS_FILE; // tests write elsewhere
 const log = (...a) => console.log(...a);
 
 // In priority order. Each source works on a different site, so they run side by side; limits mean "all"
@@ -66,7 +74,15 @@ const SOURCES = [
   ["City of Toronto", fetchToronto, Number(process.env.TORONTO_MAX || 10000)],
   ["Toronto Public Library", fetchTPL, Number(process.env.TPL_MAX || 3000)],
   ["Eventbrite", fetchEventbrite, Number(process.env.EVENTBRITE_MAX || 20000)],
-  // Venues' own calendar feeds (import/ics-feeds.json; empty until a feed's format and terms are checked)
+  // Curated calendars and ticketing for the scenes the big sites miss: TOREVENT (hand-curated arts and nightlife),
+  // Showpass (many small venues and promoters sell there), YOHOMO (Toronto's queer events list)
+  ["TOREVENT", fetchTorevent, Number(process.env.TOREVENT_MAX || 5000)],
+  ["Showpass", fetchShowpass, Number(process.env.SHOWPASS_MAX || 3000)],
+  ["YOHOMO", fetchYohomo, Number(process.env.YOHOMO_MAX || 300)],
+  // Venues' own websites: WordPress event calendars (config/wp-calendars.json), pages with schema.org event data
+  // (config/venue-pages.json) and Elfsight calendar widgets (config/elfsight-calendars.json), each checked against robots.txt
+  ["Venue websites", fetchVenueWebsites, Number(process.env.VENUES_MAX || 3000)],
+  // Venues' own calendar feeds (config/ics-feeds.json; empty until a feed's format and terms are checked)
   ["Venue calendars", fetchICS, Number(process.env.ICS_MAX || 3000)],
   // Ontario's open data: off unless ONTARIO_EVENTS=1 (format not yet checked against the live file)
   ["Ontario open data", fetchOntario, Number(process.env.ONTARIO_MAX || 2000)],
@@ -86,7 +102,7 @@ async function previousImport() {
     const stored = await store.get("events.json");
     if (stored) return stored;
   } catch (err) {
-    log(`Couldn't read last import from Supabase Storage (${err.message}); using seed/events.json`);
+    log(`Couldn't read last import from Supabase Storage (${err.message}); using data/events.json`);
   }
   return fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, "utf8")) : null;
 }
@@ -103,7 +119,7 @@ async function previousImport() {
   const report = {};
   const dropped = {}; // why listings were left out ("beyond-toronto", "appointment") -> count
   const found = {}; // source -> events, put together in priority order below
-  const located = {}; // source -> what import/locate.js did with its venues' coordinates
+  const located = {}; // source -> what lib/locate.js did with its venues' coordinates
   await Promise.all(
     RUN.map(async ([name, fn, max]) => {
       log(`${name}: starting`);
@@ -151,19 +167,26 @@ async function previousImport() {
   // The same event listed twice (on two sites, or twice on one) becomes one listing; on a tie, the earlier source wins
   // Last run's events (kept for a source that broke) go through today's filters too
   const all = SOURCES.flatMap(([name]) => found[name] || []).filter((e) => !dropReason(e));
-  const deduped = dedupe(all).events;
-  // Vibes, format and setting saved by the last hand-run `node import/tag.js` (never the AI here)
+  const deduped = dedupe(all.map(series.unlend)).events;
+  // Vibes, format and setting saved by the last hand-run `node tag.js` (never the AI here)
   const saved = tags.load();
-  const events = deduped.map((e) => tags.apply(retag(e), saved)); // retag: last run's kept events get today's keyword rules
+  // retag: last run's kept events get today's keyword rules. Then the dates of each recurring night are linked and
+  // share what's known about it (lib/series.js; the memory of earlier runs too). describe: qualities and the thin flag.
+  const memory = (await store.get("series.json").catch(() => null)) || series.readMemory();
+  const linked = series.link(deduped.map((e) => tags.apply(retag(e), saved)), memory);
+  const events = linked.events.map(describe);
   if (!events.length) {
     log("\nNo events imported; leaving the last import as it was.");
     process.exit(1);
   }
 
+  const nextMemory = series.remember(events, memory, new Date(), linked.keys);
+  series.saveMemory(nextMemory);
+  if (process.env.UPLOAD) await store.put("series.json", nextMemory).catch((err) => log(`  Series memory not uploaded (${err.message})`));
   const file = { importedAt: new Date().toISOString(), window: { from: start.toISOString(), to: end.toISOString() }, sources: report, notImported: NOT_IMPORTED, events };
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, JSON.stringify(file, null, 0).replace(/\},\{"id"/g, '},\n{"id"') + "\n");
-  let where = "seed/events.json";
+  let where = "data/events.json";
   let tableLine = null;
   if (process.env.UPLOAD) {
     await store.put("events.json", file);
@@ -191,7 +214,13 @@ async function previousImport() {
   lines.push(`  With a price: ${events.length - missing.price} of ${events.length} (${Math.round((100 * (events.length - missing.price)) / events.length)}%); no vibe: ${events.filter((e) => !e.vibes.length).length}`);
   if (Object.keys(dropped).length) lines.push(`  Left out: ${Object.entries(dropped).map(([k, n]) => `${n} ${k}`).join(", ")}`);
   const tagged = events.filter((e) => e.tagSource === "ai").length;
-  lines.push(`  AI tags applied from import/event-tags.json: ${tagged}; untagged listings: ${events.length - tagged} (run \`node import/tag.js\` by hand to tag them)`);
+  lines.push(`  AI tags applied from data/event-tags.json: ${tagged}; untagged listings: ${events.length - tagged} (run \`node tag.js\` by hand to tag them)`);
+  // Listings too thin to say what the night is like: flagged here (and on the event page), never filled in with guesses
+  const thin = events.filter((e) => e.info === "thin");
+  lines.push(`  Thin listings (too little to tag well): ${thin.length} of ${events.length}${thin.length ? `, e.g. ${thin.slice(0, 8).map((e) => `"${e.title.slice(0, 40)}" (${e.source})`).join(", ")}` : ""}`);
+  const withQ = events.filter((e) => (e.qualities || []).length).length;
+  lines.push(`  With qualities: ${withQ} of ${events.length}`);
+  lines.push(`  Recurring: ${linked.stats.series} series linking ${linked.stats.linked} dates; ${linked.stats.filled} dates filled in from other dates of the same night`);
   log(`\n${lines.join("\n")}`);
   // In GitHub Actions, the same summary shows on the run's page
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Event import\n\n\`\`\`\n${lines.join("\n")}\n\`\`\`\n`);

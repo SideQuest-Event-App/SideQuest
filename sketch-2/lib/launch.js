@@ -20,7 +20,7 @@ const places = require("./sidekick/places");
 const usage = require("./sidekick/usage");
 const fsq = require("./sidekick/foursquare");
 const want = require("./search/want");
-const { place } = require("../../sketch-1/import/normalize");
+const { place } = require("../../events/lib/normalize");
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 const okPoint = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat || lng);

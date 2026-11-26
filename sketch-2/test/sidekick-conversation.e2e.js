@@ -62,7 +62,7 @@ async function a11y(page, where) {
 (async () => {
   const port = await freePort();
   Object.assign(process.env, { PORT: String(port), SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), AI: "off", ANTHROPIC_API_KEY: "", SIDEKICK_STUN_URL: "off", SIDEKICK_PLACES_OFF: "1", SIDEKICK_ELEVENLABS_OFF: "1" });
-  delete process.env.SUPABASE_URL;
+  process.env.SUPABASE_URL = ""; process.env.SUPABASE_SECRET_KEY = "";
   delete process.env.ELEVENLABS_API_KEY;
   for (const k of ["log", "error", "warn", "info"]) {
     const orig = console[k].bind(console);

@@ -234,9 +234,10 @@
     const s = U().search;
     const q = again ? s.ran : s.q.trim();
     if (!q) return toast("Say what you're in the mood for, like \"jazz and cheap eats\".");
-    if (!again && q === s.ran && (s.result || s.loading) && SQ.u.screen !== "search") return "search";
+    if (SQ.hideSuggest) SQ.hideSuggest();
+    if (!again && !s.venue && q === s.ran && (s.result || s.loading) && SQ.u.screen !== "search") return "search";
     const run = ++searchRun;
-    Object.assign(s, { ran: q, loading: true, since: Date.now(), result: null, error: null, matches: [], shown: REVEAL, more: false, loadingMore: false, sig: SQ.filterSig() });
+    Object.assign(s, { venue: null, host: null, series: null, ran: q, loading: true, since: Date.now(), result: null, error: null, matches: [], shown: REVEAL, more: false, loadingMore: false, sig: SQ.filterSig() });
     if (SQ.u.screen !== "search") SQ.go("search");
     else SQ.render();
     // Places for the same words ("Chinese skewers", "karaoke with private rooms"), beside the events; the server only
@@ -260,6 +261,33 @@
         SQ.saveSearch();
         SQ.render();
       });
+  };
+  // A venue picked from the search suggestions: list what's on there (the search screen reads s.venue)
+  A.searchVenue = (name) => {
+    const s = U().search;
+    if (SQ.hideSuggest) SQ.hideSuggest();
+    ++searchRun; // a keyword search still loading mustn't replace this
+    Object.assign(s, { venue: String(name || ""), host: null, series: null, q: String(name || ""), ran: "", loading: false, result: null, error: null, matches: [], more: false, loadingMore: false });
+    SQ.saveSearch();
+    if (SQ.u.screen !== "search") return "search";
+  };
+  // A host's upcoming events (from the suggestions, or tapping the host on an event page)
+  A.searchHost = (name) => {
+    const s = U().search;
+    if (SQ.hideSuggest) SQ.hideSuggest();
+    ++searchRun;
+    Object.assign(s, { host: String(name || ""), venue: null, series: null, q: String(name || ""), ran: "", loading: false, result: null, error: null, matches: [], more: false, loadingMore: false });
+    SQ.saveSearch();
+    if (SQ.u.screen !== "search") return "search";
+  };
+  // Every upcoming date of one recurring night ("See all dates" on its event page)
+  A.searchSeries = (id) => {
+    const s = U().search;
+    const first = SQ.seriesEvents ? SQ.seriesEvents(id)[0] : null;
+    ++searchRun;
+    Object.assign(s, { series: String(id || ""), venue: null, host: null, q: first ? first.title : "", ran: "", loading: false, result: null, error: null, matches: [], more: false, loadingMore: false });
+    SQ.saveSearch();
+    if (SQ.u.screen !== "search") return "search";
   };
   // All / Events / Places on the results (All by default; kept for the next search too)
   A.searchKind = (kind) => {

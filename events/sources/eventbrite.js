@@ -14,11 +14,11 @@
 // header), so Eventbrite's bot protection is asking data-centre visitors to solve a CAPTCHA. We don't get around a
 // CAPTCHA. So the first blocked page now stops the source with one clear line (instead of 14 failed weeks), the run
 // keeps last run's Eventbrite events if it has any, and the listing page's JSON-LD is read when __SERVER_DATA__ is
-// missing. What works instead: run it from a home connection (UPLOAD=1 ONLY=Eventbrite MERGE=1 node import/run.js),
+// missing. What works instead: run it from a home connection (UPLOAD=1 ONLY=Eventbrite MERGE=1 node run.js),
 // or set EVENTBRITE=off. Eventbrite's official API has no public event search (removed in 2020).
 
-const { get, jsonLdEvents, embeddedObject, sleep } = require("../fetch");
-const { parsePrice, offersPrice, toCad } = require("../price");
+const { get, jsonLdEvents, embeddedObject, sleep } = require("../lib/fetch");
+const { parsePrice, offersPrice, toCad } = require("../lib/price");
 const PAGE_CAP = 49;
 const PAGE_SIZE = 20;
 
@@ -96,9 +96,28 @@ function fromJsonLd(x) {
 
 // An error from fetch.get that means "blocked by a bot check", not "this page is missing"
 const isBotBlock = (err) => !!err && (err.status === 405 || err.status === 403 || /captcha|challenge/i.test(err.wafAction || ""));
-const BLOCKED_NOTE = (err) => `blocked by Eventbrite's bot protection (HTTP ${err.status}${err.wafAction ? `, x-amzn-waf-action: ${err.wafAction}` : ", the AWS WAF CAPTCHA answer"}) from this network. GitHub's servers have been blocked since 19 Oct 2026. Not working around a CAPTCHA: run it from a home connection with \`UPLOAD=1 ONLY=Eventbrite MERGE=1 node import/run.js\` (from sketch-1/), or set EVENTBRITE=off`;
+const BLOCKED_NOTE = (err) => `blocked by Eventbrite's bot protection (HTTP ${err.status}${err.wafAction ? `, x-amzn-waf-action: ${err.wafAction}` : ", the AWS WAF CAPTCHA answer"}) from this network. GitHub's servers have been blocked since 19 Oct 2026. Not working around a CAPTCHA: run it from a home connection with \`UPLOAD=1 ONLY=Eventbrite MERGE=1 node run.js\` (from events/), or set EVENTBRITE=off`;
 
 // Only what we use from an event page, so the cache stays small
+// The event's full write-up (its "About this event" section): the text modules of the page's structuredContent.
+// The JSON-LD description is only the one-line summary ("buzzzzzzzzzz"), so a premise like "Phones down is
+// encouraged" further down was never seen.
+function fullText(html) {
+  const i = html.indexOf('"structuredContent"');
+  if (i < 0) return "";
+  const out = [];
+  const re = /"type":"text","text":"((?:[^"\\]|\\.)*)"/g;
+  re.lastIndex = i;
+  const stop = i + 200000;
+  for (let m; (m = re.exec(html)) && m.index < stop && out.join(" ").length < 4000; ) {
+    try { out.push(JSON.parse(`"${m[1]}"`)); } catch {}
+  }
+  return out.join("\n")
+    .replace(/<\/(p|div|li|h\d)>|<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;|&rsquo;/g, "'").replace(/&quot;/g, '"')
+    .replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, "\n").replace(/\n{2,}/g, "\n").trim();
+}
+
 function eventPageInfo(html) {
   const lds = jsonLdEvents(html);
   const ld = lds.find((x) => x.offers || x.organizer) || {};
@@ -122,6 +141,7 @@ function eventPageInfo(html) {
     price,
     organizer: org || null,
     description: ld.description || "",
+    details: fullText(html),
     image: [].concat(ld.image || [])[0] || null,
   };
 }
@@ -226,6 +246,7 @@ async function fetchEventbrite({ start, end, max, log }) {
     let priceNote = null;
     let organizer = (r.primary_organizer && r.primary_organizer.name) || null;
     let description = r.summary || "";
+    let details = "";
     let image = r.image && r.image.image_sizes && (r.image.image_sizes.large || r.image.image_sizes.medium);
     const fromListing = listingPrice(r);
     if (fromListing) ({ price, priceHigh, priceNote } = toCad(fromListing));
@@ -237,6 +258,7 @@ async function fetchEventbrite({ start, end, max, log }) {
         if (p && price == null) ({ price, priceHigh, priceNote } = toCad(p));
         organizer = info.organizer || organizer;
         if (info.description.length > description.length) description = info.description;
+        if (info.details) details = info.details;
         image = image || info.image;
       }
     } catch (err) {
@@ -256,6 +278,7 @@ async function fetchEventbrite({ start, end, max, log }) {
       priceHigh,
       priceNote,
       description,
+      details,
       categories: cats,
       organizer,
       image: image || null,

@@ -2,7 +2,7 @@
 // (open.toronto.ca, "Festivals and events json feed"). Every festival, exhibit, performance and
 // market approved for the City's calendar, with venues, prices and images. One file, no scraping.
 
-const { get, sleep } = require("../fetch");
+const { get, sleep } = require("../lib/fetch");
 
 const FEED = "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/9201059e-43ed-4369-885e-0b867652feac/resource/8900fdb2-7f6c-4f50-8581-b463311ff05d/download/file.json";
 const IMAGE = "https://secure.toronto.ca/c3api_upload/retrieve/festivals_events/";

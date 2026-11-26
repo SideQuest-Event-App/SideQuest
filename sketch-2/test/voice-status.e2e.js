@@ -78,6 +78,7 @@ const INIT = () => {
     ELEVENLABS_MINUTES_PER_MONTH: "100", ELEVENLABS_STOP_AT: "1", ELEVENLABS_DAILY_MINUTES: "100", ELEVENLABS_MAX_CALL_MINUTES: "10",
   });
   for (const k of ["SUPABASE_URL", "SIDEKICK_ELEVENLABS_OFF", "ELEVENLABS_TTS_OFF", "ELEVENLABS_BASE_URL"]) delete process.env[k];
+  process.env.SUPABASE_URL = process.env.SUPABASE_SECRET_KEY = ""; // blank, not missing: a missing key is filled in from .env (the real database)
 
   // ---------- the fake ElevenLabs API: each case sets how it answers ----------
   const mode = { tts: 200, agent: 200 };

@@ -14,8 +14,8 @@
 // many rows each rule dropped, so a zero is explained in the run's summary.
 // Not checked against the live file from this session (open.toronto.ca was unreachable); tested on fixtures.
 
-const { get } = require("../fetch");
-const { torontoISO } = require("../../lib/posters");
+const { get } = require("../lib/fetch");
+const { torontoISO } = require("../lib/posters");
 
 const CKAN = "https://ckan0.cf.opendata.inter.prod-toronto.ca/api/3/action/package_show?id=";
 const FEED_PACKAGE = "library-branch-programs-and-events-feed";

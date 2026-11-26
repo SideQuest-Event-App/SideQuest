@@ -101,7 +101,7 @@ function contrast(a, b) {
   // Three upcoming events on land, far enough apart to show as single pins at the default zoom
   const all = (await (await realFetch(`${base}/api/events`)).json());
   const events = (Array.isArray(all) ? all : all.events || []).filter((e) => e.startsAt && Date.parse(e.startsAt) > Date.now() + 3600000 && e.venue && Number.isFinite(e.venue.lat));
-  const gta = require(path.join(ROOT, "..", "sketch-1", "lib", "gta"));
+  const gta = require(path.join(ROOT, "..", "events", "lib", "gta"));
   const spread = [];
   for (const e of events) if (gta.onMap(e.venue.lat, e.venue.lng) && Math.abs(e.venue.lat - 43.65) < 0.03 && Math.abs(e.venue.lng + 79.39) < 0.04 && spread.every((x) => Math.hypot(x.venue.lat - e.venue.lat, x.venue.lng - e.venue.lng) > 0.008) && spread.length < 3) spread.push(e);
   assert.strictEqual(spread.length, 3, "found three upcoming events downtown");

@@ -12,7 +12,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { askJSON } = require("./ai");
 
-const LOCAL_DIR = path.join(__dirname, "..", "data", "posters");
+const LOCAL_DIR = process.env.POSTERS_DIR || require("./paths").data("posters"); // sketch-1 points this at its own data/posters
 const BUCKET = "posters";
 const EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
 

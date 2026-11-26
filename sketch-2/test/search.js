@@ -11,8 +11,8 @@ const path = require("path");
 const assert = require("assert");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sq-search-"));
 Object.assign(process.env, { SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), ANTHROPIC_API_KEY: "", AI: "off", GOOGLE_MAPS_API_KEY: "test-key", EVENT_TAGS_FILE: path.join(tmp, "event-tags.json") });
-delete process.env.SUPABASE_URL;
-delete process.env.SUPABASE_SECRET_KEY;
+process.env.SUPABASE_URL = "";
+process.env.SUPABASE_SECRET_KEY = "";
 delete process.env.SIDEKICK_PLACES_OFF;
 delete process.env.WEATHER_OFF;
 
@@ -20,15 +20,15 @@ delete process.env.WEATHER_OFF;
 global.fetch = async (url) => { throw new Error(`Unexpected real fetch in test: ${url}`); };
 
 const ROOT = path.join(__dirname, "..");
-const IMPORT = path.join(ROOT, "..", "sketch-1", "import");
-const N = require(path.join(IMPORT, "normalize"));
-const price = require(path.join(IMPORT, "price"));
-const tags = require(path.join(IMPORT, "tags"));
-const tm = require(path.join(IMPORT, "sources", "ticketmaster"));
-const eb = require(path.join(IMPORT, "sources", "eventbrite"));
-const tpl = require(path.join(IMPORT, "sources", "tpl"));
-const ics = require(path.join(IMPORT, "sources", "ics"));
-const ontario = require(path.join(IMPORT, "sources", "ontario"));
+const EV = path.join(ROOT, "..", "events");
+const N = require(path.join(EV, "lib", "normalize"));
+const price = require(path.join(EV, "lib", "price"));
+const tags = require(path.join(EV, "lib", "tags"));
+const tm = require(path.join(EV, "sources", "ticketmaster"));
+const eb = require(path.join(EV, "sources", "eventbrite"));
+const tpl = require(path.join(EV, "sources", "tpl"));
+const ics = require(path.join(EV, "sources", "ics"));
+const ontario = require(path.join(EV, "sources", "ontario"));
 const taste = require(path.join(ROOT, "lib", "search", "taste"));
 const rank = require(path.join(ROOT, "lib", "search", "rank"));
 const weather = require(path.join(ROOT, "lib", "search", "weather"));
@@ -104,7 +104,7 @@ const raw = (title, description = "", extra = {}) => ({ source: "Test", sourceId
   await test("AI tags: the hand-run step refuses to run inside GitHub Actions", async () => {
     const { execFileSync } = require("child_process");
     let out = "";
-    try { execFileSync(process.execPath, [path.join(IMPORT, "tag.js")], { env: { ...process.env, GITHUB_ACTIONS: "true" }, stdio: "pipe" }); } catch (err) { out = String(err.stderr); }
+    try { execFileSync(process.execPath, [path.join(EV, "tag.js")], { env: { ...process.env, GITHUB_ACTIONS: "true" }, stdio: "pipe" }); } catch (err) { out = String(err.stderr); }
     assert(/hand-run step/.test(out), out);
   });
 

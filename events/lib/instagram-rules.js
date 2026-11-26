@@ -1,7 +1,7 @@
 // Event details from an Instagram caption by plain rules (no AI), for the daily automated Instagram import.
 // Careful on purpose: a post becomes an event only when its caption gives a date (or "tonight"/"tomorrow"/a weekday)
 // AND looks like an event (a time, "doors", "tickets", "live", "presents"...). Everything it can't find stays empty,
-// as with the other sources (price, end time). The by-hand AI reader (import/instagram.js) is still better: it reads
+// as with the other sources (price, end time). The by-hand AI reader (instagram.js) is still better: it reads
 // the posters too, and what it has read always wins over these rules.
 //
 //   parseCaption(caption, postedAt) -> [{ title, start: "YYYY-MM-DDTHH:MM" (Toronto time), end: null, price,

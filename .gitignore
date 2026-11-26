@@ -11,13 +11,14 @@ node_modules/
 # OS
 .DS_Store
 
-# Sketch 1 importer caches and downloaded images (re-created by the importer and the app)
-sketch-1/import/.cache/
-sketch-1/import/instagram-images/
-sketch-1/import/instagram-raw.json
-sketch-1/import/instagram-events.json
+# Importer caches and downloads (re-created by events/run.js and events/instagram.js)
+events/data/.cache/
+events/data/instagram-images/
+events/data/instagram-raw.json
+events/data/instagram-events.json
+events/data/posters/
+events/data/geocode.json
 sketch-1/data/posters/
-sketch-1/data/geocode.json
 
 # Sketch 2 local database and generated files
 sketch-2/data/

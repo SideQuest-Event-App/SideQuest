@@ -4,7 +4,7 @@
 // mocked Graph API and its fallback to the saved file, and that no key or token ever reaches a log line.
 // No real network: every request goes to a fake (a real one fails the test).
 //
-//   node test/import-pipeline.js        (from sketch-1/)
+//   node test/import-pipeline.js        (from events/)
 
 const fs = require("fs");
 const os = require("os");
@@ -17,6 +17,7 @@ const FAKE_KEY = "sb_secret_TEST_KEY_never_log_me_123";
 const FAKE_TOKEN = "IGQVJ_TEST_TOKEN_never_log_me_456";
 Object.assign(process.env, { IMPORT_CACHE_DIR: path.join(tmp, "cache"), GAP_MS: "0", CACHE_HOURS: "0", EVENTBRITE_LIST_GAP_MS: "0", EVENTBRITE_PAGE_GAP_MS: "0", AI: "off" });
 for (const k of ["SUPABASE_URL", "SUPABASE_SECRET_KEY", "INSTAGRAM_USER_ID", "INSTAGRAM_ACCESS_TOKEN", "UPLOAD", "IG_AI", "EVENTBRITE", "EVENTS_TABLE", "EVENTS_BATCH"]) delete process.env[k];
+process.env.SUPABASE_URL = process.env.SUPABASE_SECRET_KEY = ""; // blank, not missing: a missing key is filled in from .env (the real database)
 
 const realFetch = global.fetch;
 let fakeFetch = null; // set per test: (url, opts) => Response, for non-localhost requests
@@ -95,7 +96,7 @@ const response = (status, body, headers = {}) => new Response(typeof body === "s
     const weekly = { schedule: "23 6 * * 1", only: "" };
     const byHand = { schedule: "", only: "Ticketmaster,City of Toronto" };
     const byHandAll = { schedule: "", only: "" };
-    assert.strictEqual(evaluate(only, daily), "Ticketmaster,SeatGeek,City of Toronto,Toronto Public Library,Luma,DICE,Instagram");
+    assert.strictEqual(evaluate(only, daily), "Ticketmaster,SeatGeek,City of Toronto,Toronto Public Library,Luma,DICE,Instagram,TOREVENT,Showpass,YOHOMO,Venue websites");
     assert.strictEqual(evaluate(merge, daily), "1");
     assert.strictEqual(evaluate(only, weekly), "");
     assert.strictEqual(evaluate(merge, weekly), "");
@@ -104,7 +105,7 @@ const response = (status, body, headers = {}) => new Response(typeof body === "s
     assert.strictEqual(evaluate(only, byHandAll), "");
     assert.strictEqual(evaluate(merge, byHandAll), "");
     // Every daily source is a real source name in run.js (case-insensitive, as run.js matches them)
-    const runJs = fs.readFileSync(path.join(ROOT, "import", "run.js"), "utf8");
+    const runJs = fs.readFileSync(path.join(ROOT, "run.js"), "utf8");
     const names = [...runJs.matchAll(/^\s*\["([^"]+)", fetch\w+/gm)].map((m) => m[1].toLowerCase());
     for (const n of evaluate(only, daily).split(",")) assert.ok(names.includes(n.toLowerCase()), `${n} is not a source in run.js`);
   });
@@ -185,7 +186,7 @@ const response = (status, body, headers = {}) => new Response(typeof body === "s
   });
 
   // ---------- 3. Eventbrite ----------
-  const eb = require(path.join(ROOT, "import", "sources", "eventbrite"));
+  const eb = require(path.join(ROOT, "sources", "eventbrite"));
   const fixture = (n) => fs.readFileSync(path.join(__dirname, "fixtures", n), "utf8");
 
   await test("eventbrite: listing page's __SERVER_DATA__ is parsed", () => {
@@ -252,7 +253,7 @@ const response = (status, body, headers = {}) => new Response(typeof body === "s
     fakeFetch = null;
     assert.ok(out && out.skipped, "returns { skipped } so run.js keeps last run's Eventbrite events");
     assert.match(out.skipped, /bot protection \(HTTP 405, x-amzn-waf-action: captcha\)/);
-    assert.match(out.skipped, /UPLOAD=1 ONLY=Eventbrite MERGE=1 node import\/run\.js/);
+    assert.match(out.skipped, /UPLOAD=1 ONLY=Eventbrite MERGE=1 node run\.js/);
     assert.ok(listings <= 2, `stopped after the first page (and its one retry), not ${listings} requests`);
     assert.strictEqual(lines.filter((l) => /bot protection/.test(l)).length, 1);
   });
@@ -291,14 +292,14 @@ const response = (status, body, headers = {}) => new Response(typeof body === "s
     ],
     testpromoter: [{ id: "p_promo", caption: `Warehouse Party\n${md} 10pm at Test Venue, tickets in bio`, timestamp: postedAt, permalink: "https://www.instagram.com/p/PROMO/", media_type: "CAROUSEL_ALBUM", children: { data: [{ media_type: "IMAGE", media_url: "https://cdn.example/promo1.jpg" }] } }],
   };
-  const ig = require(path.join(ROOT, "import", "sources", "instagram"));
+  const ig = require(path.join(ROOT, "sources", "instagram"));
   const window = { start: new Date(), end: new Date(Date.now() + 92 * 86400000), max: 5000 };
   // No Supabase for the Instagram tests (Storage reads would go to the fake, which is fine, but keep them local)
   const sbUrl = process.env.SUPABASE_URL;
 
   await test("instagram: with the Graph API secrets, posts are read (saved AI reading first, then caption rules)", async () => {
-    delete process.env.SUPABASE_URL;
-    delete process.env.SUPABASE_SECRET_KEY;
+    process.env.SUPABASE_URL = "";
+    process.env.SUPABASE_SECRET_KEY = "";
     process.env.INSTAGRAM_USER_ID = "17841400000000000";
     process.env.INSTAGRAM_ACCESS_TOKEN = FAKE_TOKEN;
     const calls = [];
@@ -353,7 +354,7 @@ const response = (status, body, headers = {}) => new Response(typeof body === "s
     const lines = [];
     const out = await ig.fetchInstagram({ ...window, log: (s) => lines.push(s) });
     assert.deepStrictEqual(out.map((e) => e.title), ["Saved Earlier"]);
-    assert.ok(lines.some((l) => /README-instagram\.md/.test(l)));
+    assert.ok(lines.some((l) => /instagram-setup\.md/.test(l)));
     fs.unlinkSync(process.env.IG_EVENTS_FILE);
     const none = await ig.fetchInstagram({ ...window, log: (s) => lines.push(s) });
     assert.match(none.skipped, /No Instagram events saved yet/);
@@ -368,7 +369,7 @@ const response = (status, body, headers = {}) => new Response(typeof body === "s
   });
 
   await test("instagram rules: careful caption parsing", () => {
-    const rules = require(path.join(ROOT, "import", "instagram-rules"));
+    const rules = require(path.join(ROOT, "lib", "instagram-rules"));
     const t = "2026-11-20T15:00:00Z"; // a Friday
     assert.deepStrictEqual(rules.parseCaption("SOUTHPORT & FRIENDS!\nFri Nov 27 at The Garrison\nDoors 7pm, show 8:30pm\n$15 adv", t).map((e) => [e.title, e.start, e.price]), [["SOUTHPORT & FRIENDS!", "2026-11-27T20:30", 15]]);
     assert.strictEqual(rules.parseCaption("Comedy tonight! Free, 9pm", t)[0].start, "2026-11-20T21:00");

@@ -1,7 +1,7 @@
 // Tests for where Sketch 2's server gets its events and how fresh they are: the events table first (only upcoming
 // events), then the Storage file, then the repo's seed file, each with its "Events: ..." log line; the server
 // starting against a fake Supabase and reporting the source on /api/health; and the 36-hour staleness warning
-// (server log and /api/health). Supabase is a local fake (sketch-1/test/fake-supabase.js) answering like PostgREST
+// (server log and /api/health). Supabase is a local fake (events/test/fake-supabase.js) answering like PostgREST
 // and Storage; nothing reaches the internet.
 //
 //   node test/events-source.js
@@ -13,8 +13,8 @@ const net = require("net");
 const assert = require("assert");
 
 const ROOT = path.join(__dirname, "..");
-const SK1 = path.join(ROOT, "..", "sketch-1");
-const { createFakeSupabase } = require(path.join(SK1, "test", "fake-supabase"));
+const EV = path.join(ROOT, "..", "events");
+const { createFakeSupabase } = require(path.join(EV, "test", "fake-supabase"));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sq-events-source-"));
 const FAKE_KEY = "sb_secret_TEST_KEY_never_log_me_789";
 
@@ -74,7 +74,7 @@ const since = (mark) => logs.slice(mark);
   const now = Date.now();
   const iso = (h) => new Date(now + h * 3600000).toISOString();
   const event = (n, h, extra = {}) => ({ id: 5000 + n, source: "Ticketmaster", sourceUrl: `https://example.com/${n}`, title: `Table Event ${n}`, date: "", startsAt: iso(h), endsAt: null, runsUntil: null, neighbourhood: "Kensington", area: "Downtown", venue: { name: "Example Hall", address: "1 St", lat: 43.65, lng: -79.4 }, scene: "Music", price: 10, priceNote: "$10", description: "N/A", tags: [], vibes: ["Live music"], rating: null, reviews: [], going: 0, attendees: [], organizer: { name: "Example", rating: null, review: "" }, friends: [], travel: {}, ticketLink: "", image: null, dayInfo: {}, ...extra });
-  const table = require(path.join(SK1, "lib", "events-table"));
+  const table = require(path.join(EV, "lib", "events-table"));
   const rows = [event(1, 5), event(2, 30), event(3, 200), event(4, -48)].map((e) => ({ ...table.toRow(e), updated_at: iso(-2) }));
   const importedAt = iso(-2);
   const fake = createFakeSupabase({
@@ -117,7 +117,7 @@ const since = (mark) => logs.slice(mark);
     fake.fail["/storage/v1/object/imports"] = { status: 500, body: { message: "storage down" } };
     const mark = logs.length;
     const out = await db.seedEvents();
-    const seed = JSON.parse(fs.readFileSync(path.join(SK1, "seed", "events.json"), "utf8"));
+    const seed = JSON.parse(fs.readFileSync(path.join(EV, "data", "events.json"), "utf8"));
     assert.strictEqual(out.importedAt, seed.importedAt);
     assert.strictEqual(db.eventsSource.from, "seed");
     const lines = since(mark);

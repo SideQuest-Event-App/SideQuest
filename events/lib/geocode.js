@@ -4,11 +4,11 @@
 //   - at most one request a second, across everything in this process (a single queue, even for parallel callers)
 //   - every answer cached (data/geocode.json, or GEOCODE_CACHE), misses too, so a venue is looked up once;
 //     a failed request isn't cached, so it's tried again on a later run
-//   - no bulk or heavy use: the import asks only for venues whose coordinates are missing or wrong (import/locate.js),
+//   - no bulk or heavy use: the import asks only for venues whose coordinates are missing or wrong (lib/locate.js),
 //     capped per run (GEOCODE_MAX)
 // Results are bounded to the Greater Toronto Area.
 //
-//   const { geocode } = require("./geocode");             the shared instance (sketch-1/data/geocode.json)
+//   const { geocode } = require("./geocode");             the shared instance (events/data/geocode.json)
 //   const g = require("./geocode").create({ cacheFile, fetchImpl, gapMs });   your own (tests, sketch-2)
 
 const fs = require("fs");
@@ -18,7 +18,7 @@ const UA = "SideQuest-class-project";
 const ENDPOINT = "https://nominatim.openstreetmap.org/search";
 // Greater Toronto, so "The Garrison" finds the one on Dundas
 const VIEWBOX = "-80.1,44.15,-78.8,43.35";
-const DEFAULT_CACHE = () => process.env.GEOCODE_CACHE || path.join(__dirname, "..", "data", "geocode.json");
+const DEFAULT_CACHE = () => process.env.GEOCODE_CACHE || require("./paths").data("geocode.json");
 
 function create({ cacheFile = DEFAULT_CACHE(), fetchImpl = (...a) => fetch(...a), gapMs = 1100, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   let cache = null;

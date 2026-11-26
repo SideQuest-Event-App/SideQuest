@@ -5,13 +5,13 @@
 
 const fs = require("fs");
 const path = require("path");
-const { dedupe } = require("../import/dedupe");
+const { dedupe } = require("../../events/lib/dedupe");
 
 const ROOT = path.join(__dirname, "..");
 const DATA_DIR = path.join(ROOT, "data");
 const DB_PATH = path.join(DATA_DIR, "db.json");
-const readSeed = (name) => JSON.parse(fs.readFileSync(path.join(ROOT, "seed", name), "utf8"));
-// seed/events.json is written by `node import/run.js`: real listings plus when they were imported
+const readSeed = (name) => JSON.parse(fs.readFileSync(name === "events.json" ? require("../../events/lib/paths").EVENTS_FILE : path.join(ROOT, "seed", name), "utf8"));
+// events/data/events.json is written by `node events/run.js`: real listings plus when they were imported
 function seedEvents() {
   const file = readSeed("events.json");
   return Array.isArray(file) ? { importedAt: "sample", events: file } : file;

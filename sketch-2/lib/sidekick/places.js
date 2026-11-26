@@ -11,7 +11,7 @@
 const usage = require("./usage");
 const fsq = require("./foursquare");
 const want = require("../search/want");
-const { travel, place } = require("../../../sketch-1/import/normalize");
+const { travel, place } = require("../../../events/lib/normalize");
 
 const ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const NEARBY = "https://places.googleapis.com/v1/places:searchNearby";

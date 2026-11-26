@@ -4,8 +4,8 @@
 // Only Toronto rows with a venue we can place and a start time are kept: a festival listed by date alone has no time
 // to plan around, and nothing here fills one in.
 
-const { get } = require("../fetch");
-const { torontoISO } = require("../../lib/posters");
+const { get } = require("../lib/fetch");
+const { torontoISO } = require("../lib/posters");
 
 const PACKAGE = "https://data.ontario.ca/api/3/action/package_show?id=celebrate-ontario-events";
 
@@ -86,7 +86,7 @@ async function fetchOntario({ start, end, max, log }) {
   const res = ((meta && meta.result && meta.result.resources) || []).find((r) => /csv/i.test(r.format || r.url || ""));
   if (!res) return { skipped: "No CSV file in the dataset" };
   const rows = parseCSV(await get(res.url));
-  const { geocode } = require("../../lib/geocode");
+  const { geocode } = require("../lib/geocode");
   const { listings, why } = await toListings(rows, { start, end, geocode });
   log(`  ontario: ${rows.length} rows -> ${listings.length} kept; left out: ${Object.entries(why).map(([k, n]) => `${n} ${k}`).join(", ")}`);
   return listings.slice(0, max);

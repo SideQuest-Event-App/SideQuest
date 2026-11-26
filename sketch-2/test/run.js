@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Runs the test files of sketch-2 and sketch-1 in parallel, each worker in its own copy of the two folders,
+// Runs the test files of sketch-2 and events/ (the importer) in parallel, each worker in its own copy of the folders,
 // because many tests write data/db.json (and other files under data/) and put it back afterwards.
 //
 //   node sketch-2/test/run.js              every test file, 3 at a time
@@ -28,7 +28,7 @@ const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] 
 
 function allTests() {
   const out = [];
-  for (const dir of ["sketch-2", "sketch-1"]) {
+  for (const dir of ["sketch-2", "events"]) {
     const t = path.join(REPO, dir, "test");
     if (!fs.existsSync(t)) continue;
     for (const f of fs.readdirSync(t).sort()) {
@@ -47,7 +47,8 @@ const keyOf = (t) => `${t.dir}/${t.name}`;
 
 // What each part of the code is covered by. Anything not listed (server.js, lib/db.js...) runs everything.
 const MAP = [
-  [/^sketch-1\//, (t) => t.dir === "sketch-1" || /events-source|search/.test(t.name)],
+  [/^events\//, (t) => t.dir === "events" || /events-source|search/.test(t.name)],
+  [/^sketch-1\//, () => false], // the first sketch, kept as it was; nothing runs it
   [/^sketch-2\/lib\/search\//, (t) => /search|picks-eval|sidekick-want|map-places|features/.test(t.name)],
   [/^sketch-2\/lib\/sidekick\/study\.js/, (t) => /study/.test(t.name)],
   [/^sketch-2\/lib\/sidekick\/(tts|usage)\.js/, (t) => /sidekick-tts|sidekick-voice|sidekick-integrations|voice-status/.test(t.name)],
@@ -79,7 +80,7 @@ function pick() {
     if (!files) { console.log(`Couldn't compare with ${base}: running everything.`); return tests; }
     const keep = new Set();
     for (const f of files) {
-      const own = f.match(/^(sketch-[12])\/test\/(.+)\.js$/);
+      const own = f.match(/^(sketch-2|events)\/test\/(.+)\.js$/);
       if (own) { tests.filter((t) => t.dir === own[1] && t.name === own[2]).forEach((t) => keep.add(t)); continue; }
       const hit = MAP.find(([re]) => re.test(f));
       if (!hit) { console.log(`${f} has no mapping: running everything.`); return tests; }
@@ -93,9 +94,10 @@ function pick() {
 
 function copyTree(dest) {
   fs.mkdirSync(dest, { recursive: true });
-  for (const dir of ["sketch-1", "sketch-2", ".github"]) {
+  for (const dir of ["events", "sketch-1", "sketch-2", ".github"]) {
     if (!fs.existsSync(path.join(REPO, dir))) continue;
-    fs.cpSync(path.join(REPO, dir), path.join(dest, dir), { recursive: true, filter: (src) => !/[\\/](node_modules|\.git|shots)([\\/]|$)/.test(src) });
+    // Not the importer's page cache or Instagram downloads (about a gigabyte; tests use their own temp folders)
+    fs.cpSync(path.join(REPO, dir), path.join(dest, dir), { recursive: true, filter: (src) => !/[\\/](node_modules|\.git|shots|\.cache|instagram-images)([\\/]|$)/.test(src) });
   }
 }
 

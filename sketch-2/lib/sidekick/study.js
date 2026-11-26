@@ -127,7 +127,7 @@ const pick = (list) => list[crypto.randomInt(list.length)];
 
 let data = null; // { assigned: n, sessions: { id: session }, erased: { id: { at, why } }, removals: [{ code, at }], accounts: [study test account ids] }
 let store = null;
-try { store = require("../../../sketch-1/lib/store"); } catch {}
+try { store = require("../../../events/lib/store"); } catch {}
 
 const blank = () => ({ assigned: 0, sessions: {}, erased: {}, removals: [], accounts: [], purgedAt: null });
 async function load() {

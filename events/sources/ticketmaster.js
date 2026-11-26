@@ -1,11 +1,11 @@
 // Ticketmaster: the official Discovery API (free key from developer.ticketmaster.com).
-// Put TICKETMASTER_API_KEY=... in sketch-1/.env. Without a key this source is skipped.
+// Put TICKETMASTER_API_KEY=... in events/.env (or sketch-2/.env). Without a key this source is skipped.
 // Prices: every priceRanges entry in the search result; when a search result has none, the event's own detail
 // endpoint is asked (it sometimes has them when search doesn't), up to TICKETMASTER_DETAIL_MAX calls a run
 // (default 400, well inside the 5,000-a-day allowance; each is cached for 12 hours like every request).
 
-const { get } = require("../fetch");
-const { ticketmasterPrice } = require("../price");
+const { get } = require("../lib/fetch");
+const { ticketmasterPrice } = require("../lib/price");
 
 const DETAIL_MAX = () => Number(process.env.TICKETMASTER_DETAIL_MAX || 400);
 

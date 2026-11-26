@@ -6,9 +6,9 @@
 
 const fs = require("fs");
 const path = require("path");
-const { get, jsonLdEvents, nextData } = require("../fetch");
+const { get, jsonLdEvents, nextData } = require("../lib/fetch");
 
-const GROUPS_FILE = path.join(__dirname, "..", "meetup-groups.json");
+const GROUPS_FILE = require("../lib/paths").config("meetup-groups.json");
 const PER_GROUP = 15; // a group's next events; weekly series repeat, so more would mostly be the same night
 const groupOf = (url) => (String(url).match(/meetup\.com\/([A-Za-z0-9-]+)\/events\/\d+/) || [])[1];
 

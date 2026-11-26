@@ -9,7 +9,7 @@
 
 const path = require("path");
 const ROOT = path.join(__dirname, "..");
-const seed = require(path.join(ROOT, "..", "sketch-1", "seed", "events.json"));
+const seed = require(path.join(ROOT, "..", "events", "data", "events.json"));
 const events = Array.isArray(seed) ? seed : seed.events;
 const R = require(path.join(ROOT, "lib", "sidekick", "rooms"));
 const P = require(path.join(ROOT, "lib", "sidekick", "plan"));

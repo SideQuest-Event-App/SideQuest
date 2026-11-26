@@ -18,7 +18,7 @@
   SQ.HOODS = HOODS;
   const hood = (name) => HOODS.find((h) => h[0] === name);
 
-  // Where a pin may go: in the Greater Toronto Area and not in Lake Ontario. The same numbers as sketch-1/lib/gta.js
+  // Where a pin may go: in the Greater Toronto Area and not in Lake Ontario. The same numbers as events/lib/gta.js
   // (a test checks they match). An event whose coordinates fail this is left off the map, never moved to a guessed
   // spot; it still shows in the lists. [lng, lat] pairs along the shore, then back across the lake.
   const GEO = {

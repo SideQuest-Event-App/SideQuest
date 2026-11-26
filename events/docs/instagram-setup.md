@@ -1,8 +1,8 @@
 # Turning on the automatic Instagram import
 
 Once two secrets are added on GitHub, the daily "Import events" run reads the recent posts of every account in
-`sketch-2/reference/instagram-accounts.md` by itself and turns the ones that announce events into listings. Until
-then it keeps using the events saved by the last by-hand `node import/instagram.js`.
+`events/config/instagram-accounts.md` by itself and turns the ones that announce events into listings. Until
+then it keeps using the events saved by the last by-hand `node instagram.js`.
 
 It uses Instagram's **official Graph API** ("Business Discovery"): Meta's supported way for an app to read another
 professional (business or creator) account's public posts. It doesn't log in as anyone, doesn't open instagram.com
@@ -102,17 +102,17 @@ That's all. GitHub hides secret values in logs, and the importer also masks the 
 
 ## Running it on your own computer
 
-Put the same two values in `sketch-1/.env`:
+Put the same two values in `events/.env` (or `sketch-2/.env`):
 
 ```
 INSTAGRAM_USER_ID=1784...
 INSTAGRAM_ACCESS_TOKEN=...
 ```
 
-- `ONLY=Instagram MERGE=1 node import/run.js` (from `sketch-1/`): the same automatic read as the daily run.
-- `node import/instagram.js`: the by-hand run with Claude Code, which also reads the posters (better results). What it
-  reads is saved in `import/instagram-extracted.json`; commit that file and the daily run uses those readings too.
-- `IG_AI=1 ONLY=Instagram MERGE=1 node import/run.js`: the automatic read, with the AI reading new posts (at most
+- `ONLY=Instagram MERGE=1 node run.js` (from `events/`): the same automatic read as the daily run.
+- `node instagram.js`: the by-hand run with Claude Code, which also reads the posters (better results). What it
+  reads is saved in `data/instagram-extracted.json`; commit that file and the daily run uses those readings too.
+- `IG_AI=1 ONLY=Instagram MERGE=1 node run.js`: the automatic read, with the AI reading new posts (at most
   `IG_MAX_CALLS` calls, default 40). Only when you choose to; the scheduled run never does.
 
 ## Switches
@@ -127,5 +127,5 @@ INSTAGRAM_ACCESS_TOKEN=...
 ## Other ways to get venue events (no Instagram)
 
 Many venues also publish their calendar as an `.ics` feed or on their own site with schema.org event data. Feeds go in
-`import/ics-feeds.json` (read by `import/sources/ics.js`) once a venue's feed and terms are checked. That's the
+`config/ics-feeds.json` (read by `sources/ics.js`) once a venue's feed and terms are checked. That's the
 sturdiest source of all: no token, no account.

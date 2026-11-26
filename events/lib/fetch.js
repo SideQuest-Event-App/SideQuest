@@ -1,13 +1,13 @@
 // Polite fetching for the importer: identifies itself honestly, follows each site's robots.txt (its rules and
 // Crawl-delay), waits between requests to the same site, retries once, stops asking a site that blocks or
-// rate-limits us, and caches every response in import/.cache so re-runs don't re-download.
+// rate-limits us, and caches every response in data/.cache so re-runs don't re-download.
 
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
 const UA = "SidequestSketch/1.0 (university student prototype; low-volume event import)";
-const CACHE_DIR = process.env.IMPORT_CACHE_DIR || path.join(__dirname, ".cache"); // tests point this at a temp folder
+const CACHE_DIR = process.env.IMPORT_CACHE_DIR || require("./paths").data(".cache"); // tests point this at a temp folder
 const CACHE_HOURS = Number(process.env.CACHE_HOURS || 12);
 const GAP_MS = Number(process.env.GAP_MS || 900); // between requests to the same host
 

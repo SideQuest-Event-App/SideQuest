@@ -15,7 +15,7 @@
 //
 // GEOCODE=1 turns the lookups on (the workflow sets it); GEOCODE_MAX caps them per run (default 300, about 5 minutes).
 
-const { onMap, inGTA, inLake } = require("../lib/gta");
+const { onMap, inGTA, inLake } = require("./gta");
 
 const PLUS_CODE = /^\s*[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3}\b/i;
 const num = (v) => (v === null || v === undefined || v === "" ? NaN : Number(v));

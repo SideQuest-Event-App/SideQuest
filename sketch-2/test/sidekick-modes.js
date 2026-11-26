@@ -11,7 +11,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sk-modes-"));
 Object.assign(process.env, { SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), ANTHROPIC_API_KEY: "", SIDEKICK_PLACES_OFF: "1" });
 
 const ROOT = path.join(__dirname, "..");
-const seed = require(path.join(ROOT, "..", "sketch-1", "seed", "events.json"));
+const seed = require(path.join(ROOT, "..", "events", "data", "events.json"));
 const events = Array.isArray(seed) ? seed : seed.events;
 const P = require(path.join(ROOT, "lib", "sidekick", "plan"));
 const R = require(path.join(ROOT, "lib", "sidekick", "rooms"));

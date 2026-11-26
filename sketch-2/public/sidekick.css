@@ -578,11 +578,11 @@ body.sk-live #say:empty,body.sk-live #ticks:empty{display:none}
 .vtip{color:var(--t2)}
 
 /* ==================== The redesign: Plan and the call (approve.html: Plan, The call; nav.html #5-8, #11, #12) ====================
-   The site's tokens; photos in violet duotone (#duoViolet in sidekick.html); weights 400/500/600 only, text 12 px and up,
+   The site's tokens; photos in full colour, as posted; weights 400/500/600 only, text 12 px and up,
    44 px targets. */
 :root{--hot:#f28dc8;--ok-x:#8fdcaa;--red:#ee6e6e;--red-t:#742424}
 main{position:relative;z-index:1}
-.duo{position:absolute;inset:0;background-size:cover;background-position:center;filter:url(#duoViolet);pointer-events:none}
+.duo{position:absolute;inset:0;background-size:cover;background-position:center;pointer-events:none} /* in full colour, as posted */
 .pf-mono,.cap-l{font:500 12px/16px var(--m);letter-spacing:.12em;text-transform:uppercase;color:var(--acc)}
 .pf-mono.ok{color:var(--ok-x)}
 .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}

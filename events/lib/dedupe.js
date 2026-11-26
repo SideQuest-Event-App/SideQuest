@@ -12,7 +12,7 @@
 // venues (a chain's workshop at 30 community centres) stays separate, and so do titles that differ only by a
 // number ("7 kinds of sake" vs "4 kinds of sake").
 //
-//   node import/dedupe.js    re-checks seed/events.json in place (the server picks it up on its next start)
+//   node lib/dedupe.js    re-checks data/events.json in place (the server picks it up on its next start)
 
 const fs = require("fs");
 const path = require("path");
@@ -75,9 +75,13 @@ function sameVenue(a, b) {
   return d < 2 && !!x && !!y && (x.includes(y) || y.includes(x));
 }
 
+const bothPinned = (a, b) => a.venue && b.venue && Number.isFinite(a.venue.lat) && Number.isFinite(b.venue.lat);
 function same(a, b) {
   if (a.id === b.id) return true;
   const minutes = Math.abs(Date.parse(a.startsAt) - Date.parse(b.startsAt)) / 60000;
+  // One building, two names: a ticket site names the room ("Tallulah's Cabaret"), the venue's own calendar the
+  // building ("Buddies in Bad Times Theatre"). The same start, a near-identical title and pins within 100 m are one event.
+  if (minutes <= 5 && bothPinned(a, b) && km(a.venue.lat, a.venue.lng, b.venue.lat, b.venue.lng) < 0.1 && !numbersDiffer(a, b) && titleSim(a, b) >= 0.9) return true;
   if (minutes > 75 || !sameVenue(a, b)) return false;
   if (numbersDiffer(a, b)) return false;
   const sim = titleSim(a, b);
@@ -103,6 +107,10 @@ function mergeInto(keep, other) {
   if ((!keep.description || keep.description === NA) && other.description && other.description !== NA) keep.description = other.description;
   if (keep.organizer.name === NA && other.organizer.name !== NA) keep.organizer = other.organizer;
   if (!keep.endsAt && other.endsAt) keep.endsAt = other.endsAt;
+  if (other.details && (!keep.details || other.details.length > keep.details.length)) keep.details = other.details;
+  // The venue's own calendar knows the night repeats; a ticket site's copy of the same date keeps that
+  if (!keep.seriesKey && other.seriesKey) keep.seriesKey = other.seriesKey;
+  if (!keep.repeats && other.repeats) keep.repeats = other.repeats;
   if (keep.venue && other.venue && keep.venue.address === NA && other.venue.address !== NA) keep.venue = { ...keep.venue, address: other.venue.address };
   for (const v of other.vibes || []) if (keep.vibes && !keep.vibes.includes(v)) keep.vibes.push(v);
   // "Also listed on" only for another site (one site can list the same event twice)
@@ -158,11 +166,11 @@ function findDuplicate(e, list) {
 module.exports = { dedupe, findDuplicate, mergeInto, same };
 
 if (require.main === module) {
-  const OUT = path.join(__dirname, "..", "seed", "events.json");
+  const OUT = require("./paths").EVENTS_FILE;
   const file = JSON.parse(fs.readFileSync(OUT, "utf8"));
   const { events, merged } = dedupe(file.events);
   // A new importedAt, so the running app swaps the cleaned list in on its next start
   const out = { ...file, importedAt: new Date().toISOString(), dedupedFrom: file.importedAt, events };
   fs.writeFileSync(OUT, JSON.stringify(out, null, 0).replace(/\},\{"id"/g, '},\n{"id"') + "\n");
-  console.log(`${file.events.length} listings → ${events.length} events (${merged} duplicates merged) in seed/events.json`);
+  console.log(`${file.events.length} listings → ${events.length} events (${merged} duplicates merged) in data/events.json`);
 }

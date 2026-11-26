@@ -21,7 +21,7 @@ const fs = require("fs");
 const path = require("path");
 const ROOT = path.join(__dirname, "..");
 Object.assign(process.env, { AI: "off", ANTHROPIC_API_KEY: "", SIDEKICK_PLACES_OFF: "1", SIDEKICK_ELEVENLABS_OFF: "1" });
-const seed = require(path.join(ROOT, "..", "sketch-1", "seed", "events.json"));
+const seed = require(path.join(ROOT, "..", "events", "data", "events.json"));
 const events = Array.isArray(seed) ? seed : seed.events;
 const claude = require(path.join(ROOT, "lib", "sidekick", "claude"));
 const R = require(path.join(ROOT, "lib", "sidekick", "rooms"));

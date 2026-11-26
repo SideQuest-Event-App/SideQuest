@@ -12,18 +12,19 @@ const envPath = path.join(__dirname, ".env");
 if (fs.existsSync(envPath)) {
   for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
     const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/);
-    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
 }
 
 const db = require("./lib/db");
 const ai = require("./lib/ai");
 const { track, flush: flushAnalytics } = require("./lib/analytics");
-const posters = require("./lib/posters");
-const { geocode } = require("./lib/geocode");
-const { findDuplicate, mergeInto } = require("./import/dedupe");
-const { jsonLdEvents } = require("./import/fetch");
-const { stripHtml, trimText, place, travel: travelTo, vibesOf, NA } = require("./import/normalize");
+process.env.POSTERS_DIR = process.env.POSTERS_DIR || path.join(__dirname, "data", "posters"); // served at /posters/
+const posters = require("../events/lib/posters");
+const { geocode } = require("../events/lib/geocode");
+const { findDuplicate, mergeInto } = require("../events/lib/dedupe");
+const { jsonLdEvents } = require("../events/lib/fetch");
+const { stripHtml, trimText, place, travel: travelTo, vibesOf, NA } = require("../events/lib/normalize");
 const siteName = require("./public/js/sites.js"); // shared with the add-event form
 
 const PORT = process.env.PORT || 3000;

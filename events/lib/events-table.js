@@ -1,5 +1,5 @@
 // The imported events as rows in a Supabase table (one row per event), next to the Storage file during the switch.
-// The importer (import/run.js, UPLOAD=1) calls sync(); Sketch 2's server calls upcoming().
+// The importer (run.js, UPLOAD=1) calls sync(); Sketch 2's server calls upcoming().
 // The table is made by sketch-2/supabase/schema.sql ("listings": the name "events" is already Sketch 1's table).
 // Talks to Supabase's REST API (PostgREST) with Node's built-in fetch, like lib/store.js. Needs SUPABASE_URL and
 // SUPABASE_SECRET_KEY; without them every call does nothing. Error messages carry the status and Supabase's answer,
@@ -59,9 +59,13 @@ async function all(route) {
 
 const iso = (s) => (s && !isNaN(Date.parse(s)) ? new Date(s).toISOString() : null);
 const num = (n) => (typeof n === "number" && Number.isFinite(n) ? n : null);
-// One event (as import/normalize.js makes it) -> one row. raw keeps the whole event, so the app gets back exactly
+// One event (as lib/normalize.js makes it) -> one row. raw keeps the whole event, so the app gets back exactly
 // what the Storage file would have given it; the columns are for filtering and for reading in the Table Editor.
+// Half a character (a lone surrogate, from text cut mid-emoji anywhere upstream) makes PostgREST reject the whole
+// batch as "invalid json"; every string is made whole before it's sent
+const whole = (v) => (typeof v === "string" ? v.toWellFormed() : Array.isArray(v) ? v.map(whole) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, whole(x)])) : v);
 function toRow(e) {
+  e = whole(e);
   const venue = e.venue || {};
   const row = {
     source: e.source,

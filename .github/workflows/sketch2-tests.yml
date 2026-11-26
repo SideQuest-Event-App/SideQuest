@@ -1,11 +1,11 @@
 name: Sketch 2 tests
 
-# Runs every sketch-1 and sketch-2 test file on each push, so the chat doesn't have to wait for them.
+# Runs every events/ (importer) and sketch-2 test file on each push, so the chat doesn't have to wait for them.
 # On Render, set Auto-Deploy to "After CI Checks Pass" so a failing push never deploys.
 on:
   push:
     branches: ["main", "claude/**"]
-    paths: ["sketch-1/**", "sketch-2/**", ".github/workflows/sketch2-tests.yml"]
+    paths: ["events/**", "sketch-1/**", "sketch-2/**", ".github/workflows/sketch2-tests.yml"]
   workflow_dispatch:
 
 concurrency:

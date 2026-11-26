@@ -58,8 +58,8 @@ function restore() {
     GOOGLE_MAPS_API_KEY: "test-key", SIDEKICK_ELEVENLABS_OFF: "1", SIDEKICK_STUN_URL: "off",
     SIDEKICK_STUDY_FILE: path.join(tmp, "study.json"),
   });
-  delete process.env.SUPABASE_URL;
-  delete process.env.SUPABASE_SECRET_KEY;
+  process.env.SUPABASE_URL = "";
+  process.env.SUPABASE_SECRET_KEY = "";
   delete process.env.SIDEKICK_PLACES_OFF;
 
   // ---------- Google Places, faked (and counted) ----------
@@ -357,8 +357,8 @@ function restore() {
       assert(await page.$(".qd-nav .tb-listbtn"), "the ＋ (add to a list) button stays");
       assert.match(await page.textContent(".qd-buy .btn"), /Get tickets on Ticketmaster/);
       assert.strictEqual(await page.$eval(".qd-title h1", (h) => getComputedStyle(h).fontWeight), "800", "big 800-weight title");
-      // The import cleans the same way (sketch-1/import/normalize.js)
-      const norm = require(path.join(ROOT, "..", "sketch-1", "import", "normalize"));
+      // The import cleans the same way (events/lib/normalize.js)
+      const norm = require(path.join(ROOT, "..", "events", "lib", "normalize"));
       const e = norm.toEvent({ source: "Ticketmaster", sourceId: "x1", url: "https://example.com", title: "Show", startsAt: soon, venue: { name: "Hall", address: "1 St", lat: 43.65, lng: -79.38, city: "Toronto" }, description: "A SHOUTED DESCRIPTION OF THIS SHOW THAT GOES ON.", categories: ["Undefined", "Theatre"], organizer: "PROMOTER NOT DEFINED" });
       assert.strictEqual(e.organizer.name, "N/A");
       assert.strictEqual(e.description, "A shouted description of this show that goes on.");

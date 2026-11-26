@@ -1,0 +1,13 @@
+{
+  "note": "Venue calendars made with Elfsight's Event Calendar widget, read by sources/elfsight.js from core.service.elfsight.com/p/boot/ (its robots.txt allows /p/*). widget: the id in the page's elfsight-app-<id> div. Check the venue's own robots.txt before adding one.",
+  "calendars": [
+    {
+      "name": "Black Eagle",
+      "widget": "e5a158fb-806e-4349-9a16-7546cf9cd113",
+      "page": "https://www.blackeagletoronto.com/",
+      "venue": { "name": "Black Eagle", "address": "457 Church St, Toronto, ON M4Y 2C5", "lat": 43.6655, "lng": -79.3806 },
+      "categories": ["queer", "leather"],
+      "usualStart": "21:00"
+    }
+  ]
+}

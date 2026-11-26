@@ -13,9 +13,9 @@
 // and link back to the event's SeatGeek page; the event page names the source. The client id never reaches a log.
 //
 // Sports are left out (outside our scenes), and so are parking passes and add-ons. Ticketmaster is listed before
-// SeatGeek in run.js, so when both list the same show the dedupe (import/dedupe.js) keeps Ticketmaster's.
+// SeatGeek in run.js, so when both list the same show the dedupe (lib/dedupe.js) keeps Ticketmaster's.
 
-const { get } = require("../fetch");
+const { get } = require("../lib/fetch");
 
 const BASE = "https://api.seatgeek.com/2/events";
 const CENTER = { lat: 43.6532, lon: -79.3832 };

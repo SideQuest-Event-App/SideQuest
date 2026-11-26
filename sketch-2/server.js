@@ -9,10 +9,11 @@ const zlib = require("zlib");
 
 // --- Load .env (so the API key never lives in the code). Must run before lib/ai.js loads. ---
 // Sketch 2's own .env wins; anything it leaves out (or no .env at all) comes from Sketch 1's, so one set of Supabase keys does both.
+// A variable already set wins, even when set to "" on purpose: tests blank SUPABASE_URL so they never touch the real database.
 for (const envPath of [path.join(__dirname, ".env"), path.join(__dirname, "..", "sketch-1", ".env")]) if (fs.existsSync(envPath)) {
   for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
     const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/);
-    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
 }
 
@@ -21,9 +22,9 @@ const ai = require("./lib/ai");
 const { track, flush: flushAnalytics } = require("./lib/analytics");
 const posters = require("./lib/posters");
 const { geocode } = require("./lib/geocode");
-const { findDuplicate, mergeInto } = require("../sketch-1/import/dedupe");
-const { jsonLdEvents } = require("../sketch-1/import/fetch");
-const { stripHtml, trimText, place, travel: travelTo, vibesOf, NA, cleanListing } = require("../sketch-1/import/normalize");
+const { findDuplicate, mergeInto } = require("../events/lib/dedupe");
+const { jsonLdEvents } = require("../events/lib/fetch");
+const { stripHtml, trimText, place, travel: travelTo, vibesOf, NA, cleanListing } = require("../events/lib/normalize");
 const siteName = require("./public/js/sites.js"); // shared with the add-event form
 const sidekick = require("./lib/sidekick/rooms"); // Sidekick planning calls (lib/sidekick, public/sidekick.html)
 const skOg = require("./lib/sidekick/og"); // link previews for call invites
@@ -277,6 +278,9 @@ function eventsVersion() {
   const ended = d.events.reduce((n, e) => n + (e.ended ? 1 : 0), 0);
   return [d.createdAt, d.eventsImportedAt, d.events.length, ended, d.logs.going.length, d.eventEdits || 0, Math.floor(now().getTime() / 600000)].join("|");
 }
+// What the event page shows about its vibe: qualities, the premise, and whether the listing was too thin to tell
+const { traits } = require("./lib/search/traits");
+const shownTraits = (e) => { const t = traits(e); return { qualities: t.qualities, info: t.info, premise: t.premise || undefined }; };
 let eventsCache = { version: null, json: null, gzip: null };
 function eventsPayload() {
   const version = eventsVersion();
@@ -286,7 +290,7 @@ function eventsPayload() {
     for (const g of d.logs.going) if (!g.sample) goingCounts[g.eventId] = (goingCounts[g.eventId] || 0) + 1;
     // Passed events are left out, except ones someone has in their Quest Log or a host published (for ratings and recaps)
     const kept = new Set(Object.values(d.users).flatMap((u) => Object.keys(u.log || {})).map(Number));
-    const json = JSON.stringify({ version, events: d.events.filter((e) => !isOver(e) || e.ended || e.publishedBy || kept.has(e.id)).map((e) => ({ ...cleanListing(e), joinRequests: undefined, going: (e.going || 0) + (goingCounts[e.id] || 0), over: isOver(e), ended: !!e.ended })) });
+    const json = JSON.stringify({ version, events: d.events.filter((e) => !isOver(e) || e.ended || e.publishedBy || kept.has(e.id)).map((e) => ({ ...cleanListing(e), ...shownTraits(e), details: e.details && String(e.description || "").length < 80 ? e.details : undefined, aiQualities: undefined, keywords: undefined, own: undefined, seriesKey: undefined, joinRequests: undefined, going: (e.going || 0) + (goingCounts[e.id] || 0), over: isOver(e), ended: !!e.ended })) });
     eventsCache = { version, json, gzip: zlib.gzipSync(json) };
   }
   return eventsCache;

@@ -441,6 +441,100 @@
   };
   SQ.searchBar = searchBar;
   SQ.filterChips = filterChips;
+
+  // ---------- Suggestions while typing (like Eventbrite's): search the words, a venue, or one event ----------
+  // Built from the events already in the browser, so they show as you type with no server call.
+  const fold = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[’']/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  const upcoming = (e) => !isPast(e);
+  // How well a name fits what's typed: whole name starts with it 3, a word starts with it 2, it's inside 1, else 0
+  const fitOf = (name, q) => {
+    const n = fold(name).replace(/^the /, ""), f = fold(name);
+    if (!q) return 0;
+    if (n.startsWith(q) || f.startsWith(q)) return 3;
+    if ((" " + f).includes(" " + q)) return 2;
+    return q.length >= 3 && f.includes(q) ? 1 : 0;
+  };
+  const venueName = (e) => (e.venue && e.venue.name ? String(e.venue.name).trim() : "");
+  const hostOf = (e) => (SQ.realHost && SQ.realHost(e) ? String(e.organizer.name).trim().replace(/[\s_]+/g, " ") : "");
+  const suggestFor = (text) => {
+    const q = fold(text);
+    if (q.length < 2) return { venues: [], hosts: [], events: [] };
+    const all = (SQ.d.events || []).filter(upcoming);
+    const venues = new Map();
+    for (const e of all) {
+      const name = venueName(e);
+      if (!name || /^(location tba|tba|online)\b/i.test(name)) continue;
+      const key = fold(name).replace(/^the /, "");
+      const v = venues.get(key) || { name, n: 0, fit: fitOf(name, q), area: e.neighbourhood || "" };
+      v.n++;
+      venues.set(key, v);
+    }
+    const vs = [...venues.values()].filter((v) => v.fit).sort((a, b) => b.fit - a.fit || b.n - a.n).slice(0, 4);
+    // Hosts and organizers: the crews behind nights (a venue that hosts its own nights is already under Venues)
+    const hosts = new Map();
+    for (const e of all) {
+      const name = hostOf(e);
+      if (!name) continue;
+      const key = fold(name).replace(/^the /, "");
+      if (venues.has(key)) continue;
+      const h = hosts.get(key) || { name, n: 0, fit: fitOf(name, q) };
+      h.n++;
+      hosts.set(key, h);
+    }
+    const hs = [...hosts.values()].filter((h) => h.fit).sort((a, b) => b.fit - a.fit || b.n - a.n).slice(0, 3);
+    const es = all.map((e) => ({ e, fit: fitOf(e.title, q) })).filter((x) => x.fit)
+      .sort((a, b) => b.fit - a.fit || String(a.e.startsAt).localeCompare(String(b.e.startsAt)));
+    // One row per title (a weekly show is one suggestion, its next date)
+    const seen = new Set(), events = [];
+    for (const x of es) { const k = fold(x.e.title); if (seen.has(k)) continue; seen.add(k); events.push(x.e); if (events.length >= 5) break; }
+    return { venues: vs, hosts: hs, events };
+  };
+  SQ.suggestFor = suggestFor;
+  // Events at one venue, soonest first (what tapping a venue suggestion shows)
+  SQ.venueEvents = (name) => {
+    const key = fold(name).replace(/^the /, "");
+    return (SQ.d.events || []).filter((e) => upcoming(e) && fold(venueName(e)).replace(/^the /, "") === key)
+      .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
+  };
+  // Everything coming up by one host, soonest first (tapping a host, on the event page or in the suggestions)
+  SQ.hostEvents = (name) => {
+    const key = fold(name).replace(/^the /, "");
+    return (SQ.d.events || []).filter((e) => upcoming(e) && fold(hostOf(e)).replace(/^the /, "") === key)
+      .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
+  };
+  // The other upcoming dates of a recurring night (lib/series.js in the importer links them)
+  SQ.seriesEvents = (id) => (SQ.d.events || []).filter((e) => upcoming(e) && e.series && e.series.id === id)
+    .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
+  const suggestBox = (text) => {
+    const t = String(text || "").trim();
+    const { venues, hosts, events } = suggestFor(t);
+    if (fold(t).length < 2) return "";
+    const head = (label) => `<div class="sg-head t-caption c-tertiary">${label}</div>`;
+    return `<div class="sg-list" role="listbox" aria-label="Suggestions">
+      <button type="button" class="sg-row" role="option" data-act="search">${icon("search", "xs")}<span class="sg-text"><span>Search for “${esc(t)}”</span></span></button>
+      ${venues.length ? head("Venues") + venues.map((v) => `<button type="button" class="sg-row" role="option" data-act="searchVenue" data-arg="${esc(v.name)}">${icon("pin", "xs")}<span class="sg-text"><span>${esc(v.name)}</span><span class="c-tertiary">${v.n} upcoming${v.area ? ` · ${esc(v.area)}` : ""}</span></span></button>`).join("") : ""}
+      ${hosts.length ? head("Hosts") + hosts.map((h) => `<button type="button" class="sg-row" role="option" data-act="searchHost" data-arg="${esc(h.name)}">${icon("host", "xs")}<span class="sg-text"><span>${esc(h.name)}</span><span class="c-tertiary">${h.n} upcoming</span></span></button>`).join("") : ""}
+      ${events.length ? head("Events") + events.map((e) => `<button type="button" class="sg-row" role="option" data-act="openQuest" data-arg="${e.id}">${icon("ticket", "xs")}<span class="sg-text"><span>${esc(e.title)}</span><span class="c-tertiary">${esc([dayTime(e), venueName(e)].filter(Boolean).join(" · "))}</span></span></button>`).join("") : ""}
+    </div>`;
+  };
+  // The box follows the search bar's input: shown while it has focus and 2+ letters, gone on Escape, blur or submit
+  const showSuggest = (input) => {
+    const form = input.closest("form.search");
+    if (!form) return;
+    let box = form.querySelector(".sg-list");
+    const html = document.activeElement === input ? suggestBox(input.value) : "";
+    if (box) box.remove();
+    if (html) form.insertAdjacentHTML("beforeend", html);
+  };
+  const hideSuggest = () => document.querySelectorAll("form.search .sg-list").forEach((b) => b.remove());
+  SQ.hideSuggest = hideSuggest;
+  const isSearchInput = (el) => el && el.matches && el.matches('form.search input[data-bind="search.q"]');
+  document.addEventListener("input", (e) => { if (isSearchInput(e.target)) showSuggest(e.target); });
+  document.addEventListener("focusin", (e) => { if (isSearchInput(e.target)) showSuggest(e.target); });
+  document.addEventListener("focusout", (e) => { if (isSearchInput(e.target)) setTimeout(() => { if (!isSearchInput(document.activeElement)) hideSuggest(); }, 0); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && isSearchInput(e.target)) hideSuggest(); });
+  // Tapping a suggestion mustn't blur the input first (that would remove the box before the tap lands)
+  document.addEventListener("pointerdown", (e) => { if (e.target.closest && e.target.closest(".sg-list")) e.preventDefault(); });
   SQ.bell = bell;
 
   /* Discover, map first (designs LD2 option L2, built on DX): a full map of what's on, event pins (violet, a star) and
@@ -746,10 +840,32 @@
     const u = me();
     const r = s.result;
     // A filter changed (here, in the Filters sheet, or on Discover) since these results: search again with it
-    if (s.ran && !s.loading && s.sig !== SQ.filterSig()) setTimeout(() => SQ.actions.search(null, null, true));
+    if (s.ran && !s.venue && !s.host && !s.series && !s.loading && s.sig !== SQ.filterSig()) setTimeout(() => SQ.actions.search(null, null, true));
     let body = "";
     // Skeleton rows after 300 ms (nothing before: most searches are back by then), a message at 1 s
-    if (s.loading) body = SQ.waiting(s.since, { skeleton: SQ.sk.rows(5), message: `Finding sidequests for "${s.ran}"…` });
+    // A venue, a host or a recurring night picked from the suggestions or the event page: everything coming up,
+    // soonest first (no AI, no filters)
+    const listOf = (list, status, empty, extra = "") => `<span class="t-caption c-tertiary search-status">${status}</span>${extra}
+        ${list.length ? `<div class="stack search-list" style="gap:16px">${list.map((e) => `<button class="quest-row" data-act="openQuest" data-arg="${e.id}">${poster(e)}<span class="text"><span>${esc(e.title)}</span><span>${esc(qMeta(e))}</span></span></button>`).join('<hr class="divider">')}</div>`
+          : `<p class="t-body-m c-secondary">${empty}</p>`}`;
+    if (s.venue) {
+      const list = SQ.venueEvents(s.venue);
+      body = listOf(list, `${list.length} upcoming at ${esc(s.venue)}`, `Nothing coming up at ${esc(s.venue)} yet.`);
+    } else if (s.host) {
+      const list = SQ.hostEvents(s.host);
+      const following = u.following.includes(s.host);
+      // Their nights, once each, with how often they happen
+      const nights = [...new Map(list.filter((e) => e.series).map((e) => [e.series.id, e])).values()];
+      const extra = `<div class="row start search-host" style="gap:12px">
+          <span class="grow t-body-m c-secondary">${nights.length ? `${nights.length} recurring ${nights.length === 1 ? "night" : "nights"}: ${esc(nights.slice(0, 3).map((e) => e.title + (e.series.rule ? ` (${e.series.rule.charAt(0).toLowerCase() + e.series.rule.slice(1)})` : "")).join(", "))}${nights.length > 3 ? "…" : ""}` : ""}</span>
+          ${btn(following ? "Following" : "Follow", { "data-act": "follow", "data-arg": s.host, "aria-pressed": String(following) }, "secondary s")}
+        </div>`;
+      body = listOf(list, `${list.length} upcoming by ${esc(s.host)}`, `Nothing coming up by ${esc(s.host)} yet.`, extra);
+    } else if (s.series) {
+      const list = SQ.seriesEvents(s.series);
+      const first = list[0];
+      body = listOf(list, `${list.length} upcoming ${list.length === 1 ? "date" : "dates"}${first && first.series.rule ? ` · ${esc(first.series.rule)}` : ""}`, "No more dates announced yet.");
+    } else if (s.loading) body = SQ.waiting(s.since, { skeleton: SQ.sk.rows(5), message: `Finding sidequests for "${s.ran}"…` });
     else if (s.error) body = SQ.errorBlock("Couldn't load your results", "Something went wrong on our side. Your search is still here.", "searchRetry");
     else if (r) {
       const hits = s.matches.filter((m) => ev(m.id) && !u.notForMe.includes(m.id));
@@ -819,12 +935,47 @@
   const sourceOf = (e) => e.source || "the host's site";
   const ticketsSold = (e) => e.price !== 0 && !!(e.ticketLink || e.sourceUrl);
 
-  // The event page's facts, cleaned (the import does the same: sketch-1/import/normalize.js cleanListing). A host
+  // The event page's facts, cleaned (the import does the same: events/lib/normalize.js cleanListing). A host
   // that's a ticket site's placeholder ("PROMOTER NOT DEFINED") is no host; categories are the listing's real kinds
   // (its vibes, else its own category words), never a guess from the photo.
   const HOST_PLACEHOLDER = /^(n\/?a|none|null|undefined|unknown|tba|tbd|tbc|-+|promoter( not defined| unknown| tbd)?|not (defined|specified|available|provided)|no (promoter|organi[sz]er|host)( (defined|listed|specified))?|organi[sz]er( not defined)?|various|default|test)$/i;
   const realHost = (e) => { const n = String((e.organizer && e.organizer.name) || "").trim().replace(/[\s_]+/g, " "); return !!n && !HOST_PLACEHOLDER.test(n); };
   const JUNK_TAG = /^(undefined|null|none|n\/?a|other|others|misc|miscellaneous|general|group|event|events|default|unknown|tba|tbd)$/i;
+  // "The vibe": the premise (what makes it different) and its qualities as chips, right under the title. A listing too
+  // thin to tell says so plainly instead of guessing.
+  const vibeCard = (e, adult) => {
+    const qs = (e.qualities || []).filter((q) => !(adult && q === "19+"));
+    const premise = e.premise ? `<p class="t-body-m qd-premise">${esc(e.premise)}</p>` : "";
+    const thin = e.info === "thin" ? `<p class="t-caption c-tertiary qd-thin">${icon("alert", "xs")}<span>The ${esc(e.source || "original")} listing says very little about this one, so we can't tell you much about the vibe yet.${e.sourceUrl ? ` <a href="${esc(e.sourceUrl)}" target="_blank" rel="noopener">See the listing</a>` : ""}</span></p>` : "";
+    const lent = (e.shared || []).filter((k) => k !== "image" && k !== "host");
+    const fromOthers = lent.length && e.series ? `<p class="t-caption c-tertiary">Some of this is from other dates of this night.</p>` : "";
+    if (!premise && !qs.length && !thin) return "";
+    return `<div class="qd-group qd-vibe">
+      <span class="overline">The vibe</span>
+      ${premise}
+      ${qs.length ? `<div class="qd-quals">${qs.map((q) => `<span class="tag qd-qual">${esc(q)}</span>`).join("")}</div>` : ""}
+      ${thin}
+      ${fromOthers}
+    </div>`;
+  };
+  // A night that keeps happening: how often, and its next dates (a different venue or a new poster is said)
+  const shortDate = (x) => `${new Date(x.startsAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: TZ })} · ${clock(x.startsAt)}`;
+  const datesCard = (e) => {
+    if (!e.series) return "";
+    const others = SQ.seriesEvents(e.series.id).filter((x) => x.id !== e.id);
+    if (!others.length && !e.series.rule) return "";
+    const venue = (x) => x.venue && x.venue.name;
+    const rows = others.slice(0, 4).map((x) => {
+      const notes = [venue(x) !== venue(e) ? `at ${venue(x)}` : "", x.image && x.image !== e.image ? "new poster" : ""].filter(Boolean).join(" · ");
+      return `<button type="button" class="qd-date" data-act="openQuest" data-arg="${x.id}"><span>${esc(shortDate(x))}</span>${notes ? `<span class="c-tertiary">${esc(notes)}</span>` : ""}${icon("chevR", "xs")}</button>`;
+    }).join("");
+    return `<div class="qd-group qd-dates">
+      <span class="overline">${others.length ? "More dates" : "Happens again"}</span>
+      ${e.series.rule ? `<span class="row start t-body-m" style="gap:8px">${icon("cal", "xs")}${esc(e.series.rule)}</span>` : ""}
+      ${rows ? `<div class="qd-date-list">${rows}</div>` : `<p class="t-caption c-tertiary">The next date isn't announced yet.</p>`}
+      ${others.length > 4 ? btn(`See all ${others.length + 1} dates`, { "data-act": "searchSeries", "data-arg": e.series.id }, "ghost s") : ""}
+    </div>`;
+  };
   const categoriesOf = (e) => {
     const vibes = (e.vibes || []).slice(0, 2);
     if (vibes.length) return vibes;
@@ -887,6 +1038,8 @@
           <span class="t-body-l c-secondary">${esc(whenLong(e))}</span>
           <span class="t-data c-secondary">${esc([venueName, e.neighbourhood, distLabel(e)].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(" · "))}</span>
         </div>
+        ${vibeCard(e, adult)}
+        ${datesCard(e)}
         ${friends.length ? `<div class="qd-group">
           <span class="overline">Friends interested</span>
           <div class="row start" style="gap:12px">${faces(friends)}
@@ -898,7 +1051,7 @@
         ${ratings.length ? `<div class="row start" style="gap:8px">${ratings.join("")}</div>` : ""}
         ${realHost(e) ? `<div class="row start qd-host" style="gap:12px">
           ${avatar(e.organizer.name, "neutral")}
-          <span class="qd-faces-text"><span class="t-title-m">${esc(e.organizer.name)}</span><span class="t-caption c-secondary">${e.organizer.followers ? `${Number(e.organizer.followers).toLocaleString("en-US")} followers` : "Host"}</span></span>
+          <span class="qd-faces-text"><button type="button" class="t-title-m qd-host-name" data-act="searchHost" data-arg="${esc(e.organizer.name)}">${esc(e.organizer.name)}</button><span class="t-caption c-secondary">${e.organizer.followers ? `${Number(e.organizer.followers).toLocaleString("en-US")} followers` : "Host"}</span></span>
           ${btn(following ? "Following" : "Follow", { "data-act": "follow", "data-arg": e.organizer.name, "aria-pressed": String(following) }, "secondary s")}
         </div>` : ""}
         ${going.length || e.going ? `<div class="qd-group">
@@ -907,7 +1060,7 @@
           ${e.guest ? `<span class="row start t-body-m" style="gap:8px">${icon("music")}Guest set: ${esc(e.guest)}</span>` : ""}
         </div>` : ""}
         ${logged && !isPast(e) ? `<div class="qd-group"><span class="overline">Event day</span>${dayCards(e)}</div>` : ""}
-        ${e.description && e.description !== "N/A" ? `<div class="qd-group"><span class="overline">About</span><p class="t-body-m c-secondary">${esc(e.description)}</p></div>` : ""}
+        ${(() => { const about = e.details && String(e.description || "").length < 80 ? e.details : e.description; return about && about !== "N/A" ? `<div class="qd-group"><span class="overline">About</span><p class="t-body-m c-secondary qd-about">${esc(about)}</p></div>` : ""; })()}
         ${verifyCard(e)}
         ${flagSection(e)}
         ${!logged ? `<div class="row" style="gap:8px"><button class="btn btn-ghost m" data-act="moreLike" data-arg="${e.id}" aria-pressed="${(me().moreLike || []).includes(e.id)}">${icon("thumbUp")}More like this</button><button class="btn btn-ghost m" data-act="notForMe" data-arg="${e.id}">${icon("thumbDown")}Not for me</button></div>` : ""}

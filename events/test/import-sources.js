@@ -1,9 +1,9 @@
 // Tests for the bigger import: the SeatGeek source, OpenStreetMap geocoding for bad venue coordinates, the "no pins
-// in the lake" rule, the import workflow's triggers (read by parsing the YAML), and a full run of import/run.js that
+// in the lake" rule, the import workflow's triggers (read by parsing the YAML), and a full run of run.js that
 // writes the Storage file even when the "listings" table doesn't exist yet. Everything runs on fixtures and fakes:
 // a real request to SeatGeek, Nominatim or anywhere else fails the test.
 //
-//   node test/import-sources.js        (from sketch-1/)
+//   node test/import-sources.js        (from events/)
 
 const fs = require("fs");
 const os = require("os");
@@ -17,6 +17,7 @@ const REPO = path.join(ROOT, "..");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sq-sources-"));
 Object.assign(process.env, { IMPORT_CACHE_DIR: path.join(tmp, "cache"), GAP_MS: "0", CACHE_HOURS: "0", AI: "off" });
 for (const k of ["SEATGEEK_CLIENT_ID", "SUPABASE_URL", "SUPABASE_SECRET_KEY", "UPLOAD", "GEOCODE", "ONLY", "MERGE"]) delete process.env[k];
+process.env.SUPABASE_URL = process.env.SUPABASE_SECRET_KEY = ""; // blank, not missing: a missing key is filled in from .env (the real database)
 
 const realFetch = global.fetch;
 global.fetch = async (url, opts) => {
@@ -29,10 +30,10 @@ const logs = [];
 const log = (...a) => logs.push(a.join(" "));
 const SECRET_ID = "sg_client_TEST_never_log_me_42";
 
-const { fetchSeatGeek, toRaw } = require(path.join(ROOT, "import", "sources", "seatgeek"));
-const { toEvent } = require(path.join(ROOT, "import", "normalize"));
-const { dedupe } = require(path.join(ROOT, "import", "dedupe"));
-const locate = require(path.join(ROOT, "import", "locate"));
+const { fetchSeatGeek, toRaw } = require(path.join(ROOT, "sources", "seatgeek"));
+const { toEvent } = require(path.join(ROOT, "lib", "normalize"));
+const { dedupe } = require(path.join(ROOT, "lib", "dedupe"));
+const locate = require(path.join(ROOT, "lib", "locate"));
 const gta = require(path.join(ROOT, "lib", "gta"));
 const geocodeLib = require(path.join(ROOT, "lib", "geocode"));
 const yaml = require(path.join(__dirname, "mini-yaml"));
@@ -188,7 +189,7 @@ function inSimpleLake(lat, lng) {
     for (const [lat, lng] of [[43.5, -79.5], [43.6, -79.36], [43.62, -79.1]]) assert.ok(inSimpleLake(lat, lng) && gta.inLake(lat, lng), `${lat},${lng} is lake`);
     for (const [lat, lng] of [[43.6387, -79.3817], [43.663, -79.307], [43.706, -79.232], [43.622, -79.475], [43.6205, -79.3786]]) assert.ok(gta.onMap(lat, lng), `${lat},${lng} is land`);
     // The current seed import, plus the fixture's lake venues, through locate.fix (no geocoder) and toEvent
-    const seed = JSON.parse(fs.readFileSync(path.join(ROOT, "seed", "events.json"), "utf8")).events;
+    const seed = JSON.parse(fs.readFileSync(path.join(ROOT, "data", "events.json"), "utf8")).events;
     const raws = [...seed.map((e) => ({ source: e.source, sourceId: e.id, url: e.sourceUrl, title: e.title, startsAt: e.startsAt, venue: { ...e.venue, city: "Toronto" }, categories: e.tags })), ...toRawAll()];
     const before = raws.filter((r) => r.venue.lat != null && inSimpleLake(r.venue.lat, r.venue.lng)).length;
     assert.ok(before >= 3, `the fixture has lake points to catch (${before})`);
@@ -204,13 +205,13 @@ function inSimpleLake(lat, lng) {
     const wf = yaml.parse(fs.readFileSync(path.join(REPO, ".github", "workflows", "import-events.yml"), "utf8"));
     const on = wf.on;
     assert.deepStrictEqual(on.push.branches, ["claude/dazzling-brahmagupta-4ldxu4"]);
-    assert.deepStrictEqual(on.push.paths.sort(), [".github/workflows/import-events.yml", "sketch-1/import/**", "sketch-1/lib/**"]);
+    assert.deepStrictEqual(on.push.paths.sort(), ["!events/README.md", "!events/data/events.json", "!events/docs/**", "!events/test/**", ".github/workflows/import-events.yml", "events/**"]);
     assert.ok(!("main" in (on.push || {})) && !on.push.branches.includes("main"), "never triggers on main pushes");
     assert.ok(on.workflow_dispatch && on.workflow_dispatch.inputs.only, "Run workflow is still there, with its 'only' input");
     assert.deepStrictEqual(on.schedule.map((s) => s.cron), ["17 7 * * 0,2-6", "23 6 * * 1"]);
     assert.strictEqual(wf.concurrency.group, "import-events");
     assert.strictEqual(wf.concurrency["cancel-in-progress"], false, "a running import is never killed half-way");
-    const step = wf.jobs.import.steps.find((s) => s.run === "node import/run.js");
+    const step = wf.jobs.import.steps.find((s) => s.run === "node run.js");
     assert.strictEqual(step.env.SEATGEEK_CLIENT_ID, "${{ secrets.SEATGEEK_CLIENT_ID }}");
     assert.strictEqual(step.env.GEOCODE, "1");
     assert.strictEqual(step.env.UPLOAD, "1");
@@ -221,7 +222,7 @@ function inSimpleLake(lat, lng) {
     assert.strictEqual(evaluate(step.env.MERGE, push), "");
     assert.ok(evaluate(step.env.ONLY, { schedule: "17 7 * * 0,2-6" }).split(",").includes("SeatGeek"));
     // The geocode cache is kept between runs
-    assert.ok(wf.jobs.import.steps.some((s) => s.uses && s.uses.startsWith("actions/cache@") && s.with.path === "sketch-1/data/geocode.json"));
+    assert.ok(wf.jobs.import.steps.some((s) => s.uses && s.uses.startsWith("actions/cache@") && s.with.path === "events/data/geocode.json"));
   });
 
   // ---------- A full run: Storage written even without the listings table ----------
@@ -249,8 +250,8 @@ function inSimpleLake(lat, lng) {
         throw new Error("Unexpected real fetch in run.js test: " + u);
       };`);
     const out = path.join(tmp, "events.json");
-    const env = { ...process.env, ONLY: "SeatGeek", SEATGEEK_CLIENT_ID: SECRET_ID, UPLOAD: "1", GEOCODE: "1", GEOCODE_CACHE: path.join(tmp, "run-geocode.json"), SUPABASE_URL: fake.url, SUPABASE_SECRET_KEY: KEY, IMPORT_OUT: out, EVENT_TAGS_FILE: path.join(tmp, "tags.json") };
-    const child = spawn(process.execPath, ["-r", preload, path.join(ROOT, "import", "run.js")], { env, cwd: ROOT });
+    const env = { ...process.env, ONLY: "SeatGeek", SEATGEEK_CLIENT_ID: SECRET_ID, UPLOAD: "1", GEOCODE: "1", GEOCODE_CACHE: path.join(tmp, "run-geocode.json"), SUPABASE_URL: fake.url, SUPABASE_SECRET_KEY: KEY, IMPORT_OUT: out, EVENT_TAGS_FILE: path.join(tmp, "tags.json"), SERIES_FILE: path.join(tmp, "series.json") };
+    const child = spawn(process.execPath, ["-r", preload, path.join(ROOT, "run.js")], { env, cwd: ROOT });
     let text = "";
     child.stdout.on("data", (d) => (text += d));
     child.stderr.on("data", (d) => (text += d));
@@ -260,7 +261,7 @@ function inSimpleLake(lat, lng) {
       assert.strictEqual(code, 0, text);
       assert.match(text, /SeatGeek: done, 4 fetched, 4 in-person GTA events kept/);
       assert.match(text, /Events table: not there yet/);
-      assert.match(text, /Wrote 4 events .* to seed\/events\.json and Supabase Storage/);
+      assert.match(text, /Wrote 4 events .* to data\/events\.json and Supabase Storage/);
       assert.match(text, /Locations: 1 venues looked up on OpenStreetMap .*1 kept off the map; 1 listed without a pin/);
       assert.ok(!text.includes(SECRET_ID) && !text.includes(KEY), "no key in the log");
       const stored = JSON.parse(zlib.gunzipSync(fake.files["imports/events.json.gz"]).toString("utf8"));

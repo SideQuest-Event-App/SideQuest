@@ -3,7 +3,7 @@
 // Each venue page also lists all its upcoming events, so venues found this way add many more.
 // DICE's /api/ is off-limits in its robots.txt, so it isn't used.
 
-const { get, jsonLdEvents } = require("../fetch");
+const { get, jsonLdEvents } = require("../lib/fetch");
 
 const GTA = /-(toronto|mississauga|brampton|markham|vaughan|richmond-hill|oakville|burlington|pickering|ajax|whitby|oshawa|etobicoke|scarborough|north-york|east-york)-tickets$/;
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];

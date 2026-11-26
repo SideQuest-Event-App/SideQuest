@@ -92,7 +92,7 @@ const month = () => today().slice(0, 7);
 
 let data = null; // { month: { "2026-11": { meter: n } }, day: { "2026-11-24": { meter: n } } }
 let store = null;
-try { store = require("../../../sketch-1/lib/store"); } catch {}
+try { store = require("../../../events/lib/store"); } catch {}
 
 async function load() {
   if (data) return data;

@@ -45,7 +45,7 @@ const leaks = (label, text) => DIGITS.filter((d) => String(text).includes(d)).ma
     PORT: String(port), SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), AI: "off", ANTHROPIC_API_KEY: "",
     GOOGLE_MAPS_API_KEY: "test-key", SIDEKICK_ELEVENLABS_OFF: "1", SIDEKICK_STUN_URL: "off",
   });
-  delete process.env.SUPABASE_URL;
+  process.env.SUPABASE_URL = ""; process.env.SUPABASE_SECRET_KEY = "";
   delete process.env.SIDEKICK_PLACES_OFF;
 
   // ---------- fakes and taps, before the app loads ----------

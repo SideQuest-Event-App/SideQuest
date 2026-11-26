@@ -23,7 +23,7 @@ const path = require("path");
 for (const envPath of [path.join(__dirname, "..", ".env"), path.join(__dirname, "..", "..", "sketch-1", ".env")]) if (fs.existsSync(envPath)) {
   for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
     const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/);
-    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
 }
 const personas = require("../lib/sidekick/personas");

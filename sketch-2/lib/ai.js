@@ -133,8 +133,16 @@ function coreWords(text) {
 function phrasesOf(text) {
   return String(text).split(/,|;|\n|\/|\band\b|&/i).map((p) => p.trim().toLowerCase()).filter((p) => p.length > 1);
 }
+// Loaded on first use (lib/search requires this file, so requiring it at the top would be circular)
+let traitsFn = null, askedFn = null;
+const askedOf = () => askedFn || (askedFn = require("../../events/lib/qualities").askedQualities);
+const traitsOf = () => traitsFn || (traitsFn = require("./search/traits").traits);
 function haystack(e) {
-  return `${e.title} ${e.description} ${e.tags.join(" ")} ${(e.vibes || []).join(" ")} ${e.scene}`.toLowerCase();
+  // The venue and organizer count too, so typing a place you go to ("Cafeteria") finds what's on there
+  const venue = e.venue && typeof e.venue === "object" ? e.venue.name : e.venue;
+  const organizer = e.organizer && typeof e.organizer === "object" ? e.organizer.name : e.organizer;
+  // Its qualities and premise too ("Phone-free" also reads as "offline", "no phones"), and the listing's full text
+  return `${e.title} ${e.description} ${e.tags.join(" ")} ${(e.vibes || []).join(" ")} ${e.scene} ${venue || ""} ${organizer || ""} ${traitsOf()(e).words}`.toLowerCase();
 }
 // Vibe names hit if any of their words appear ("Zines & print" hits "zines")
 function vibeWords(vibes) {
@@ -154,6 +162,9 @@ function compact(e, origins) {
     listedOn: e.source,
     price: e.price,
     description: String(e.description || "").slice(0, 220),
+    // What it's like beyond its vibe (rules + AI tags), so "phone-free" or "queer" nights can be matched
+    premise: traitsOf()(e).premise || undefined,
+    qualities: traitsOf()(e).qualities.length ? traitsOf()(e).qualities : undefined,
     vibes: e.vibes,
     tags: e.tags,
     rating: e.rating || undefined,
@@ -277,12 +288,15 @@ function matchKeywords(people, pool, n = 5) {
       let fitCount = 0;
       let hitTotal = 0;
       const allHits = [];
+      const has = traitsOf()(e).qualities;
       for (const p of people) {
         const hits = wordsOf(p.interests).filter((w) => hay.includes(w));
-        fits[p.name] = hits.length ? `Mentions ${hits.join(", ")}` : "";
-        if (hits.length) fitCount++;
-        hitTotal += hits.length;
-        allHits.push(...hits);
+        // Qualities the words ask for ("queer", "no phones") count most: they're what the night is, not a word in it
+        const asked = askedOf()(p.interests).filter((l) => has.includes(l));
+        fits[p.name] = asked.length ? `${asked.join(", ")}` : hits.length ? `Mentions ${hits.join(", ")}` : "";
+        if (hits.length || asked.length) fitCount++;
+        hitTotal += hits.length + asked.length * 3;
+        allHits.push(...asked, ...hits);
       }
       const reason = crew ? `Matches ${fitCount} of ${people.length} of you by keyword.` : `Mentions: ${[...new Set(allHits)].join(", ")}`;
       const score = Math.min(95, 45 + Math.round((fitCount / people.length) * 35) + hitTotal * 4);

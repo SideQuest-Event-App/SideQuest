@@ -5,7 +5,7 @@
 //  3. Google and Foursquare results for the same place are merged into one (Google's copy wins, with Foursquare's
 //     categories), and a want search uses both
 //  4. the key never reaches a log line
-//  5. the map's lake and GTA numbers (public/js/map.js) are the import's (sketch-1/lib/gta.js), and the map drops
+//  5. the map's lake and GTA numbers (public/js/map.js) are the import's (events/lib/gta.js), and the map drops
 //     pins in the lake or outside the GTA
 //
 //   node test/places-sources.js
@@ -20,6 +20,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sq-places-src-"));
 const FSQ_KEY = "fsq_TEST_KEY_never_log_me_314";
 Object.assign(process.env, { SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), ANTHROPIC_API_KEY: "", AI: "off", GOOGLE_MAPS_API_KEY: "test-key", FOURSQUARE_FREE_PER_MONTH: "10", FOURSQUARE_STOP_AT: "0.8", FOURSQUARE_DAILY_MAX: "5" });
 for (const k of ["SUPABASE_URL", "SUPABASE_SECRET_KEY", "SIDEKICK_PLACES_OFF", "FOURSQUARE_API_KEY", "FOURSQUARE_OFF"]) delete process.env[k];
+process.env.SUPABASE_URL = process.env.SUPABASE_SECRET_KEY = ""; // blank, not missing: a missing key is filled in from .env (the real database)
 
 const logs = [];
 for (const m of ["log", "warn", "error"]) {
@@ -155,7 +156,7 @@ async function test(name, fn) {
     win.window = win;
     vm.createContext(win);
     vm.runInContext(fs.readFileSync(path.join(ROOT, "public", "js", "map.js"), "utf8"), win);
-    const gta = require(path.join(ROOT, "..", "sketch-1", "lib", "gta"));
+    const gta = require(path.join(ROOT, "..", "events", "lib", "gta"));
     assert.strictEqual(JSON.stringify(win.SQ.GEO.LAKE), JSON.stringify(gta.LAKE), "same lake polygon");
     assert.strictEqual(JSON.stringify(win.SQ.GEO.GTA), JSON.stringify(gta.GTA), "same GTA box");
     const pts = [[43.65, -79.38, true], [43.6, -79.38, false], [43.45, -79.5, false], [42.88, -78.87, false], [null, null, false], [0, 0, false], [43.6205, -79.3786, true], [43.663, -79.307, true]];

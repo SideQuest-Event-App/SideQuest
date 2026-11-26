@@ -58,7 +58,7 @@
   --ink-40: rgba(19, 16, 27, 0.4);
   --ink-60: rgba(19, 16, 27, 0.6);
   --gradient: linear-gradient(96deg, #a97af2 0%, #c98adf 55%, #f28dc8 100%); /* Signature/Gradient */
-  --duo: url(#duoViolet); /* every photo: violet duotone, the SVG filter in index.html (shadows #13101b, highlights #c2a5f6) */
+  --duo: none; /* photos and posters are shown exactly as posted: never recoloured (only resized and cropped) */
   --scrim: linear-gradient(180deg, rgba(19, 16, 27, 0) 20%, rgba(19, 16, 27, 0.6) 60%, rgba(19, 16, 27, 0.94) 100%); /* Image/Scrim bottom */
   --shadow-card: 0 4px 16px rgba(19, 16, 27, 0.1); /* Elevation/1 · Card */
   --shadow-float: 0 12px 32px -4px rgba(19, 16, 27, 0.32); /* Elevation/3 · Floating */
@@ -827,7 +827,7 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .icon-btn.raised { background: var(--bg-raised); }
 .qd-hero { position: relative; height: 330px; margin-bottom: -28px; flex: none; overflow: hidden; }
 .qd-hero .poster { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; }
-.qd-scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(19, 16, 27, 0.6) 0%, rgba(19, 16, 27, 0) 40%); }
+.qd-scrim { display: none; } /* nothing over a poster: the buttons on it carry their own backgrounds */
 .qd-nav { position: absolute; left: 20px; right: 20px; top: 36px; display: flex; gap: 10px; align-items: center; }
 .qd-nav .grow { flex: 1; }
 .qd-sheet { position: relative; background: var(--bg-base); border-radius: 28px 28px 0 0; padding: 20px 20px 24px; display: flex; flex-direction: column; gap: 18px; }
@@ -1117,7 +1117,7 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .sw-row > .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; }
 .pub-card { position: relative; height: 210px; border-radius: var(--r-2xl); overflow: hidden; color: var(--white); }
 .pub-card > .poster { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; }
-.pub-card > .qd-scrim { background: linear-gradient(180deg, rgba(19, 16, 27, 0) 30%, rgba(19, 16, 27, 0.8) 100%); }
+.pub-card > .qd-scrim { display: none; }
 .pub-card .tl { position: absolute; left: 12px; top: 12px; }
 .pub-card .tr { position: absolute; right: 16px; top: 16px; }
 .pub-card .tr .ic { width: 22px; height: 22px; }
@@ -1468,3 +1468,36 @@ a.tab { text-decoration: none; }
 .side-data { margin: 0; font-size: 12px; line-height: 16px; color: var(--text-secondary); }
 .side-data.stale { padding: 8px 10px; border-radius: var(--r-md); background: var(--status-warning-tint); color: var(--text-primary); font-weight: 500; }
 .ranked .text > .crew-who { display: flex; }
+
+/* Search suggestions under the search bar: search the words, a venue, or one event */
+form.search { position: relative; }
+.sg-list { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 30; display: flex; flex-direction: column; padding: 6px; max-height: min(60vh, 420px); overflow-y: auto; border-radius: 16px; background: var(--bg-surface); border: 1px solid var(--border-subtle); box-shadow: var(--shadow-float); }
+.sg-head { padding: 10px 10px 4px; }
+.sg-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 6px 10px; border: 0; border-radius: 10px; background: none; color: inherit; text-align: left; cursor: pointer; }
+.sg-row:hover, .sg-row:focus-visible { background: var(--bg-raised); }
+.sg-row > .ic { flex: none; color: var(--text-tertiary); }
+.sg-text { display: flex; flex-direction: column; min-width: 0; }
+.sg-text > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg-text > span + span { font-size: 0.8125rem; }
+
+/* Event page: the vibe (premise and qualities) */
+.qd-vibe { gap: 10px; }
+.qd-premise { color: var(--text-primary); }
+.qd-quals { display: flex; flex-wrap: wrap; gap: 6px; }
+.qd-qual { background: var(--bg-raised); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
+.qd-thin { display: flex; gap: 6px; align-items: flex-start; }
+.qd-thin a { color: var(--text-accent); }
+.qd-about { white-space: pre-line; }
+
+/* A recurring night's other dates on its event page, and the host's name as a link to their events */
+.qd-dates { gap: 10px; }
+.qd-date-list { display: flex; flex-direction: column; border: 1px solid var(--border-subtle, rgba(255,255,255,.08)); border-radius: 12px; overflow: hidden; }
+.qd-date { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.qd-date + .qd-date { border-top: 1px solid var(--border-subtle, rgba(255,255,255,.08)); }
+.qd-date > span:first-child { flex: 1 1 auto; min-width: 0; }
+.qd-date > .c-tertiary { flex: none; font-size: 13px; }
+.qd-date > .ic { flex: none; color: var(--text-tertiary); }
+.qd-date:hover, .qd-date:focus-visible { background: var(--bg-raised); }
+.qd-host-name { padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
+.qd-host-name:hover, .qd-host-name:focus-visible { text-decoration-color: currentColor; }
+.search-host { margin: 4px 0 12px; }

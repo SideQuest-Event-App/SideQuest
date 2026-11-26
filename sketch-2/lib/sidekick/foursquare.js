@@ -16,7 +16,7 @@
 // Every search reserves from the usage meter first (usage.js "foursquare_places"), like places.js.
 
 const usage = require("./usage");
-const { travel, place } = require("../../../sketch-1/import/normalize");
+const { travel, place } = require("../../../events/lib/normalize");
 
 const HOST = () => process.env.FOURSQUARE_HOST || "https://places-api.foursquare.com";
 const VERSION = () => process.env.FOURSQUARE_API_VERSION || "2025-06-17";

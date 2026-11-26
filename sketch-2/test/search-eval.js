@@ -15,6 +15,7 @@ const assert = require("assert");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sq-search-eval-"));
 Object.assign(process.env, { SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), ANTHROPIC_API_KEY: "", AI: "off", GOOGLE_MAPS_API_KEY: "test-key", FOURSQUARE_API_KEY: "test-key", GOOGLE_PLACES_DAILY_MAX: "500" });
 for (const k of ["SUPABASE_URL", "SUPABASE_SECRET_KEY", "SIDEKICK_PLACES_OFF", "FOURSQUARE_OFF"]) delete process.env[k];
+process.env.SUPABASE_URL = process.env.SUPABASE_SECRET_KEY = ""; // blank, not missing: a missing key is filled in from .env (the real database)
 
 const ROOT = path.join(__dirname, "..");
 

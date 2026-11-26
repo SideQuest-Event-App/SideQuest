@@ -74,8 +74,8 @@ function fakeSupabase(users) {
 (async () => {
   const port = await freePort();
   Object.assign(process.env, { PORT: String(port), AI: "off", ANTHROPIC_API_KEY: "", SIDEKICK_PLACES_OFF: "1", SIDEKICK_ELEVENLABS_OFF: "1", SIDEKICK_STUN_URL: "off", SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), SIDEKICK_STUDY_FILE: path.join(tmp, "study.json") });
-  delete process.env.SUPABASE_URL;
-  delete process.env.SUPABASE_SECRET_KEY;
+  process.env.SUPABASE_URL = "";
+  process.env.SUPABASE_SECRET_KEY = "";
   delete process.env.GOOGLE_MAPS_API_KEY;
   const realFetch = global.fetch;
   global.fetch = async (url, opts) => { if (!String(url).startsWith("http://localhost")) throw new Error("offline in tests"); return realFetch(url, opts); };
@@ -469,7 +469,7 @@ function fakeSupabase(users) {
       process.env.SUPABASE_URL = fake.url;
       process.env.SUPABASE_SECRET_KEY = "sb_secret_test";
       let r;
-      try { r = (await act("deleteAccount", { confirm: "DELETE" }, doomed)).result; } finally { delete process.env.SUPABASE_URL; delete process.env.SUPABASE_SECRET_KEY; }
+      try { r = (await act("deleteAccount", { confirm: "DELETE" }, doomed)).result; } finally { process.env.SUPABASE_URL = ""; process.env.SUPABASE_SECRET_KEY = ""; }
       assert.deepStrictEqual(r, { deleted: true, auth: { deleted: "auth-doomed" } });
       assert(!dbm.data.users[doomed], "the account row is gone first");
       assert(fake.seen.some((x) => x.method === "DELETE" && x.url === "/auth/v1/admin/users/auth-doomed" && x.apikey === "sb_secret_test"), `DELETE /auth/v1/admin/users/{id} with the secret key: ${JSON.stringify(fake.seen)}`);

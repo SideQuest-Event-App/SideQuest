@@ -5,19 +5,20 @@
 
 const fs = require("fs");
 const path = require("path");
-const { dedupe } = require("../../sketch-1/import/dedupe");
-const store = require("../../sketch-1/lib/store");
-const eventsTable = require("../../sketch-1/lib/events-table");
+const { dedupe } = require("../../events/lib/dedupe");
+const store = require("../../events/lib/store");
+const eventsTable = require("../../events/lib/events-table");
 
 const ROOT = path.join(__dirname, "..");
 const DATA_DIR = path.join(ROOT, "data");
 const DB_PATH = path.join(DATA_DIR, "db.json");
 // Sketch 2 shares Sketch 1's imported listings (read-only), so one import feeds both
-const readSeed = (name) => JSON.parse(fs.readFileSync(path.join(ROOT, "..", "sketch-1", "seed", name), "utf8"));
-// The import (sketch-1/import/run.js): real listings plus when they were imported. Read, in order, from:
+const readJSON = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
+const readSeed = (name) => readJSON(name === "events.json" ? require("../../events/lib/paths").EVENTS_FILE : path.join(ROOT, "..", "sketch-1", "seed", name)); // the import's file, or sketch-1's sample requests
+// The import (events/run.js): real listings plus when they were imported. Read, in order, from:
 //   1. the events table in Supabase ("listings", sketch-2/supabase/schema.sql): only upcoming events, by date;
 //   2. the import file in Supabase Storage (imports/events.json.gz), kept up to date during the switch;
-//   3. sketch-1/seed/events.json in the repo (no Supabase keys, or both of the above failed).
+//   3. events/data/events.json in the repo (no Supabase keys, or both of the above failed).
 // lastSource says which one was used, for the log line and /api/health.
 let lastSource = null;
 async function seedEvents({ quiet = false } = {}) {
@@ -43,7 +44,7 @@ async function seedEvents({ quiet = false } = {}) {
       return stored;
     }
   } catch (err) {
-    console.warn(`Couldn't read the import from Supabase Storage (${err.message}); using sketch-1/seed/events.json`);
+    console.warn(`Couldn't read the import from Supabase Storage (${err.message}); using events/data/events.json`);
   }
   const file = readSeed("events.json");
   const out = Array.isArray(file) ? { importedAt: "sample", events: file } : file;

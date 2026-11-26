@@ -2,7 +2,7 @@
 
 **What it is:** the [Sidequest — App Screens](https://www.figma.com/design/7EVuAdMhiXva0GgXMH7897/Sidequest-%E2%80%94-App-Screens?node-id=283-5129) Figma page, coded. Every visible screen is here, with the design's fonts (Geist and Geist Mono), colours, spacing, radii and components. Hidden screens in the file were left out.
 
-Sketch 2 is built on [Sketch 1](../sketch-1): the same server, database, AI, events and actions. Sketch 1's code was copied in once and then edited here, so nothing is written twice. The real events come straight from Sketch 1 (`../sketch-1/seed`), and so does its importer and duplicate checker. Sketch 1 itself isn't changed.
+Sketch 2 is built on [Sketch 1](../sketch-1): the same server, database, AI, events and actions. Sketch 1's code was copied in once and then edited here, so nothing is written twice. The real events, the importer and the duplicate checker live in their own folder, [`events/`](../events/README.md), shared by both sketches.
 
 ## Run it
 
@@ -136,7 +136,7 @@ Sketch 2 runs on Render the same way as Sketch 1, as a second web service from t
 
 1. In Supabase's SQL Editor, run `supabase/schema.sql` once (after Sketch 1's). The tables are already there in our project.
 2. On Render: **New > Web Service**, pick this repo, and copy Sketch 1's service settings with these changes:
-   - **Root Directory:** leave it empty. Sketch 2 reads Sketch 1's events and importer (`../sketch-1/seed`, `../sketch-1/import`), so it needs the whole repo.
+   - **Root Directory:** leave it empty. Sketch 2 reads Sketch 1's events and importer (`../events`), so it needs the whole repo.
    - **Start Command:** `node sketch-2/server.js`. There's nothing to install, so the build command can be the same as Sketch 1's.
    - **Environment variables:** `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (the same values as Sketch 1's service) and `ANTHROPIC_API_KEY`. Render sets `PORT` itself. For in-app audio on mobile networks, also `SIDEKICK_TURN_URL`, `SIDEKICK_TURN_USER` and `SIDEKICK_TURN_PASS` (see "Talk in the app" above). For Sidekick's natural voice: `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_FRIEND` and `ELEVENLABS_AGENT_CONCIERGE` (nothing new is needed if these are already set; `SIDEKICK_TOOL_SECRET` is no longer needed for the voice). The agents themselves are updated from code with `node tools/elevenlabs-agents.js --update`, not on Render. If you turned on an allowlist in the agents' security settings, it must include your Render address.
 3. Deploy. The log's first lines should say `Database: Supabase` and `Matching with AI via the Anthropic API`.
@@ -188,18 +188,18 @@ The exceptions, each marked in the code with a `ponytail:` comment:
 
 ## Where the events come from (automatic import)
 
-Sketch 1's importer (`sketch-1/import/`) gathers the next three months of in-person GTA events. A GitHub Action (`.github/workflows/import-events.yml`) runs it on its own and puts the result in Supabase: one row per event in the `listings` table, and (during the switch) the whole import as a file in Storage. This server checks for a new import every hour, so you don't need to commit, redeploy or restart.
+The importer (`events/`, see [its README](../events/README.md)) gathers the next three months of in-person GTA events. A GitHub Action (`.github/workflows/import-events.yml`) runs it on its own and puts the result in Supabase: one row per event in the `listings` table, and (during the switch) the whole import as a file in Storage. This server checks for a new import every hour, so you don't need to commit, redeploy or restart.
 
 - **Every day except Monday, about 07:17 UTC:** the quick sources (Ticketmaster, SeatGeek, City of Toronto, Toronto Public Library, Luma, DICE, Instagram); the others keep their last events. **Monday, about 06:23 UTC:** every source (Meetup alone takes about 35 minutes). GitHub often starts scheduled runs late, sometimes by hours.
 - **The daily and Monday schedules only run once the workflow file is on `main`.** GitHub runs scheduled workflows from the default branch only. Until then, the import runs from the `claude/dazzling-brahmagupta-4ldxu4` branch in two ways:
-  - **On a push** to that branch that changes the import code (`sketch-1/import/**`, `sketch-1/lib/**`) or the workflow file. A push run imports every source.
+  - **On a push** to that branch that changes the import code (`events/**`, except its output, docs and tests) or the workflow file. A push run imports every source.
   - **By hand:** on GitHub, open **Actions**, click **Import events**, click **Run workflow**, pick `claude/dazzling-brahmagupta-4ldxu4` under "Use workflow from", and click the green **Run workflow** button.
   - Runs wait for each other (one at a time), and a newer waiting run replaces an older one, so they never pile up.
 - **Order** (the earlier source wins a tie between duplicates): Ticketmaster, SeatGeek, Instagram, DICE, Meetup, Luma, City of Toronto, Toronto Public Library, Eventbrite.
 - **SeatGeek** (optional): the official Platform API, for Toronto-area concerts, comedy and theatre (no sports). Add the `SEATGEEK_CLIENT_ID` secret (a client id from [seatgeek.com/account/develop](https://seatgeek.com/account/develop)); without it SeatGeek is skipped. The same show on Ticketmaster and SeatGeek is kept once, as Ticketmaster's. SeatGeek's terms ask for SeatGeek attribution wherever its data is shown.
 - **Map coordinates:** a venue with no coordinates, or with ones in Lake Ontario (often a Meetup venue that's only a plus code), is looked up on OpenStreetMap's Nominatim (one request a second, the generic User-Agent `SideQuest-class-project`, answers cached between runs). If nothing trustworthy is found, the event stays in the lists but gets no pin. The map also leaves off any pin in the lake or outside the GTA; it never places a guess.
-- **Where this server reads them from,** in order: the `listings` table (only events that haven't ended), the Storage file, then `sketch-1/seed/events.json`. Its log says which, e.g. `Events: table (2319 upcoming, updated 2026-11-25T07:31:02.000Z)`. `/api/health` shows the same, plus how old the newest import is; over 36 hours, the log and `/api/health` carry a `WARNING: the newest event import is … old` line.
-- **Instagram is automatic once its two secrets are added** (`INSTAGRAM_USER_ID`, `INSTAGRAM_ACCESS_TOKEN`; step by step: [`sketch-1/import/README-instagram.md`](../sketch-1/import/README-instagram.md)). Each day it reads the accounts' recent posts through Instagram's official Graph API, uses what the AI already read, and reads new captions with plain rules (no AI). Without the secrets it uses the events saved by the last by-hand `node import/instagram.js` (from `sketch-1/`, with Claude Code), which still gives the best results because the AI reads the posters too. To add or drop an account, edit `reference/instagram-accounts.md`.
+- **Where this server reads them from,** in order: the `listings` table (only events that haven't ended), the Storage file, then `events/data/events.json`. Its log says which, e.g. `Events: table (2319 upcoming, updated 2026-11-25T07:31:02.000Z)`. `/api/health` shows the same, plus how old the newest import is; over 36 hours, the log and `/api/health` carry a `WARNING: the newest event import is … old` line.
+- **Instagram is automatic once its two secrets are added** (`INSTAGRAM_USER_ID`, `INSTAGRAM_ACCESS_TOKEN`; step by step: [`events/docs/instagram-setup.md`](../events/docs/instagram-setup.md)). Each day it reads the accounts' recent posts through Instagram's official Graph API, uses what the AI already read, and reads new captions with plain rules (no AI). Without the secrets it uses the events saved by the last by-hand `node import/instagram.js` (from `sketch-1/`, with Claude Code), which still gives the best results because the AI reads the posters too. To add or drop an account, edit `reference/instagram-accounts.md`.
 - **Eventbrite is blocked from GitHub's servers** (since 19 Oct 2026 every listing page answers 405, Eventbrite's CAPTCHA). The import now says so in one line and keeps last run's Eventbrite events, if any. To bring them back, run it from a home connection: from `sketch-1/` with the Supabase keys in `.env`, `UPLOAD=1 ONLY=Eventbrite MERGE=1 node import/run.js`.
 - **Not imported:** NOW Toronto (it turns automated visitors away), Resident Advisor, Partiful and blogTO (their robots.txt or terms rule it out).
 
@@ -217,7 +217,7 @@ Do this once, in the Supabase project the app uses. Until you do, everything kee
 
 Past events can be deleted every night with `supabase/cleanup-past-events.sql` (it explains how to schedule it with pg_cron). It isn't switched on: the server only ever asks for upcoming events, so it isn't needed yet.
 
-One-time setup: on GitHub, go to Settings → Secrets and variables → Actions and add `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `TICKETMASTER_API_KEY` (the same values as in `sketch-1/.env`), for SeatGeek `SEATGEEK_CLIENT_ID`, and, for automatic Instagram, `INSTAGRAM_USER_ID` and `INSTAGRAM_ACCESS_TOKEN`. Then on the Actions tab, open "Import events" and click "Run workflow" for the first import. Until that first import exists, the server uses `sketch-1/seed/events.json`.
+One-time setup: on GitHub, go to Settings → Secrets and variables → Actions and add `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `TICKETMASTER_API_KEY` (the same values as in your `.env`), for SeatGeek `SEATGEEK_CLIENT_ID`, and, for automatic Instagram, `INSTAGRAM_USER_ID` and `INSTAGRAM_ACCESS_TOKEN`. Then on the Actions tab, open "Import events" and click "Run workflow" for the first import. Until that first import exists, the server uses `events/data/events.json`.
 
 Guardrails:
 - Every site is read within its robots.txt, including its Crawl-delay. A site that answers 403 or 429 (blocked or rate-limited) isn't asked again that run.

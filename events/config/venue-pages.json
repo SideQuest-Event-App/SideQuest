@@ -1,0 +1,8 @@
+{
+  "note": "Venue pages with schema.org Event data (JSON-LD), read by import/sources/venue-pages.js. Add a page only after checking its robots.txt allows it (fetch.js checks again on every request). usualStart: the venue's usual start, used only when the page gives a date without a time (the listing says so). genericImage: part of the venue's generic share image, which isn't an event poster.",
+  "pages": [
+    { "name": "Horseshoe Tavern", "url": "https://horseshoetavern.com/", "checked": "2026-11-26: robots.txt allows all", "usualStart": "20:00", "genericImage": "horse_OG", "venue": { "name": "Horseshoe Tavern", "address": "370 Queen St W, Toronto, ON M5V 2A2" }, "categories": ["live music"] },
+    { "name": "Sneaky Dee's", "url": "https://www.sneakydees.com/events", "checked": "2026-11-26: robots.txt allows all", "usualStart": "21:00", "venue": { "name": "Sneaky Dee's", "address": "431 College St, Toronto, ON M5T 1T1" }, "categories": [] },
+    { "name": "DROM Taberna", "url": "https://www.dromtaberna.com/", "checked": "2026-11-26: robots.txt allows all", "usualStart": "20:00", "venue": { "name": "DROM Taberna", "address": "458 Queen St W, Toronto, ON M5V 2A8" }, "categories": ["live music"] }
+  ]
+}

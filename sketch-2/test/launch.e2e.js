@@ -93,8 +93,8 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
     GOOGLE_MAPS_API_KEY: "test-key", SIDEKICK_ELEVENLABS_OFF: "1", SIDEKICK_STUN_URL: "off",
     SIDEKICK_STUDY_FILE: path.join(tmp, "sidekick-study.json"), SIDEKICK_STUDY_KEY: "launch-study-key",
   });
-  delete process.env.SUPABASE_URL;
-  delete process.env.SUPABASE_SECRET_KEY;
+  process.env.SUPABASE_URL = "";
+  process.env.SUPABASE_SECRET_KEY = "";
   delete process.env.SIDEKICK_PLACES_OFF;
 
   // ---------- Google Places, faked (and counted) ----------

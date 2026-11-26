@@ -1,6 +1,6 @@
 # Instagram accounts
 
-The business accounts the Instagram import reads. To add one, add a row with its handle and its venue's name (or "Promoter" if it has no single venue); to drop one, delete its row. The numbers are filled in by `node sketch-1/import/instagram.js` (last run 2026-10-15).
+The business accounts the Instagram import reads. To add one, add a row with its handle and its venue's name (or "Promoter" if it has no single venue); to drop one, delete its row. The numbers are filled in by `node events/instagram.js` (last run 2026-10-15).
 
 - **Venue**: events from the account's posts are placed here, unless a post names another venue. A new venue is found on the map by its name.
 - **Posts read**: how many of its recent posts (the last 40, up to 60 days old) the AI has read.

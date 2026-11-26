@@ -49,7 +49,7 @@ const PRIVATE = /\$\s?\d|\bdollars?\b|\bbucks\b|\btwenty\b|\bthirty\b|under \$|e
 (async () => {
   const port = await freePort();
   Object.assign(process.env, { PORT: String(port), SIDEKICK_USAGE_FILE: path.join(tmp, "usage.json"), AI: "off", ANTHROPIC_API_KEY: "", SIDEKICK_STUN_URL: "off", SIDEKICK_PLACES_OFF: "1" });
-  delete process.env.SUPABASE_URL;
+  process.env.SUPABASE_URL = ""; process.env.SUPABASE_SECRET_KEY = "";
   delete process.env.ELEVENLABS_API_KEY;
 
   // ---------- fakes, before the app loads ----------

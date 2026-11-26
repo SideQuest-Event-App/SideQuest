@@ -27,7 +27,7 @@ Object.assign(process.env, {
 for (const k of ["SUPABASE_URL", "SUPABASE_SECRET_KEY", "SIDEKICK_PLACES_OFF", "FOURSQUARE_API_KEY"]) delete process.env[k];
 
 const ROOT = path.join(__dirname, "..");
-const seed = require(path.join(ROOT, "..", "sketch-1", "seed", "events.json"));
+const seed = require(path.join(ROOT, "..", "events", "data", "events.json"));
 const events = Array.isArray(seed) ? seed : seed.events;
 const P = require(path.join(ROOT, "lib", "sidekick", "plan"));
 

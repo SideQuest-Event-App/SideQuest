@@ -212,7 +212,8 @@ function tidyTitle(t) {
 function trimText(s, n = 300) {
   s = stripHtml(s);
   if (s.length <= n) return s;
-  const cut = s.slice(0, n);
+  // Never half a character: "bold" letters (𝗥𝗘𝗙) and emoji are two code units, and half of one is invalid JSON to Postgres
+  const cut = s.slice(0, n).toWellFormed().replace(/\uFFFD$/, "");
   const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "));
   return (end > n * 0.5 ? cut.slice(0, end + 1) : cut.trim() + "…").trim();
 }
@@ -262,7 +263,7 @@ function cleanListing(e) {
 // Every in-person GTA listing is kept except the off-topic ones in EXCLUDE; listings that match none
 // of our vibes get the scene "Other". Anything the listing doesn't give is "N/A", never made up.
 function toEvent(raw) {
-  // venue.noPin (import/locate.js): its coordinates were wrong and nothing trustworthy was found. It stays listed,
+  // venue.noPin (lib/locate.js): its coordinates were wrong and nothing trustworthy was found. It stays listed,
   // with no coordinates (never a guessed point), so it shows in lists but not on the map.
   const noPin = Boolean(raw.venue && raw.venue.noPin);
   const lat = noPin ? null : Number(raw.venue && raw.venue.lat);
@@ -270,6 +271,10 @@ function toEvent(raw) {
   if ((!noPin && (!Number.isFinite(lat) || !Number.isFinite(lng))) || !raw.title || !raw.startsAt || isNaN(Date.parse(raw.startsAt))) return null;
   const title = tidyTitle(raw.title);
   const description = trimText(raw.description || "");
+  // The listing's full text, when it says more than the short description: search and tags read it, the app shows the
+  // description (a premise like "phones down" is often deep in the listing, after the lineup)
+  const fullText = stripHtml(raw.details || "");
+  const details = fullText.length > description.length + 20 ? trimText(fullText, 1200) : "";
   const words = `${title} ${(raw.categories || []).join(" ")} ${description}`;
   // Judge off-topic by title and categories only: a concert "in the church hall" is still a concert
   if (EXCLUDE.test(`${title} ${(raw.categories || []).join(" ")}`.toLowerCase())) return null;
@@ -303,6 +308,11 @@ function toEvent(raw) {
     price,
     priceNote: priceNote || (price == null ? NA : price === 0 ? "Free" : raw.priceHigh && raw.priceHigh > price ? `From $${price}` : `$${price}`),
     description: calmCase(description) || NA,
+    ...(details ? { details } : {}),
+    // A night that keeps happening: the source's own id for the series, and its rule in words ("4th Thursday of
+    // the month"). lib/series.js links the dates; sources without either are linked by title, venue and host.
+    ...(raw.seriesKey ? { seriesKey: String(raw.seriesKey) } : {}),
+    ...(raw.repeats ? { repeats: String(raw.repeats) } : {}),
     tags: cleanTags([...(raw.categories || []), ...vibes]).slice(0, 8),
     vibes,
     rating: null,

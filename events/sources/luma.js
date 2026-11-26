@@ -1,7 +1,7 @@
 // Luma: the public Toronto discover page's event list (api.lu.ma's discover endpoint, which the page
 // itself loads and robots.txt allows), then each event's page for its full description.
 
-const { get, jsonLdEvents } = require("../fetch");
+const { get, jsonLdEvents } = require("../lib/fetch");
 
 // Only what we use from an event page, so the cache stays small
 const eventPageInfo = (html) => {

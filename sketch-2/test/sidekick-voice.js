@@ -84,7 +84,7 @@ const INIT = () => {
     ELEVENLABS_API_KEY: "test-key", ELEVENLABS_AGENT_FRIEND: "agent_friend", ELEVENLABS_AGENT_CONCIERGE: "agent_concierge",
     ELEVENLABS_MINUTES_PER_MONTH: "100", ELEVENLABS_STOP_AT: "1", ELEVENLABS_DAILY_MINUTES: "100", ELEVENLABS_MAX_CALL_MINUTES: "10",
   });
-  delete process.env.SUPABASE_URL;
+  process.env.SUPABASE_URL = ""; process.env.SUPABASE_SECRET_KEY = "";
   delete process.env.SIDEKICK_ELEVENLABS_OFF;
 
   // ---------- fakes, before the app loads ----------

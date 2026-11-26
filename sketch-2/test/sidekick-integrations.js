@@ -21,10 +21,10 @@ Object.assign(process.env, {
   ELEVENLABS_MINUTES_PER_MONTH: "30", ELEVENLABS_STOP_AT: "0.8", ELEVENLABS_DAILY_MINUTES: "20", ELEVENLABS_MAX_CALL_MINUTES: "10",
   SIDEKICK_TOOL_SECRET: "s3cret",
 });
-delete process.env.SUPABASE_URL;
+process.env.SUPABASE_URL = ""; process.env.SUPABASE_SECRET_KEY = "";
 
 const ROOT = path.join(__dirname, "..");
-const seed = require(path.join(ROOT, "..", "sketch-1", "seed", "events.json"));
+const seed = require(path.join(ROOT, "..", "events", "data", "events.json"));
 const events = Array.isArray(seed) ? seed : seed.events;
 const P = require(path.join(ROOT, "lib", "sidekick", "plan"));
 
