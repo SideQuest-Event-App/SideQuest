@@ -1,5 +1,51 @@
-I want to sort out and automate event sourcing. in reference/event-sources.md, I have some websites that I want to scrape from to update our database, while respecting their robots.txt guidelines. I want to automate it so it gathers the next 3 months of in-person events in the GTA every week.
+# SideQuest sketch 2: working notes for Claude
 
-I also want to do the same for Ticketmaster and Instagram, which I have the APIs for. I'm thinking of maybe doing this daily, but unsure. For instagram, I want to define a list of business accounts to get this information from, so can you please make a file /reference/instagram-accounts.md that has a list of all the instagram accounts that were previously checked? I want ticketmaster to be the first place that's searched for events, then instagram (since they both have API access), and then after that the other event apps can be checked for what gets missed. Is it more effective to gather events over instagram because we have API access, despite there not being a clear set of information laid out, as there would be on other event sites?
+Read this before touching sketch-2. It replaces rediscovering the layout every session. `claude.md` (lowercase) is an old
+prompt, not instructions. The user-facing docs are `README.md`.
 
-Overall, how can i make it so this doesn't bloat our app, and also doesn't take up too many Claude tokens? Are there any guardrails I should define?
+## Rules
+- Work only on the session's `claude/...` branch. Never push or merge to `main`. No PRs unless asked. No force-push.
+- Stage files by explicit path and check `git diff --cached --stat` before committing (agents have mixed up each other's files).
+- Never commit secrets or `.env`. Keys live in Render's Environment or GitHub secrets, never in chat or code.
+- Location is never stored: used live only (search circle, blue dot). Private answers (budget, avoided areas) are never
+  shown with a name or said aloud.
+- No model names in code, commits or docs. Commit trailers come from the session's instructions.
+- Every push to the branch deploys to Render (`sidequest-sidekick`) and ends live calls: push tested work only.
+
+## Stack
+Plain Node `http` server (`server.js`), vanilla JS in `public/`, no npm runtime dependencies. Data: Supabase when
+`SUPABASE_URL` + `SUPABASE_SECRET_KEY` are set (must be the secret key, not the publishable one), else `data/db.json`.
+Events come from `../sketch-1` (importer + seed). Node 22.
+
+## Map of the code
+- `server.js`: routes, `/api/act` actions, search (`apiSearch`), feed, places proxy.
+- `lib/db.js` storage · `lib/launch.js` map places (`nearby`, `forQuery`) · `lib/ai.js` matching.
+- `lib/search/`: `taste.js` (taste weights, fit), `rank.js` (MMR, wildcard), `discover.js` (For you order), `want.js`
+  (free-text wants like "Chinese skewers", relevance), `mixed.js` (events + places in one list), `foryou.js` (Discover's
+  For you vibe collections, `/api/foryou`).
+- `lib/sidekick/`: `rooms.js` (live call rooms, SSE, agent tools, picks; big), `plan.js` (slots, filtering, scoring, readiness),
+  `places.js` (Google Places searches), `planflow.js` (Plan tab setup), `personas.js` / `talk.js` (spoken lines),
+  `tts.js` (ElevenLabs line voice), `usage.js` (spending caps), `study.js` (A/B study, consent, deletion), `callside.js`.
+- `lib/tabs/`: Squads, Profile pages, settings, notifications.
+- `public/js/`: `app.js` (router, tabs, `SQ.liveCall()` reading `localStorage["sk:live"]`), `screens-attendee.js` (Discover,
+  search, event pages, Your Sidequesters), `launch.js` (Discover's sheet, location, places), `screens-tabs.js`
+  (Squads, Sidequests, Profile), `map.js`, `sidekick.js` (Plan flow + call screen; big), `study.js`.
+- `tools/elevenlabs-agents.js --update | --check`: pushes the agent prompts to ElevenLabs (key is proxy-injected in
+  Claude sessions). `reference/elevenlabs-agents.json` is its snapshot.
+
+## Tests
+Run from the repo root:
+- `node sketch-2/test/run.js --quick`: fast logic tests, about 2 min. Run after every change.
+- `node sketch-2/test/run.js --changed`: only the tests mapped to files changed against `origin/main`.
+- `node sketch-2/test/run.js`: everything, 3 at a time in isolated copies (tests write `data/`). Run before pushing.
+- `node sketch-2/test/run.js --only call-ui.e2e,picks-eval`: named files.
+GitHub Actions (`.github/workflows/sketch2-tests.yml`) runs the full suite on every push: read its result instead of
+rerunning everything in the chat. Timing tests (`sidekick-thinking`, `sidekick-tts`) run alone at the end; a failure of
+theirs under heavy load is worth one rerun before calling it real. Playwright is preinstalled (`NODE_PATH=/opt/node-tools/node_modules`);
+never run `playwright install` in a Claude session.
+
+## Working cheaply
+- Read the part of a big file you need (grep for the function, then read 50-100 lines), not the whole file.
+- Delegate test runs and log reading to a cheaper model; keep design and tricky logic for the strongest one.
+- Agent reports: under about 300 words, test counts per file, screenshots only when asked.
+- One agent at a time on `rooms.js` / `sidekick.js`: they are the conflict hot spots.
