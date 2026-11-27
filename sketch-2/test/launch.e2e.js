@@ -715,7 +715,7 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await ctx.close();
     });
 
-    await test("flow e. Testing opens /study; its Discover step lands in the demo app with a '← Study checklist' bar", async () => {
+    await test("flow e. Testing opens /study; a task's Start lands in the app as the private study profile (never the demo), and the '← Study checklist' bar comes back after it", async () => {
       const { ctx, page } = await phone({ user: null });
       await page.goto(base);
       await question(page);
@@ -729,22 +729,25 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await page.click("#start");
       await page.waitForURL(/\/study\?s=/);
       const sid = new URL(page.url()).searchParams.get("s");
-      await page.click("#skipAccount"); // the account step: skipped, so the app links use the demo
+      assert.strictEqual(await page.locator("#skipAccount").count(), 0, "no account step");
       await skipQuestions(page);
       await page.waitForSelector(".steps");
-      await page.click('.step-h[data-step="discover"]').catch(() => {});
-      if (!(await page.$('a:has-text("Open Discover")'))) await page.click('.step-h[data-step="discover"]');
-      const href = await page.getAttribute('a:has-text("Open Discover")', "href");
-      assert.strictEqual(href, `/?demo=1&study=${encodeURIComponent(sid)}`);
-      await page.click('a:has-text("Open Discover")');
+      await page.click("#panel-task1 [data-task-start='1']");
       await mapUp(page);
-      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.demo), true, "signed in to the demo");
+      assert.strictEqual(await page.evaluate(() => Boolean(SQ.d.user && SQ.d.user.demo)), false, "not the demo");
+      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.name), "You", "the private study profile");
       assert.strictEqual(new URL(page.url()).search, "", "the link's details are tidied out of the address");
+      assert(await page.isVisible("#task-bar"), "the task bar shows");
+      assert.strictEqual(await page.getAttribute('nav.tabs a.tab:has-text("Plan")', "href"), `/sk?study=${encodeURIComponent(sid)}`, "Plan keeps the study");
+      // After the task, the app's link back to the checklist is the study bar again
+      await page.evaluate(() => sessionStorage.removeItem("sq2.studyTask"));
+      await page.goto(`${base}/?study=${encodeURIComponent(sid)}`);
+      await mapUp(page);
       const bar = await page.$eval("#study-bar", (b) => ({ shown: !b.hidden && b.getBoundingClientRect().height, text: b.textContent.trim(), href: b.getAttribute("href") }));
       assert(bar.shown >= 44, "the bar shows, 44px tall");
       assert.strictEqual(bar.text, "← Study checklist");
-      assert.strictEqual(bar.href, `/study?s=${encodeURIComponent(sid)}#discover`);
-      assert.strictEqual(await page.getAttribute('nav.tabs a.tab:has-text("Plan")', "href"), `/sk?study=${encodeURIComponent(sid)}`, "Plan keeps the study");
+      assert.strictEqual(bar.href, `/study?s=${encodeURIComponent(sid)}`);
+      assert.strictEqual(await page.locator("#task-bar").count(), 0, "no task bar without a task");
       await ctx.close();
     });
 
@@ -1095,21 +1098,18 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       await ctx.close();
     });
 
-    await test("account d. Testing: an account after consent, the checklist's app links use it, skipping falls back to the demo, and the export is anonymous", async () => {
-      const stamp2 = Date.now().toString(36);
-      const tester = { name: "Rowan", email: `rowan-${stamp2}@example.com` };
-      // 1. Create an account
+    await test("account d. Testing: a private study profile after the questions (no account step), the app opens as it, what's saved stays, and the export is anonymous", async () => {
       const { ctx, page } = await phone({ user: null });
       await page.goto(base);
       await question(page);
       await Promise.all([page.waitForURL(/\/study$/), page.click('.mode-pick[data-pick="test"]')]);
       await agreeStudy(page);
       await page.click("#start");
-      await page.waitForSelector("text=Create your account (1 min)");
+      await page.waitForSelector("#qNext");
       const sid1 = new URL(page.url()).searchParams.get("s");
+      await skipQuestions(page);
+      await page.waitForSelector(".steps");
       await page.waitForFunction(() => !document.documentElement.classList.contains("arrive"), null, { timeout: 5000 }); // the rows' fade-in is over
-      assert(await page.isVisible("text=Already have an account? Sign in"), "sign-in for returning testers");
-      assert(await page.isVisible("#skipAccount"), "and a way to skip");
       const look = await page.evaluate(() => {
         const out = { small: [], tiny: [], weights: new Set(), grad: 0, overflow: document.documentElement.scrollWidth - innerWidth };
         for (const el of document.querySelectorAll("#app button, #app input, #app a")) { const r = el.getBoundingClientRect(); if (r.width && (r.height < 43.5)) out.small.push(`${el.tagName}#${el.id}.${el.className} ${Math.round(r.height)}`); if (/gradient/.test(getComputedStyle(el).backgroundImage)) out.grad++; }
@@ -1122,82 +1122,31 @@ const SPOT = { latitude: 43.65468, longitude: -79.40061 }; // by Kensington Mark
       assert(look.weights.every((w) => ["400", "500", "600"].includes(w)), `weights ${look.weights}`);
       assert.strictEqual(look.grad, 1, "the gradient only on the primary button");
       assert(look.overflow <= 0, "no sideways scroll");
-      await page.screenshot({ path: path.join(ACC_SHOTS, "study-account-step.png"), fullPage: true });
-      await page.fill("#a-name", tester.name);
-      await page.fill("#a-email", tester.email);
-      await page.click('[data-vibe="Live music"]');
-      await page.click('[data-vibe="Comedy"]');
-      await page.click('#acctCreate [type=submit]');
-      await skipQuestions(page);
-      await page.waitForSelector(".steps");
+      await page.screenshot({ path: path.join(ACC_SHOTS, "study-checklist.png"), fullPage: true });
+      await page.click("#panel-task1 [data-task-start='1']");
+      await mapUp(page);
       const own = await page.evaluate(() => localStorage.getItem("sq2.user"));
       const made = dbm.data.users[own];
-      assert(made && made.email === tester.email && made.registered && !made.demo, "a real, finished account");
-      if (!(await page.$('a:has-text("Open Discover")'))) await page.click('.step-h[data-step="discover"]');
-      const href = await page.getAttribute('a:has-text("Open Discover")', "href");
-      assert.strictEqual(href, `/?study=${encodeURIComponent(sid1)}`, "the app link uses their account, not the demo");
-      await page.click('a:has-text("Open Discover")');
-      await mapUp(page);
-      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.id), own, "the app opens as their account");
-      assert(!(await page.evaluate(() => SQ.d.user.demo)), "not the demo");
-      assert(await page.isVisible("#study-bar"), "with the bar back to the checklist");
-      // What they make is theirs and stays: a save survives a reload
+      assert(made && made.study && made.registered && !made.demo && !made.email, "a real study account with no email");
+      assert.strictEqual(await page.evaluate(() => SQ.d.user && SQ.d.user.id), own, "the app opens as it");
+      // What they save stays: a save survives a reload
       const ev = await page.evaluate(() => SQ.d.events.find((e) => !e.over).id);
       await page.evaluate((id) => SQ.act("save", { eventId: id }), ev);
       await page.reload();
       await mapUp(page);
       assert.strictEqual(await page.evaluate(() => SQ.d.user.id), own);
-      // 2. Skip: the demo
-      const { ctx: c2, page: p2 } = await phone({ user: null });
-      await p2.goto(`${base}/study`);
-      await agreeStudy(p2);
-      await p2.click("#start");
-      await p2.waitForSelector("#skipAccount");
-      const sid2 = new URL(p2.url()).searchParams.get("s");
-      await p2.click("#skipAccount");
-      await skipQuestions(p2);
-      await p2.waitForSelector(".steps");
-      if (!(await p2.$('a:has-text("Open Discover")'))) await p2.click('.step-h[data-step="discover"]');
-      assert.strictEqual(await p2.getAttribute('a:has-text("Open Discover")', "href"), `/?demo=1&study=${encodeURIComponent(sid2)}`);
-      await p2.click('a:has-text("Open Discover")');
-      await mapUp(p2);
-      assert.strictEqual(await p2.evaluate(() => SQ.d.user && SQ.d.user.demo), true, "the demo account");
-      // 3. A returning tester signs in
-      const { ctx: c3, page: p3 } = await phone({ user: null });
-      await p3.goto(`${base}/study`);
-      await agreeStudy(p3);
-      await p3.click("#start");
-      await p3.click("text=Already have an account? Sign in");
-      await p3.fill("#a-email", tester.email);
-      await p3.click("#acctSignin [type=submit]");
-      await p3.waitForSelector("#a-code");
-      const code = await p3.$eval(".note b", (b) => b.textContent.trim());
-      await p3.fill("#a-code", code);
-      await p3.click("#acctCode [type=submit]");
-      await skipQuestions(p3);
-      await p3.waitForSelector(".steps");
-      const sid3 = new URL(p3.url()).searchParams.get("s");
-      assert.strictEqual(await p3.evaluate(() => localStorage.getItem("sq2.user")), own, "signed in as their account");
-      if (!(await p3.$('a:has-text("Open Discover")'))) await p3.click('.step-h[data-step="discover"]');
-      assert.strictEqual(await p3.getAttribute('a:has-text("Open Discover")', "href"), `/?study=${encodeURIComponent(sid3)}`);
-      // 4. The export: account kind and internal id only, no names or emails
+      assert(await page.evaluate((id) => SQ.d.user.saved.includes(id), ev), "the save stayed");
+      // The export: account kind and internal id only, no names or emails
       await require(path.join(ROOT, "lib", "sidekick", "study")).flush();
       const json = await (await realFetch(`${base}/api/sk/study/export?key=launch-study-key&format=json`)).json();
       const csvT = await (await realFetch(`${base}/api/sk/study/export?key=launch-study-key&table=testers`)).text();
       const rows = Object.fromEntries(json.testers.map((r) => [r.session, r]));
-      assert.strictEqual(rows[sid1].account_kind, "own");
+      assert.strictEqual(rows[sid1].account_kind, "study");
       assert.strictEqual(rows[sid1].account_id, own, "linked by the internal id");
-      assert.strictEqual(rows[sid2].account_kind, "demo");
-      assert.strictEqual(rows[sid2].account_id, null, "the demo has no id");
-      assert.strictEqual(rows[sid3].account_kind, "own");
       assert(/account_kind,account_id/.test(csvT), "the CSV has the columns");
       const all = JSON.stringify(json) + csvT;
-      for (const bad of [tester.name, tester.email, "@example.com", "Launch Test", "demo@sidequest.app"]) assert(!all.includes(bad), `the export contains "${bad}"`);
+      for (const bad of ["Robin", "Jules", "Study crew", "Launch Test", "demo@sidequest.app"]) assert(!all.includes(bad), `the export contains "${bad}"`);
       assert(!/[\w.+-]+@[\w-]+\.[\w.]+/.test(all), "no email anywhere in the export");
-      const raw = fs.readFileSync(process.env.SIDEKICK_STUDY_FILE, "utf8");
-      assert(!raw.includes(tester.email) && !raw.includes(tester.name), "the study file keeps no name or email either");
-      await c3.close();
-      await c2.close();
       await ctx.close();
     });
   } finally {

@@ -75,6 +75,7 @@ textarea.in{height:auto;min-height:76px;padding:12px 14px;resize:vertical;font:i
 .final-t{font:600 28px/30px var(--f);letter-spacing:-.03em;margin:0;color:var(--t1)}
 .prog .meter i{background:linear-gradient(96deg,#a97af2 0%,#c98adf 55%,#f28dc8 100%)}
 .profile-note b{color:var(--t1);font-weight:600}
+.panel b,.note b,.small b{font-weight:600}
 .num.orbk{background:radial-gradient(circle at 35% 30%,#fff1ff 0%,#c98adf 38%,#a97af2 62%,#452871 100%)}
 .step.done .num.orbk{background:var(--ok-t)}
 .step.now{background:linear-gradient(180deg,rgba(69,40,113,.35),var(--surf))}
