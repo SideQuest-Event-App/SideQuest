@@ -2,7 +2,7 @@
 // browser against the real server. Google Places is faked in this process; every other outside request is blocked,
 // so the light map stands in. The database file is copied first and put back afterwards.
 //
-//  a. Every photo is in violet duotone (the SVG filter's table values, on posters, place photos and squad cards).
+//  a. Every photo is in full colour, as posted (no duotone or greyscale filter on posters, place photos and squad cards).
 //  b. For you shows vibe collections that mix events and places (the page and /api/foryou), each with a match %;
 //     repeated shows collapse into one card with their dates; prices only when known.
 //  c. The sheet has three heights (peek < half < full, by height), and the map's zoom − / + are stacked vertically on
@@ -138,22 +138,19 @@ function restore() {
 
   try {
     // ---------- a ----------
-    await test("a. Every photo is in violet duotone: the SVG filter (#13101b to #c2a5f6) on posters, place photos and squad cards", async () => {
+    await test("a. Every photo is in full colour, as posted: no duotone or greyscale filter on posters, place photos or squad cards", async () => {
       const { ctx, page } = await phone();
       await collectionsIn(page);
-      const f = await page.evaluate(() => {
-        const q = (s) => document.querySelector(`#duoViolet ${s}`);
-        return { r: q("feFuncR").getAttribute("tableValues"), g: q("feFuncG").getAttribute("tableValues"), b: q("feFuncB").getAttribute("tableValues"), sat: q("feColorMatrix").getAttribute("values") };
-      });
-      assert.deepStrictEqual(f, { r: "0.075 0.761", g: "0.063 0.647", b: "0.106 0.965", sat: "0" });
+      // Photos are never recoloured (styles.css --duo is none); the unused #duoViolet SVG filter may stay in the page
+      const recoloured = (x) => /url\(|grayscale|saturate|sepia/.test(x || "");
       // Wait for the photos to be drawn (slower machines render the rows a moment later)
       await page.waitForFunction(() => document.querySelectorAll(".dx-img, .poster.has-img, .ph").length >= 3, null, { timeout: 15000 }).catch(() => {});
       const filters = await page.$$eval(".dx-img, .poster.has-img, .ph", (els) => els.map((e) => getComputedStyle(e).filter));
-      assert(filters.length >= 3 && filters.every((x) => /url\("?#duoViolet"?\)/.test(x)), `filters: ${[...new Set(filters)].join(" | ")}`);
-      assert(!(await page.evaluate(() => [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => /grayscale\(1\)/.test(r.cssText)); } catch { return false; } }))), "no greyscale photo rule left");
+      assert(filters.length >= 3 && filters.every((x) => !recoloured(x)), `filters: ${[...new Set(filters)].join(" | ")}`);
+      assert(!(await page.evaluate(() => [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => /grayscale\(|#duoViolet/.test(r.cssText)); } catch { return false; } }))), "no greyscale or duotone photo rule left");
       await go(page, "squads");
       await at(page, "squads");
-      assert(/duoViolet/.test(await page.$eval(".sq-card .ph", (e) => getComputedStyle(e).filter)), "squad photo cards too");
+      assert(!recoloured(await page.$eval(".sq-card .ph", (e) => getComputedStyle(e).filter)), "squad photo cards too");
       await ctx.close();
     });
 

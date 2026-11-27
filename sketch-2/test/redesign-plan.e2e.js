@@ -6,7 +6,7 @@
 //  c. No app tab bar from step 1 until the call ends; ✕ Exit leaves at once, or asks first once something's picked.
 //  d. Step 1 has no ‹ (only ✕ Exit); step 2 has ‹ back.
 //  e. Step 2 is a 21-night calendar: tapping picks a night (and marks you free); the free counts and tints are right.
-//  f. The call: the crew's photo in violet duotone, the question said once (the card is only answers), the voice pill
+//  f. The call: the crew's photo in full colour, as posted, the question said once (the card is only answers), the voice pill
 //     in the top row between ⌄ and LIVE; at 375×667 no page scroll and 44 px targets.
 //  g. "I've got everything": the facts as chips, the bar, Looks good / Change something.
 //  h. Picks: four facts each, one Vote button, no jargon ("crew match", "by keyword", "Mentions").
@@ -212,7 +212,7 @@ async function until(fn, ms, what) {
       assert.strictEqual(await page.locator("[data-pfback]").count(), 0, "step 1: no ‹");
       assert.strictEqual((await page.textContent("#pfExit")).trim(), "✕ Exit");
       assert(await page.locator(".pf-crew .duo").count() >= 1, "squads as photo rows");
-      assert.strictEqual(await page.$eval(".pf-crew .duo", (e) => getComputedStyle(e).filter), 'url("#duoViolet")');
+      assert.strictEqual(await page.$eval(".pf-crew .duo", (e) => getComputedStyle(e).filter), "none", "squad photos in full colour, as posted");
       const optsText = await page.textContent(".pf-opts");
       assert(/Choose people/.test(optsText) && /I'll decide later/.test(optsText) && !/Send a link/.test(optsText), "squads, Choose people, I'll decide later");
       await wayOut(page, "step 1");
@@ -289,19 +289,17 @@ async function until(fn, ms, what) {
       await ctx.close();
     });
 
-    await test("f. The call: crew photo in duotone, the question said once, the voice pill between ⌄ and LIVE, 375×667 fit", async () => {
+    await test("f. The call: crew photo in full colour, the question said once, the voice pill between ⌄ and LIVE, 375×667 fit", async () => {
       const call = await newCall({ members: ["Ravi", "Maya", "Kai"] });
       await toLead(call);
       const { ctx, page } = await callPage(call);
       await page.waitForSelector("#body .q .chip");
       const photo = await page.evaluate(() => {
         const p = document.querySelector("#kback .kphoto");
-        const f = document.querySelector("#duoViolet");
-        return { filter: getComputedStyle(p).filter, bg: getComputedStyle(p).backgroundImage, r: f.querySelector("feFuncR").getAttribute("tableValues"), g: f.querySelector("feFuncG").getAttribute("tableValues"), b: f.querySelector("feFuncB").getAttribute("tableValues") };
+        return { filter: getComputedStyle(p).filter, bg: getComputedStyle(p).backgroundImage };
       });
-      assert.strictEqual(photo.filter, 'url("#duoViolet")');
+      assert.strictEqual(photo.filter, "none", "the crew photo in full colour, as posted");
       assert(/\/assets\/photos\/[\w-]+\.jpg/.test(photo.bg), photo.bg);
-      assert.deepStrictEqual([photo.r, photo.g, photo.b], ["0.075 0.761", "0.063 0.647", "0.106 0.965"]);
       // The stage: the orb, the crew around it, invited people dashed
       assert.strictEqual(await page.locator("#stage .stage-orb").count(), 1);
       assert.strictEqual(await page.locator("#stage .av.orbit").count(), 2, "Asia and Ravi");

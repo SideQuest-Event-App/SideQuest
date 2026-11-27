@@ -118,6 +118,7 @@ function handTo(room, slot, { skip = [] } = {}) {
 
 // ---------- Titles for the ear ----------
 // "Free event. Bello's Birthday Bash w/karaoke @ Owl's Club" -> "Bello's Birthday Bash"
+// "HeHeHeated Rivalry: a Heated Rivalry comedy show" -> "HeHeHeated Rivalry" (the listing keeps its full title)
 // "54.40" -> "54.40 at the Danforth Music Hall" (a title that's just a number needs its venue)
 function spokenTitle(title, venue) {
   let t = String(title || "");
@@ -126,7 +127,9 @@ function spokenTitle(title, venue) {
   t = t.replace(/\s*\[[^\]]*\]\s*/g, " ").replace(/\s*\([^)]*\)\s*/g, " ");
   t = t.replace(/\s+w\/.*$/i, "").replace(/\s*@\s*.*$/, "").replace(/\s+\|\s.*$/, "");
   t = t.replace(/\s+[-–—]\s+.*$/, "");
-  t = t.replace(/:\s+(.*)$/, (m, tail) => (/\b(tour|live|anniversary|concert|edition)\b/i.test(tail) || tail === tail.toUpperCase() ? "" : m));
+  // A subtitle after a colon goes when it's a tour or edition, shouted, or a description ("HeHeHeated Rivalry: a
+  // Heated Rivalry comedy show"): one starting with a/an/the, or four words or more after a name of its own
+  t = t.replace(/^(.*?):\s+(.*)$/, (m, head, tail) => (/\b(tour|live|anniversary|concert|edition)\b/i.test(tail) || tail === tail.toUpperCase() || /^(a|an|the)\s/i.test(tail) || (head.trim().split(/\s+/).length >= 2 && tail.trim().split(/\s+/).length >= 4) ? head : m));
   const first = String(venue || "").replace(/^the\s+/i, "").split(/\s+/)[0];
   if (first) t = t.replace(new RegExp(`\\s+at\\s+(the\\s+)?${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*$`, "i"), "");
   t = t.replace(/[!?]/g, ""); // a title never ends a sentence or asks a question

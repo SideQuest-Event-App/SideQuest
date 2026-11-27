@@ -83,6 +83,20 @@ function restore() {
   const userId = await account("Asia Park");
   // Past nights this season, in different venues and neighbourhoods, each with a venue and vibes
   const seasonStart = (() => { const d = new Date(now); const m = d.getUTCMonth() + 1; const first = [12, 1, 2].includes(m) ? 12 : [3, 4, 5].includes(m) ? 3 : [6, 7, 8].includes(m) ? 6 : 9; return Date.UTC(first === 12 && m !== 12 ? d.getUTCFullYear() - 1 : d.getUTCFullYear(), first - 1, 2); })();
+  // The import keeps upcoming listings only, so the test makes its own past nights: copies of five upcoming events,
+  // each at its own venue, moved to 3 to 7 days ago (well inside this season, which starts on the 2nd of its first month)
+  {
+    const src = events.filter((e) => e.type !== "place" && Date.parse(e.startsAt) > now && (e.vibes || []).length && e.venue && e.venue.name && e.venue.name !== "N/A");
+    const byVenue = [...new Map(src.map((e) => [e.venue.name, e])).values()].slice(0, 5);
+    let nextId = Math.max(...events.map((e) => Number(e.id) || 0)) + 1;
+    for (const [i, e] of byVenue.entries()) {
+      const at = Math.max(seasonStart + 3600000, now - (3 + i) * 86400000);
+      const copy = JSON.parse(JSON.stringify(e));
+      Object.assign(copy, { id: nextId++, title: `${e.title} (past night ${i + 1})`, startsAt: new Date(at).toISOString(), endsAt: new Date(at + 3 * 3600000).toISOString() });
+      for (const k of ["series", "runsUntil", "dates"]) delete copy[k];
+      events.push(copy);
+    }
+  }
   const pastPool = events.filter((e) => e.type !== "place" && Date.parse(e.startsAt) > seasonStart && Date.parse(e.startsAt) < now - 2 * 86400000 && (e.vibes || []).length && e.venue && e.venue.name && e.venue.name !== "N/A");
   const seen = new Set();
   const nights = pastPool.filter((e) => { if (seen.has(e.venue.name)) return false; seen.add(e.venue.name); return true; }).slice(0, 4);
