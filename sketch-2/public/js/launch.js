@@ -94,8 +94,7 @@
   // draws it on the loader's lights and runs the zoom into the app). A real, non-demo account skips it and goes
   // straight to the map, with the zoom's second half. The answer is kept for this tab only, so a reload in the same
   // tab doesn't ask again: "demo" opens the shared demo account on the map; "test" opens the voice study at /study,
-  // whose checklist links back into the app as the tester's own account (/?study=<id>) or, if they skipped making
-  // one, the demo (/?demo=1&study=<id>); "app" is a real account (signed in, or "Sign in or create an account").
+  // whose checklist links back into the app as the tester's private study profile (/?study=<id>); "app" is a real account (signed in, or "Sign in or create an account").
   // Shared links (/sk, /study?s=…, ?quest=, ?demo=1) never see the question.
   const MODE_KEY = "sq2.mode";
   SQ.mode = {
@@ -153,6 +152,7 @@
     const at = p ? p : e && e.venue && SQ.onMap(e.venue.lat, e.venue.lng) ? e.venue : null;
     if (at && L.stop !== "peek") SQ.mapJump("discover", { lat: at.lat, lng: at.lng });
     if (L.stop !== "peek") { L.stop = "peek"; local.set(stopKey(), "peek"); }
+    if (SQ.studyTask && p) SQ.studyTask.signal("place", id); // a place's card opened (the study's map task)
     if (U().screen !== "discover") return "discover";
   };
 
@@ -314,6 +314,7 @@
   function setStop(stop, animate = true) {
     const L = state();
     L.stop = stop;
+    if (SQ.studyTask) SQ.studyTask.signal("sheet", stop); // only a drag, tap or key moves it here (the study's map task)
     local.set(stopKey(), stop);
     const p = parts();
     if (!p) return;

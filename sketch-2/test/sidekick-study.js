@@ -185,11 +185,7 @@ const blindCheck = (text, where) => { for (const re of BLIND) assert(!re.test(te
         await shot("1-study-hub.png");
         for (const k of ["age", "gta", "phone", "agree"]) await page.check(`#c-${k}`);
         await page.click("#start");
-        // The account step: this tester skips it and uses the shared demo account
-        await page.waitForSelector("#skipAccount");
-        await visible("the account step");
-        await page.click("#skipAccount");
-        // The questionnaire: four parts, this tester skips through them
+        // The questionnaire straight after consent (no account step): four parts, this tester skips through them
         for (let part = 1; part <= 4; part++) {
           await page.waitForSelector(`#qPartT:has-text("Part ${part} of 4")`);
           await visible(`questionnaire part ${part}`);
@@ -200,17 +196,17 @@ const blindCheck = (text, where) => { for (const re of BLIND) assert(!re.test(te
         const html = await page.content();
         assert(!/concierge|plugged/i.test(html), "the hub's page source names a persona");
 
-        // 2. Discover: the app opens, then mark done
-        const app = await ctx.newPage();
-        await app.goto(`${base}/`);
-        await app.waitForLoadState("domcontentloaded");
-        await app.close();
-        await page.click("[data-mark=discover]");
-        await page.waitForSelector("#step-discover.done");
+        // 2. The private study profile is ready, and the five tasks come first: this tester skips them
+        await visible("the checklist");
+        for (let n = 1; n <= 5; n++) {
+          if ((await page.getAttribute(`[data-step=task${n}]`, "aria-expanded")) !== "true") await page.click(`[data-step=task${n}]`);
+          await page.click(`#panel-task${n} [data-task-skip='${n}']`);
+          await page.waitForSelector(`#step-task${n}.done`);
+        }
 
-        // 3. Open Plan from the checklist
-        await page.click("[data-step=plan]");
-        await page.click("#panel-plan a.btn.pri");
+        // 3. Open Plan from the Voice 1 row
+        if ((await page.getAttribute("[data-step=call1]", "aria-expanded")) !== "true") await page.click("[data-step=call1]");
+        await page.click("#panel-call1 a.btn.pri");
         await page.waitForSelector("#go");
         await visible("the Plan start screen");
         await page.fill("#name", "Asia");
@@ -274,29 +270,12 @@ const blindCheck = (text, where) => { for (const re of BLIND) assert(!re.test(te
         await page.click("form[data-survey='1'] [type=submit]");
         await page.waitForSelector("#step-call1.done");
 
-        // Share: mark done (the buttons were used above)
-        await page.click("[data-step=share]");
-        await page.click("[data-mark=share]");
-        await page.waitForSelector("#step-share.done");
         await shot("2-checklist.png");
+        // No "Just answer, no call" step any more: only the calls are tested
+        assert.strictEqual(await page.locator("#step-form, #tryForm").count(), 0, "the form step is still there");
 
-        // 6. Just answer, no call
-        await page.click("[data-step=form]");
-        await page.click("#tryForm");
-        await page.waitForSelector("#formMode");
-        await page.fill("#name", "Asia");
-        await page.click(".chips[data-name=budget] .chip[data-value='50']");
-        await page.click("#formMode");
-        await page.click(".chips[data-name=time] .chip[data-value=evening]");
-        await page.click(".chips[data-name=vibe] .chip[data-value=music]");
-        await page.click("#formMode");
-        await page.waitForSelector("text=Answered by form");
-        await visible("the form practice call");
-        await page.click("text=Study checklist");
-        await page.waitForSelector("#step-form.done", { timeout: 10000 });
-
-        // 7. Voice 2: a short call
-        await page.click("[data-step=call2]");
+        // 6. Voice 2: a short call
+        if ((await page.getAttribute("[data-step=call2]", "aria-expanded")) !== "true") await page.click("[data-step=call2]");
         await page.click("#startCall2");
         await page.waitForURL(/\/sk\/.+v=2/);
         const room2 = page.url().split("/sk/")[1].split("?")[0];
@@ -307,15 +286,14 @@ const blindCheck = (text, where) => { for (const re of BLIND) assert(!re.test(te
         await page.waitForSelector("form[data-survey='2']");
         for (const q of ["natural", "decide", "trust", "again"]) await page.click(`form[data-survey='2'] [data-q=${q}][data-n="5"]`);
         await page.click("form[data-survey='2'] [type=submit]");
-        await page.waitForSelector("#step-call2.done");
 
-        // 8. The comparison survey
+        // 7. The last questions (their own screen after both calls)
         await page.waitForSelector("form[data-final]");
         await page.click("[data-keep='1']");
         await page.fill("#why", "Asia here: it felt calmer, Robin agreed");
         await page.click("[data-seq='6']");
+        await page.click("[data-use='plan']");
         await visible("the comparison survey");
-        await page.locator("#step-survey").scrollIntoViewIfNeeded();
         await shot("3-comparison-survey.png");
         await page.click("form[data-final] [type=submit]");
         await page.waitForSelector("#requestRemoval");

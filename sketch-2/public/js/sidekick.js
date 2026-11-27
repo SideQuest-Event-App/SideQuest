@@ -2091,9 +2091,7 @@
           <p class="small">1 = not at all, 5 = completely</p>
           <button class="btn pri" id="sendSurvey" disabled>Send</button>
         </div>`;
-    const studyNext = STUDY_V === "form"
-      ? `<div class="priv" style="border-style:solid;border-color:var(--bs)"><h2>Practice done</h2><p class="muted">Head back to the checklist for the next step.</p><a class="btn pri" href="/study?s=${encodeURIComponent(STUDY)}">Back to the checklist</a></div>`
-      : `<div class="priv" style="border-style:solid;border-color:var(--bs)"><h2>Voice ${esc(STUDY_V)} done</h2><p class="muted">Four quick taps about this call, back on the checklist.</p><a class="btn pri" href="/study?s=${encodeURIComponent(STUDY)}#call${esc(STUDY_V)}">Answer 4 quick questions</a></div>`;
+    const studyNext = `<div class="priv" style="border-style:solid;border-color:var(--bs)"><h2>Voice ${esc(STUDY_V)} done</h2><p class="muted">Four quick taps about this call, back on the checklist.</p><a class="btn pri" href="/study?s=${encodeURIComponent(STUDY)}#call${esc(STUDY_V)}">Answer 4 quick questions</a></div>`;
     document.getElementById("body").innerHTML = plan + (STUDY ? studyNext : survey + backBtn()); // in the study, its own questions replace these
     callNav(true); // the app's tabs stay on the ended screen too
     renderTicks();
@@ -3304,7 +3302,7 @@
     const bar = document.createElement("nav");
     bar.setAttribute("aria-label", "Study");
     bar.style.cssText = "display:flex;justify-content:space-between;align-items:center;max-width:440px;margin:0 auto;padding:max(4px,env(safe-area-inset-top)) 16px 0;font-size:13px;font-weight:600;color:var(--t3)";
-    bar.innerHTML = `<a href="/study?s=${encodeURIComponent(STUDY)}" style="color:var(--acc);text-decoration:none;min-height:44px;display:flex;align-items:center">&larr; Study checklist</a><span>${STUDY_V === "form" ? "Practice" : `Voice ${esc(STUDY_V)}`}</span>`;
+    bar.innerHTML = `<a href="/study?s=${encodeURIComponent(STUDY)}" style="color:var(--acc);text-decoration:none;min-height:44px;display:flex;align-items:center">&larr; Study checklist</a><span>Voice ${esc(STUDY_V)}</span>`;
     document.body.insertBefore(bar, app);
   }
   // The app over a minimized call asked for this same call (its Plan tab): open the call underneath instead

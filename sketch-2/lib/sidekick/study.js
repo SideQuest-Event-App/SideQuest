@@ -15,12 +15,18 @@
 // Never stored: names, transcripts, what anyone said, or anyone's private answers (budget, places to avoid).
 // Free-text "why" answers have the call's names and any amounts taken out before they're saved.
 //
-// Accounts: after consent, a tester creates a quick app account or signs in (so the events they add and
-// the plans they make are theirs and stay), or skips and uses the shared demo account. Each tester keeps
-// only which kind it was ("own" or "demo") and, for their own account, its internal id: never a name
-// or an email. The export carries the kind and that id, nothing else about the account. An account made
-// during the study ("made") is a study test account: it's deleted with the session if the tester ends
-// and erases it or abandons it, and with everything else after the deletion date.
+// The private study profile: right after the questionnaire, each tester gets a real attendee account made for
+// them, with no name or email ("You"), seeded with taste vibes from question 2, two practice friends (accounts
+// named "Robin (practice)" and "Jules (practice)") and a squad, "Study crew", with them. The app opens as it
+// for every task link, never the shared demo. It's a study test account ("made"), so it's deleted, with its
+// practice friends, its squads and its chat, with the session (End and erase, abandoned, Request removal) and
+// with everything else after the deletion date. The export carries the account's internal id only.
+//
+// Five feature tasks, in a fixed order, each timed from Start: find an event and save it, explore its page
+// (two questions built from that event), use the map, check your profile, try Squads. Per task we keep the
+// outcome (auto: the app saw it done, self: "I'm done", stuck: "I'm stuck", skipped), the seconds it took,
+// a 1-7 ease rating and an optional comment (names, emails and amounts taken out), and for task 2 whether
+// each answer matched the event.
 //
 // Consent (public/study.html): four required boxes and one optional one, stored as yes/no flags with a
 // timestamp. Where people live is never stored (the GTA box is a yes, nothing more).
@@ -29,10 +35,11 @@
 //
 // Deleting:
 //   End and erase      a tester ends the session: the session, its call metrics, its live calls (and their
-//                      practice friends) and any study test account made in it are deleted at once.
+//                      practice friends) and every study profile made in it (with its practice friends,
+//                      squads and chat) are deleted at once.
 //   Abandoned          not finished and no activity for 24 hours: the same, by a sweep (on start, hourly).
 //   Request removal    after finishing: the session is excluded at once from every export, summary and
-//                      the aggregate, then deleted. A short reference code is kept, with the date.
+//                      the aggregate, then deleted with its study profiles. A short reference code is kept, with the date.
 //   The deletion date  after SIDEKICK_STUDY_DELETE_AFTER (default 2026-12-31 23:59:59 Toronto time) a sweep
 //                      deletes all study data, every study test account and any synthetic data.
 // The aggregate (/api/sk/study/aggregate): counts per answer over consenting, finished, non-removed testers,
@@ -51,13 +58,18 @@ const STORE_NAME = "sidekick-study.json";
 const ARMS = { A: "concierge", B: "friend" };
 const ORDERS = ["AB", "BA"];
 const LIKERT = ["natural", "decide", "trust", "again"];
-const STEPS = ["consent", "discover", "plan", "share", "call1", "form", "call2", "survey"];
-const MANUAL_STEPS = ["discover", "plan", "share", "form"];
+const TASKS = [
+  { n: 1, id: "find", title: "Find something to do" },
+  { n: 2, id: "event", title: "Explore the event page" },
+  { n: 3, id: "map", title: "Use the map" },
+  { n: 4, id: "profile", title: "Check your profile" },
+  { n: 5, id: "squads", title: "Try Squads" },
+];
+const STEPS = ["consent", ...TASKS.map((x) => `task${x.n}`), "call1", "call2", "survey"];
+const OUTCOMES = ["auto", "self", "stuck", "skipped"];
+const USE_MOST = ["discover", "map", "squads", "plan", "profile"];
 const BOT_NAMES = ["Robin (practice)", "Jules (practice)"];
-const FORM_PLANNER = "Sam (practice)";
 const WAIT_FOR_HUMANS_MS = 25000; // practice friends answer anyway if the humans haven't after this long
-
-const ACCOUNT_KINDS = ["own", "demo"];
 
 // ---------- Retention ----------
 const DEFAULT_DELETE_AFTER = "2026-12-31T23:59:59-05:00"; // the end of December 31, 2026 in Toronto (EST)
@@ -111,15 +123,7 @@ function consentOf(c) {
 let clock = () => Date.now(); // tests move time with _test.setClock
 const now = () => clock();
 let deleteAccountHook = null; // set by the server (init): deletes an app account and what's stored about it
-// The app's accounts (lib/db, the same module the server loads). An own account must exist and not be the demo.
-function realAccount(id) {
-  if (typeof id !== "string" || !/^[\w-]{4,40}$/.test(id)) return null;
-  let users = null;
-  try { users = require("../db").data.users; } catch { return null; }
-  const u = users && Object.prototype.hasOwnProperty.call(users, id) ? users[id] : null;
-  if (!u || u.demo || /^@?demo$/i.test(String(u.handle || u.username || ""))) return null;
-  return u;
-}
+let makeProfileHook = null; // set by the server (init): makes a private study profile, its practice friends and squad
 const rid = (n = 6) => crypto.randomBytes(n).toString("base64url");
 const pick = (list) => list[crypto.randomInt(list.length)];
 
@@ -216,7 +220,7 @@ function lineBookOf(text) {
 }
 
 // ---------- Live calls and practice friends ----------
-// roomId -> { sid, n (1, 2 or "form"), tid, plannerPid, bots: [pid], closers: [fn], pending: Set }
+// roomId -> { sid, n (1 or 2), tid, plannerPid, bots: [pid], closers: [fn], pending: Set }
 const live = new Map();
 const names = new Map(); // sid -> Set of names seen on its calls (memory only; used to scrub free text)
 
@@ -346,17 +350,6 @@ function update(meta) {
   seen.add(room.crew);
   names.set(meta.sid, seen);
 
-  if (meta.n === "form") {
-    const t = s.testers[meta.tid];
-    if (t && !t.steps.form && humans(room).some((p) => p.mode === "form")) { t.steps.form = now(); s.formTried = true; save(s); }
-    if (humans(room).length && meta.bots.length < 2 && !meta.adding) { meta.adding = true; addBots(meta, 1).then(() => { meta.adding = false; }); } // the human is in: start the call
-    tickBots(room, meta);
-    if (room.locked && !meta.endAt) meta.endAt = now() + 20000;
-    if (meta.endAt && now() > meta.endAt && room.status !== "ended") R._test.endRoom(room, "study-practice");
-    if (room.status === "ended") detach(meta);
-    return;
-  }
-
   const c = s.calls[meta.n];
   if (!c || c.id !== meta.callId) return detach(meta);
   if (meta.autoBots && !meta.adding && room.streams.has(meta.plannerPid)) {
@@ -418,13 +411,13 @@ function update(meta) {
 function newSession() {
   const order = ORDERS[data.assigned % ORDERS.length]; // blocks of two: AB, BA, AB, BA...
   data.assigned++;
-  const s = { id: rid(6), index: data.assigned, order, createdAt: now(), updatedAt: now(), creator: null, testers: {}, calls: {}, practice: false, formTried: false };
+  const s = { id: rid(6), index: data.assigned, order, createdAt: now(), updatedAt: now(), creator: null, testers: {}, calls: {}, practice: false };
   data.sessions[s.id] = s;
   return s;
 }
 function addTester(s, consent) {
   const tid = rid(8);
-  s.testers[tid] = { n: Object.keys(s.testers).length + 1, joinedAt: now(), consent, steps: {}, surveys: {}, final: null, questionnaire: null };
+  s.testers[tid] = { n: Object.keys(s.testers).length + 1, joinedAt: now(), consent, steps: {}, surveys: {}, final: null, questionnaire: null, tasks: {} };
   if (!s.creator) s.creator = tid;
   return tid;
 }
@@ -439,34 +432,107 @@ function callStatus(s, n) {
 }
 const callDone = (s, n) => ["picks", "locked", "ended"].includes(callStatus(s, n)) && Boolean(s.calls[n]);
 
+// ---------- The private study profile and the five tasks ----------
+
+// Question 2's kinds of nights, as the app's taste vibes (the profile's starting taste)
+const Q2_VIBES = { "live-music": "Live music", comedy: "Comedy", markets: "Markets", "board-games": "Games & social", dance: "Dance", "art-shows": "Art & making", "food-pop-ups": "Food & drink", theatre: "Art & making", jazz: "Jazz", zines: "Zines & print" };
+const DEFAULT_VIBES = ["Live music", "Food & drink", "Comedy"];
+function vibesFrom(q2) {
+  const v = [...new Set((Array.isArray(q2) ? q2 : []).map((k) => Q2_VIBES[k]).filter(Boolean))];
+  return v.length >= 2 ? v : [...new Set([...v, ...DEFAULT_VIBES])].slice(0, Math.max(3, v.length));
+}
+// Makes the tester's private study profile once (after the questionnaire). Returns its id, or null if it can't.
+async function ensureProfile(s, t) {
+  if (t.account && t.account.kind === "study") return t.account.id;
+  if (!makeProfileHook) return null;
+  const p = await makeProfileHook({ vibes: vibesFrom(t.questionnaire && t.questionnaire.q2), names: BOT_NAMES });
+  if (!p || !p.id) return null;
+  t.account = { kind: "study", id: p.id, friends: p.friends || [], made: true, at: now() };
+  for (const id of [p.id, ...(p.friends || [])]) if (!data.accounts.includes(id)) data.accounts.push(id);
+  save(s);
+  return p.id;
+}
+
+// The app's events (lib/db, the module the server loads): for task 2's questions
+function eventById(id) {
+  try { return require("../db").data.events.find((e) => String(e.id) === String(id)) || null; } catch { return null; }
+}
+function profileUser(t) {
+  if (!t.account || t.account.kind !== "study") return null;
+  try { return require("../db").data.users[t.account.id] || null; } catch { return null; }
+}
+const TZ = "America/Toronto";
+const timeLabel = (ms) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: TZ }).replace(":00", "");
+const COST = [["free", "Free"], ["under-30", "Under $30"], ["30-60", "$30–60"], ["60+", "More than $60"], ["not-listed", "Not listed"], ["not-sure", "Not sure"]];
+const costOf = (e) => (e.price == null || !Number.isFinite(Number(e.price)) ? "not-listed" : Number(e.price) === 0 ? "free" : Number(e.price) < 30 ? "under-30" : Number(e.price) <= 60 ? "30-60" : "60+");
+// Task 2's event: the one saved in task 1, else the profile's latest save, else the soonest upcoming event
+function task2Event(t) {
+  const rec = t.tasks || {};
+  const ids = [rec[2] && rec[2].eventId, rec[1] && rec[1].eventId];
+  const u = profileUser(t);
+  if (u && Array.isArray(u.saved)) ids.push(...[...u.saved].reverse());
+  for (const id of ids) { const e = id != null && eventById(id); if (e) return e; }
+  try {
+    const soon = require("../db").data.events.filter((e) => Date.parse(e.startsAt) > Date.now()).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    return soon[0] || null;
+  } catch { return null; }
+}
+// The two questions, built from that event: its real start time and two plausible ones, and the price buckets
+function quizFor(t) {
+  const e = task2Event(t);
+  if (!e) return null;
+  const rec = (t.tasks[2] = t.tasks[2] || {});
+  if (String(rec.eventId) !== String(e.id) || !Array.isArray(rec.offsets)) {
+    rec.eventId = e.id;
+    rec.offsets = pick([[-2, -1], [-1, 1], [1, 2]]);
+  }
+  const at = Date.parse(e.startsAt);
+  const times = [...rec.offsets, 0].sort((a, b) => a - b).map((h) => timeLabel(at + h * 3600000));
+  return { event: { id: e.id, title: e.title }, time: [...times, "Not sure"], cost: COST.map(([, l]) => l), answer: { time: timeLabel(at), cost: costOf(e) } };
+}
+const secsSince = (a) => (a ? Math.max(0, Math.round((now() - a) / 1000)) : null);
+
 // What a tester sees: progress and "Voice 1" / "Voice 2". Never the arm or the persona.
 function testerView(s, tid) {
   const t = s.testers[tid];
+  t.tasks = t.tasks || {};
   const calls = {};
   for (const n of [1, 2]) {
     const c = s.calls[n];
     const meta = c && [...live.values()].find((m) => m.sid === s.id && m.n === n && m.callId === c.id);
     calls[n] = { label: `Voice ${n}`, status: callStatus(s, n), room: meta ? meta.room : null, mine: Boolean(meta && meta.tid === tid), reachedPicks: Boolean(c && c.picksAt) };
   }
-  const steps = {
-    consent: true,
-    discover: Boolean(t.steps.discover),
-    plan: Boolean(t.steps.plan || s.calls[1]),
-    share: Boolean(t.steps.share),
-    call1: Boolean(t.surveys[1]),
-    form: Boolean(t.steps.form),
-    call2: Boolean(t.surveys[2]),
-    survey: Boolean(t.final),
-  };
+  const tasks = {};
+  for (const { n, title } of TASKS) {
+    const r = t.tasks[n] || {};
+    const ended = OUTCOMES.includes(r.outcome);
+    tasks[n] = {
+      title,
+      outcome: r.outcome || null,
+      started: Boolean(r.startedAt),
+      secs: r.secs == null ? null : r.secs,
+      needsQuiz: n === 2 && ended && r.outcome !== "skipped" && !r.quiz,
+      needsEase: ended && r.outcome !== "skipped" && r.ease == null,
+      done: ended && (r.outcome === "skipped" || r.ease != null),
+    };
+  }
+  const e2 = task2Event(t);
+  if (e2) tasks[2].event = e2.title;
+  const steps = { consent: true };
+  for (const { n } of TASKS) steps[`task${n}`] = tasks[n].done;
+  Object.assign(steps, { call1: Boolean(t.surveys[1]), call2: Boolean(t.surveys[2]), survey: Boolean(t.final) });
   const q = t.questionnaire || {};
-  return { sid: s.id, you: { n: t.n, creator: s.creator === tid, account: t.account ? t.account.kind : null, madeAccount: Boolean(t.account && t.account.made), questionnaire: { parts: q.parts || 0, done: Boolean(q.doneAt) }, steps, surveys: { 1: Boolean(t.surveys[1]), 2: Boolean(t.surveys[2]) }, final: Boolean(t.final) }, calls, practice: s.practice, testers: Object.keys(s.testers).length, steps: STEPS };
+  const profile = t.account && t.account.kind === "study" ? t.account.id : null;
+  return { sid: s.id, you: { n: t.n, creator: s.creator === tid, account: t.account ? t.account.kind : null, profile, questionnaire: { parts: q.parts || 0, done: Boolean(q.doneAt) }, steps, tasks, surveys: { 1: Boolean(t.surveys[1]), 2: Boolean(t.surveys[2]) }, final: Boolean(t.final) }, calls, practice: s.practice, testers: Object.keys(s.testers).length, steps: STEPS };
 }
 
 // ---------- Erasing: End and erase, abandoned sessions, removal requests, the deletion date ----------
 
 const finished = (s) => Object.values(s.testers).some((t) => t.final);
 const pastDeleteDate = () => now() > deleteAfter();
-const madeAccounts = (s) => Object.values(s.testers).filter((t) => t.account && t.account.kind === "own" && t.account.made).map((t) => t.account.id);
+// The study test accounts made in a session: each private study profile and its practice friends (and, in sessions
+// from before the profile, an account a tester made in the study). only "study": just the private profiles.
+const madeAccounts = (s, only) => Object.values(s.testers).filter((t) => t.account && t.account.made && (only ? t.account.kind === only : true)).flatMap((t) => [t.account.id, ...(t.account.friends || [])]);
 
 async function deleteAccount(id) {
   try {
@@ -486,11 +552,12 @@ function endCalls(sid) {
   }
   names.delete(sid);
 }
-// Delete one session and everything in it. withAccounts: also the study test accounts made in it.
+// Delete one session and everything in it. withAccounts: also the study test accounts made in it (true: all
+// of them; "study": the private study profiles and their practice friends only).
 async function erase(s, why, { withAccounts = true } = {}) {
   endCalls(s.id);
   if (withAccounts) {
-    for (const id of madeAccounts(s)) {
+    for (const id of madeAccounts(s, withAccounts === true ? null : withAccounts)) {
       if (await deleteAccount(id)) data.accounts = data.accounts.filter((x) => x !== id);
     }
   }
@@ -533,7 +600,7 @@ function sweep() {
     }
     let erased = 0;
     for (const s of Object.values(data.sessions)) {
-      if (s.excluded) { await erase(s, "removed", { withAccounts: false }); erased++; continue; }
+      if (s.excluded) { await erase(s, "removed", { withAccounts: "study" }); erased++; continue; }
       if (!finished(s) && now() - (s.updatedAt || s.createdAt || 0) > ABANDON_MS) { await erase(s, "abandoned"); erased++; }
     }
     return { purged: false, erased };
@@ -541,8 +608,9 @@ function sweep() {
   return sweeping;
 }
 let sweepTimer = null;
-function init({ deleteAccount: del } = {}) {
+function init({ deleteAccount: del, makeProfile } = {}) {
   if (del) deleteAccountHook = del;
+  if (makeProfile) makeProfileHook = makeProfile;
   clearInterval(sweepTimer);
   sweepTimer = setInterval(() => sweep().catch((err) => console.error("Study sweep:", err.message)), SWEEP_MS);
   sweepTimer.unref();
@@ -621,13 +689,13 @@ function preferenceRows() {
   for (const s of included()) {
     for (const t of Object.values(s.testers)) {
       if (!t.final) continue;
-      rows.push({ session: s.id, session_index: s.index, order: s.order, tester: t.n, ...accountCols(t), keep_voice: t.final.keep, keep_arm: t.final.keepArm, keep_persona: ARMS[t.final.keepArm], kept_first_heard: t.final.keep === 1, seq: t.final.seq, why: t.final.why || "" });
+      rows.push({ session: s.id, session_index: s.index, order: s.order, tester: t.n, ...accountCols(t), keep_voice: t.final.keep, keep_arm: t.final.keepArm, keep_persona: ARMS[t.final.keepArm], kept_first_heard: t.final.keep === 1, seq: t.final.seq, why: t.final.why || "", use_most: t.final.use || null, change: t.final.change || "" });
     }
   }
   return rows;
 }
-// Which account a tester used: the kind, and for their own account its internal id. Never a name or an email.
-const accountCols = (t) => ({ account_kind: t.account ? t.account.kind : "none", account_id: t.account && t.account.kind === "own" ? t.account.id : null });
+// Which account a tester used: the kind ("study" for the private study profile), and its internal id. Never a name or an email.
+const accountCols = (t) => ({ account_kind: t.account ? t.account.kind : "none", account_id: t.account && (t.account.kind === "own" || t.account.kind === "study") ? t.account.id : null });
 const yn = (v) => (v ? "yes" : "no");
 const consentCols = (t) => {
   const c = t.consent && typeof t.consent === "object" ? t.consent : {};
@@ -658,6 +726,39 @@ function questionnaireRows() {
   }
   return rows;
 }
+// The tasks: one row per tester per task, by the session's random id and the tester's number only
+function taskRows() {
+  const rows = [];
+  for (const s of included()) {
+    for (const t of Object.values(s.testers).sort((a, b) => a.n - b.n)) {
+      if (!(t.questionnaire && t.questionnaire.doneAt)) continue;
+      for (const { n, id } of TASKS) {
+        const r = (t.tasks || {})[n] || {};
+        const qz = n === 2 && r.quiz ? r.quiz : null;
+        rows.push({ session: s.id, session_index: s.index, tester: t.n, task: n, task_id: id, outcome: OUTCOMES.includes(r.outcome) ? r.outcome : null, completed: r.outcome === "auto" || r.outcome === "self", secs: r.secs == null ? null : r.secs, ease: r.ease || null, comment: r.comment || "",
+          time_answer: qz ? qz.time : null, time_correct: qz ? qz.timeOk : null, cost_answer: qz ? qz.cost : null, cost_correct: qz ? qz.costOk : null });
+      }
+    }
+  }
+  return rows;
+}
+const median = (xs) => { if (!xs.length) return null; const v = [...xs].sort((a, b) => a - b); const m = Math.floor(v.length / 2); return v.length % 2 ? v[m] : Math.round(((v[m - 1] + v[m]) / 2) * 10) / 10; };
+const rate = (k, n) => (n ? Math.round((k / n) * 100) / 100 : null);
+// Group totals per task: completion rate, median time, mean ease, and task 2's correctness
+function taskSummary(rows) {
+  return TASKS.map(({ n, id, title }) => {
+    const r = rows.filter((x) => x.task === n);
+    const tried = r.filter((x) => x.outcome);
+    const done = tried.filter((x) => x.completed);
+    const count = (o) => tried.filter((x) => x.outcome === o).length;
+    const out = { task: n, task_id: id, title, testers: r.length, attempted: tried.length, auto: count("auto"), self: count("self"), stuck: count("stuck"), skipped: count("skipped"), completion_rate: rate(done.length, tried.length), median_secs: median(done.map((x) => x.secs).filter((x) => x != null)), mean_ease: mean(tried.map((x) => x.ease).filter((x) => x != null)) };
+    if (n === 2) {
+      const answered = r.filter((x) => x.time_answer);
+      Object.assign(out, { answered: answered.length, time_correct: answered.filter((x) => x.time_correct).length, cost_correct: answered.filter((x) => x.cost_correct).length, time_correct_rate: rate(answered.filter((x) => x.time_correct).length, answered.length), cost_correct_rate: rate(answered.filter((x) => x.cost_correct).length, answered.length) });
+    }
+    return out;
+  });
+}
 // The base for synthetic test users: counts per answer, over testers who ticked the synthetic box, finished
 // and weren't removed. Never a per-person row, never two answers joined. Nothing under AGGREGATE_MIN testers.
 function aggregate() {
@@ -681,7 +782,12 @@ function aggregate() {
       questions[k] = { type: q.type === "many" ? "pick_many" : q.type === "scale" ? "scale" : "pick_one", counts: count(opts, vals) };
     }
   }
-  return { testers: pool.length, kind: "distributions", note: "Counts per answer only. No per-person rows.", questions };
+  // The tasks, as group totals over the same testers (no per-person rows)
+  const inPool = new Set(pool);
+  const tRows = taskRows().filter((r) => { const s = data.sessions[r.session]; return s && Object.values(s.testers).some((t) => inPool.has(t) && t.n === r.tester); });
+  const tasks = taskSummary(tRows).map(({ testers, ...x }) => ({ ...x, ease: count([1, 2, 3, 4, 5, 6, 7], tRows.filter((r) => r.task === x.task && r.outcome).map((r) => r.ease)) }));
+  const useMost = count(USE_MOST, pool.map((t) => t.final.use));
+  return { testers: pool.length, kind: "distributions", note: "Counts per answer only. No per-person rows.", questions, tasks, use_most: useMost };
 }
 function csv(rows) {
   if (!rows.length) return "";
@@ -715,6 +821,8 @@ function summary() {
   const sessions = included();
   return {
     removals: data.removals.map((r) => ({ code: r.code, date: torontoDay(r.at) })),
+    tasks: taskSummary(taskRows()),
+    use_most: Object.fromEntries(USE_MOST.map((k) => [k, prefs.filter((p) => p.use_most === k).length])),
     sessions: sessions.length,
     assigned: { AB: sessions.filter((s) => s.order === "AB").length, BA: sessions.filter((s) => s.order === "BA").length },
     first_call: byArm(calls.filter((x) => x.call === 1)),
@@ -751,10 +859,10 @@ async function handle(req, res, url, { readBody, sendJSON }) {
         if (!agg) return sendJSON(res, 409, { error: `Not enough testers yet. The aggregate needs at least ${AGGREGATE_MIN} who agreed to synthetic data and finished.` });
         return sendJSON(res, 200, agg);
       }
-      const tables = { calls: callRows, preferences: preferenceRows, testers: testerRows, questionnaire: questionnaireRows };
+      const tables = { calls: callRows, preferences: preferenceRows, testers: testerRows, questionnaire: questionnaireRows, tasks: taskRows };
       const which = Object.prototype.hasOwnProperty.call(tables, url.searchParams.get("table")) ? url.searchParams.get("table") : "calls";
       const table = tables[which]();
-      if (url.searchParams.get("format") === "json") return sendJSON(res, 200, { calls: callRows(), preferences: preferenceRows(), testers: testerRows(), questionnaire: questionnaireRows() });
+      if (url.searchParams.get("format") === "json") return sendJSON(res, 200, { calls: callRows(), preferences: preferenceRows(), testers: testerRows(), questionnaire: questionnaireRows(), tasks: taskRows() });
       res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "cache-control": "no-store", "content-disposition": `attachment; filename="sidekick-study-${which}.csv"` });
       return res.end(csv(table));
     }
@@ -784,21 +892,15 @@ async function handle(req, res, url, { readBody, sendJSON }) {
     if (!tid || !s.testers[tid]) return sendJSON(res, 403, { error: "Open the study link and agree to take part first.", join: true });
     const t = s.testers[tid];
     if (req.method === "GET" && !action) return sendJSON(res, 200, testerView(s, tid));
-    if (req.method !== "POST") return sendJSON(res, 404, { error: "Not found" });
-
-    // The account this tester uses in the app: their own (by internal id), or the shared demo if they skipped
-    if (action === "account") {
-      const kind = ACCOUNT_KINDS.includes(body.kind) ? body.kind : null;
-      if (!kind) return sendJSON(res, 400, { error: "Choose your own account or the demo." });
-      const u = kind === "own" ? realAccount(body.user) : null;
-      if (kind === "own" && !u) return sendJSON(res, 400, { error: "That account couldn't be found. Create one, sign in again, or use the demo." });
-      // A study test account: made in this session (after it started), so it's deleted with the study
-      const made = Boolean(u && body.made === true && Date.parse(u.createdAt) >= (s.createdAt || 0) - 1000);
-      t.account = kind === "own" ? { kind, id: body.user, at: now(), ...(made ? { made: true } : {}) } : { kind, at: now() };
-      if (made && !data.accounts.includes(body.user)) data.accounts.push(body.user);
+    // Task 2's two questions, built from the event saved in task 1 (the answers stay on the server)
+    if (req.method === "GET" && action === "quiz") {
+      t.tasks = t.tasks || {};
+      const qz = quizFor(t);
+      if (!qz) return sendJSON(res, 404, { error: "There's no event to ask about yet." });
       save(s);
-      return sendJSON(res, 200, testerView(s, tid));
+      return sendJSON(res, 200, { event: qz.event, time: qz.time, cost: qz.cost });
     }
+    if (req.method !== "POST") return sendJSON(res, 404, { error: "Not found" });
 
     // The questionnaire, a part at a time (3 questions each). Anything not answered is recorded as skipped.
     if (action === "questionnaire") {
@@ -810,6 +912,65 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       q.parts = Math.max(q.parts || 0, part);
       q.at = now();
       if (q.parts === PARTS.length && !q.doneAt) q.doneAt = now();
+      save(s);
+      // The questionnaire is done: the private study profile is made straight away
+      if (q.doneAt) await ensureProfile(s, t).catch((err) => console.error("Couldn't make a study profile:", err.message));
+      return sendJSON(res, 200, testerView(s, tid));
+    }
+
+    // The private study profile (made after the questionnaire; this makes it if that didn't work)
+    if (action === "profile") {
+      if (!(t.questionnaire && t.questionnaire.doneAt)) return sendJSON(res, 409, { error: "Answer the questions first." });
+      const id = await ensureProfile(s, t);
+      if (!id) return sendJSON(res, 503, { error: "Couldn't set up your study profile. Try again in a moment." });
+      return sendJSON(res, 200, testerView(s, tid));
+    }
+
+    // The five tasks. start: the clock starts. outcome: auto | self | stuck | skipped (once; seconds from Start).
+    if (action === "task") {
+      const n = int(body.n, 1, TASKS.length);
+      if (!n) return sendJSON(res, 400, { error: "Unknown task." });
+      t.tasks = t.tasks || {};
+      const r = (t.tasks[n] = t.tasks[n] || {});
+      if (body.start === true) {
+        if (!OUTCOMES.includes(r.outcome) || r.outcome === "skipped") r.startedAt = now();
+      } else {
+        const outcome = OUTCOMES.includes(body.outcome) ? body.outcome : null;
+        if (!outcome) return sendJSON(res, 400, { error: "Unknown outcome." });
+        if (!OUTCOMES.includes(r.outcome) || (r.outcome === "skipped" && outcome !== "skipped")) {
+          r.outcome = outcome;
+          r.endedAt = now();
+          r.secs = outcome === "skipped" ? null : secsSince(r.startedAt);
+          if (n === 1 && body.eventId != null && eventById(body.eventId)) r.eventId = Number(body.eventId) || body.eventId;
+        }
+      }
+      save(s);
+      return sendJSON(res, 200, testerView(s, tid));
+    }
+    // After a task: how easy it was (1-7) and an optional comment
+    if (action === "taskRate") {
+      const n = int(body.n, 1, TASKS.length);
+      const ease = int(body.ease, 1, 7);
+      const r = n && t.tasks && t.tasks[n];
+      if (!r || !OUTCOMES.includes(r.outcome)) return sendJSON(res, 409, { error: "Do the task first." });
+      if (!ease) return sendJSON(res, 400, { error: "Pick a number from 1 to 7." });
+      r.ease = ease;
+      r.comment = scrub(body.comment, s.id);
+      save(s);
+      return sendJSON(res, 200, testerView(s, tid));
+    }
+    // Task 2's answers: whether each matched the event. Answering both is what counts as done.
+    if (action === "quiz") {
+      t.tasks = t.tasks || {};
+      const r = t.tasks[2] || {};
+      if (!OUTCOMES.includes(r.outcome) || r.outcome === "skipped") return sendJSON(res, 409, { error: "Do task 2 first." });
+      const qz = quizFor(t);
+      if (!qz) return sendJSON(res, 404, { error: "There's no event to ask about." });
+      if (!qz.time.includes(body.time) || !qz.cost.includes(body.cost)) return sendJSON(res, 400, { error: "Answer both questions." });
+      const costKey = COST.find(([, l]) => l === body.cost)[0];
+      const timeAns = body.time === "Not sure" ? "not-sure" : body.time === qz.answer.time ? "correct" : "wrong";
+      t.tasks[2].quiz = { time: timeAns, cost: costKey, timeOk: timeAns === "correct", costOk: costKey === qz.answer.cost, at: now() };
+      if (t.tasks[2].outcome === "self") t.tasks[2].outcome = "auto"; // both answered: the task is done
       save(s);
       return sendJSON(res, 200, testerView(s, tid));
     }
@@ -829,18 +990,10 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       s.removal = { code, at: now() };
       data.removals.push({ code, at: s.removal.at });
       await flush();
-      await erase(s, "removed", { withAccounts: false });
+      await erase(s, "removed", { withAccounts: "study" });
       data.erased[s.id].code = code;
       await flush();
       return sendJSON(res, 200, { code });
-    }
-
-    if (action === "step") {
-      if (!MANUAL_STEPS.includes(body.step)) return sendJSON(res, 400, { error: "That step fills in by itself." });
-      if (body.done === false) delete t.steps[body.step];
-      else t.steps[body.step] = now();
-      save(s);
-      return sendJSON(res, 200, testerView(s, tid));
     }
 
     if (action === "call") {
@@ -877,7 +1030,6 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       s.calls[n] = { id: rid(5), n, arm: s.order[n - 1], persona: room.persona, startedAt: now(), short };
       const m = { sid: s.id, n, callId: s.calls[n].id, tid, room: out.data.room, plannerPid: out.data.person, bots: [], closers: [], pending: new Set(), lines: new Set() };
       attach(m);
-      if (n === 1 && !t.steps.plan) t.steps.plan = now();
       if (short && s.practice) {
         // The practice friends come back, with Call 1's time, a budget and a start already in, once the planner's phone is on
         const seed = s.calls[1].seed || {};
@@ -890,7 +1042,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
 
     if (action === "practice") {
       const meta = live.get(String(body.room || ""));
-      if (!meta || meta.sid !== s.id || meta.n === "form") return sendJSON(res, 404, { error: "Start the study call first." });
+      if (!meta || meta.sid !== s.id) return sendJSON(res, 404, { error: "Start the study call first." });
       const room = roomOf(meta.room);
       if (!room || room.status !== "live") return sendJSON(res, 400, { error: "This call has ended." });
       if (!room.people.some((p) => p.id === body.p)) return sendJSON(res, 403, { error: "Join the call first." });
@@ -899,24 +1051,6 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       save(s);
       update(meta);
       return sendJSON(res, 200, { ok: true, added: added.length });
-    }
-
-    if (action === "form") {
-      if (!callDone(s, 1)) return sendJSON(res, 409, { error: "Do the Voice 1 call first, so the first voice you hear is the one your crew got." });
-      const existing = [...live.values()].find((m) => m.sid === s.id && m.n === "form" && m.tid === tid && roomOf(m.room) && roomOf(m.room).status === "live");
-      if (existing) return sendJSON(res, 200, { room: existing.room });
-      const sug = await call("GET", "/api/sk/nights");
-      const nights = ((sug.data && sug.data.nights) || []).filter((x) => x.events > 0).slice(0, 2).map((x) => x.date);
-      // A practice call in the voice this crew already heard, planned by a practice friend
-      const out = await call("POST", "/api/sk/rooms", { name: FORM_PLANNER, crew: "Practice crew", nights, persona: ARMS[s.order[0]] });
-      if (out.status !== 200) return sendJSON(res, out.status, out.data);
-      const room = roomOf(out.data.room);
-      room.noWait = true;
-      room.people[0].practice = true;
-      const m = { sid: s.id, n: "form", tid, room: out.data.room, plannerPid: out.data.person, bots: [out.data.person], closers: [], pending: new Set(), lines: new Set() };
-      m.closers.push(openStream(m.room, out.data.person));
-      attach(m);
-      return sendJSON(res, 200, { room: out.data.room });
     }
 
     if (action === "survey") {
@@ -940,7 +1074,7 @@ async function handle(req, res, url, { readBody, sendJSON }) {
       const seq = int(body.seq, 1, 7);
       if (!keep || !seq) return sendJSON(res, 400, { error: "Pick a voice and an answer from 1 to 7." });
       const keepArm = s.order[keep - 1];
-      t.final = { keep, keepArm, seq, why: scrub(body.why, s.id), at: now() };
+      t.final = { keep, keepArm, seq, why: scrub(body.why, s.id), use: USE_MOST.includes(body.use) ? body.use : null, change: scrub(body.change, s.id), at: now() };
       save(s);
       return sendJSON(res, 200, testerView(s, tid));
     }
@@ -951,4 +1085,4 @@ async function handle(req, res, url, { readBody, sendJSON }) {
   }
 }
 
-module.exports = { handle, flush, init, sweep, ARMS, ORDERS, QUESTIONS, PARTS, _test: { lineBookOf, binomial, scrub, summary, callRows, preferenceRows, testerRows, questionnaireRows, aggregate, load, live, consentOf, cleanAnswer, CODE_CHARS, deleteAfter, setClock: (fn) => { clock = fn || (() => Date.now()); }, data: () => data, reset: () => { data = null; } } };
+module.exports = { handle, flush, init, sweep, ARMS, ORDERS, QUESTIONS, PARTS, TASKS, BOT_NAMES, _test: { lineBookOf, binomial, scrub, summary, callRows, preferenceRows, testerRows, questionnaireRows, taskRows, aggregate, load, vibesFrom, quizFor, live, consentOf, cleanAnswer, CODE_CHARS, deleteAfter, setClock: (fn) => { clock = fn || (() => Date.now()); }, data: () => data, reset: () => { data = null; } } };

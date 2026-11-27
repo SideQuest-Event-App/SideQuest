@@ -189,6 +189,7 @@
       if (SQ.realUser()) SQ.demoSession(false);
       SQ.reportStale = true;
       SQ.acts++;
+      if (SQ.studyTask) SQ.studyTask.act(type, args || {}, r.result); // a running study task watches for its goal
       return r.result;
     } catch (err) {
       // The server forgot the demo account mid-visit (a restart): sign in again quietly and try once more
@@ -380,6 +381,7 @@
     renderSide();
     ensure();
     if (snap) SQ.navMotion(screenEl, snap, kind);
+    if (SQ.studyTask) SQ.studyTask.screen(SQ.u.screen); // the study's task bar (study-task.js)
   }
   SQ.render = () => render(false);
 
@@ -711,7 +713,7 @@
   (async function start() {
     const params = new URLSearchParams(location.search);
     try { localStorage.removeItem("sq2.mode"); } catch {} // the old per-device answer: not used any more
-    // Links into the app from the voice study (/?demo=1&study=<id>): the demo account, and a bar back to the checklist
+    // Links into the app from the voice study (/?study=<id>): the tester's private study profile, and a bar back to the checklist
     const study = params.get("study");
     if (study && /^[\w-]{4,80}$/.test(study)) {
       try {
@@ -731,7 +733,7 @@
     const sid = SQ.studyId();
     if (sid) {
       const bar = document.getElementById("study-bar");
-      bar.href = `/study?s=${encodeURIComponent(sid)}#discover`;
+      bar.href = `/study?s=${encodeURIComponent(sid)}`;
       bar.hidden = false;
       document.getElementById("phone").classList.add("studying");
     }
@@ -765,10 +767,15 @@
       SQ.opening.ask();
       return;
     }
-    // ?demo=1 and the study's links sign into the demo when no real account is signed in (a tester who made their
-    // own account comes in as it); so does a demo tab whose account the server forgot
+    // ?demo=1 signs into the demo when no real account is signed in; so does a demo tab whose account the server forgot.
+    // The study's links never use the demo: they open as the tester's private study profile (the checklist signs it
+    // in), and without it they go back to the checklist, which sets it up again.
     const studyLink = !!(params.get("study") && sid);
-    if (!SQ.realUser() && (params.get("demo") || studyLink || (!SQ.d.user && (SQ.demoSession() || (params.get("quest") && SQ.mode.get() === "demo"))))) {
+    if (studyLink && !SQ.realUser()) {
+      location.replace(`/study?s=${encodeURIComponent(sid)}`);
+      return;
+    }
+    if (!SQ.realUser() && (params.get("demo") || (!SQ.d.user && (SQ.demoSession() || (params.get("quest") && SQ.mode.get() === "demo"))))) {
       try {
         await SQ.act("demoLogin");
       } catch {

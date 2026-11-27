@@ -13,7 +13,7 @@
   let tid = sid ? store.get(`study:${sid}:tid`) : null;
   let view = null;
   let open = null; // which step's panel is open
-  const draft = { 1: {}, 2: {}, final: { why: "" } };
+  const draft = { 1: {}, 2: {}, final: { why: "", change: "" } };
 
   let toastTimer;
   function toast(msg) {
@@ -72,14 +72,14 @@
       <header class="lights"><span class="tag pri">SideQuest study</span><h1 class="hero">Help us test <span class="nb">SideQuest</span></h1></header>
       <p class="intro">SideQuest is a student project for a university course. It helps groups of friends in Toronto find and plan nights out, with a planning assistant called Sidekick.</p>
       ${section("why", "iv", "Why we're doing this", bullets(["To learn whether SideQuest makes planning a night out with friends easier.", "To find out which of two Sidekick voices people prefer.", "To improve the app and finish our class project."]))}
-      ${section("todo", "iv", `What you'll be asked to do <span class="sub">(about 15–20 minutes)</span>`, `
-        <ol class="tl" aria-label="The four steps">${[["Questions", "2–3 min", "v"], ["Try the app", "look around", "v"], ["Call 1", "Sidekick", "t"], ["Call 2", "other voice", "t"]].map(([t, s, c], i) => `<li><i class="${c}" aria-hidden="true">${i + 1}</i><span class="tl-t">${t}</span><span class="tl-s">${s}</span></li>`).join("")}</ol>
-        ${bullets(["Answer a few short questions about how you usually go out (2–3 minutes).", "Try the app: look around, start a plan, and have a short planning call with Sidekick.", "Try a second, shorter call with a different Sidekick voice. This is an A/B test: you won't be told which voice is which.", "Answer a few quick questions about each call."])}`)}
+      ${section("todo", "iv", `What you'll be asked to do <span class="sub">(about 20–25 minutes)</span>`, `
+        <ol class="tl" aria-label="The four steps">${[["Questions", "2–3 min", "v"], ["Try the app", "5 short tasks", "v"], ["Call 1", "Sidekick", "t"], ["Call 2", "other voice", "t"]].map(([t, s, c], i) => `<li><i class="${c}" aria-hidden="true">${i + 1}</i><span class="tl-t">${t}</span><span class="tl-s">${s}</span></li>`).join("")}</ol>
+        ${bullets(["Answer a few short questions about how you usually go out (2–3 minutes).", "Try SideQuest's main features with five short tasks (finding an event, the map, your profile, Squads).", "Try the app: look around, start a plan, and have a short planning call with Sidekick.", "Try a second, shorter call with a different Sidekick voice. This is an A/B test: you won't be told which voice is which.", "Answer a few quick questions about each call."])}`)}
       ${section("invited", "it", "Why you were invited", `<p class="c14">You can take part if you:</p>
         <ul class="elig">${[["<b>18+</b>", "are 18 or older;"], [SI.gta, "live in the Greater Toronto Area;"], [SI.phone, "have a mobile phone you can use for the test."]].map(([i, t]) => `<li><span class="isq it sm" aria-hidden="true">${i}</span><span>${t}</span></li>`).join("")}</ul>`)}
       <div class="cards">
-        <section class="ccard"><h2 class="sech sm"><span class="isq iv sm">${SI.collect}</span><span>What we collect</span></h2>${bullets(["Your answers to the questions.", "What you do in the app during the test, such as what you tap, save, plan and pick.", "Your ratings of each call."])}</section>
-        <section class="ccard teal"><h2 class="sech sm"><span class="isq it sm">${SI.nope}</span><span>What we don't collect</span></h2>${bullets(["We don't record or keep your voice or call transcripts.", "We don't save your location.", "Your answers are stored with a random code, not your name or email.", "If you create an account to test with, your account details are kept separate from your study answers."])}</section>
+        <section class="ccard"><h2 class="sech sm"><span class="isq iv sm">${SI.collect}</span><span>What we collect</span></h2>${bullets(["Your answers to the questions.", "What you do in the app during the test, such as what you tap, save, plan and pick.", "Your ratings of each call.", "Whether you finished each task, how long it took, and how easy it felt."])}</section>
+        <section class="ccard teal"><h2 class="sech sm"><span class="isq it sm">${SI.nope}</span><span>What we don't collect</span></h2>${bullets(["We don't record or keep your voice or call transcripts.", "We don't save your location.", "Your answers are stored with a random code, not your name or email.", "You don't need an account. We set up a private study profile for you, with no name or email, and delete it with your answers."])}</section>
       </div>
       ${section("choices", "iv", "Your choices", bullets(["Taking part is completely voluntary.", "You can skip any question you don't want to answer.", "You can leave or end the session at any time, for any reason.", "If you leave or drop the session before finishing, everything you've shared in this session will be erased.", "If you finish and later want your answers removed sooner, you can submit a request and we'll make sure they aren't included in our study."]))}
       ${section("keep", "ia", "How long we keep it", bullets([`We will automatically delete all study data after <b>${DELETE_DATE}</b>.`, "This includes test accounts made for the study.", "You don't need to do anything."]))}
@@ -144,7 +144,6 @@
       history.replaceState(null, "", `/study?s=${encodeURIComponent(sid)}`);
       view = out.view;
       open = null;
-      acct = null;
       document.body.classList.remove("on-consent");
       if (peekObserver) peekObserver.disconnect();
       render();
@@ -201,10 +200,10 @@
     wrap.querySelector(".safe").focus();
   }
   function forgetLocal() {
-    if (view && view.you && view.you.madeAccount) { try { localStorage.removeItem("sq2.user"); } catch {} } // the study test account is deleted
+    appUser.giveBack(view && view.you && view.you.profile); // the study profile is deleted: sign out of it
     if (sid) store.set(`study:${sid}:tid`, null);
     store.set("study:last", null);
-    sid = null; tid = null; view = null; acct = null;
+    sid = null; tid = null; view = null;
     history.replaceState(null, "", "/study");
   }
   function endSheet() {
@@ -342,7 +341,7 @@
         open = null;
         render();
         window.scrollTo(0, 0);
-        toast("Thanks. On to the app.");
+        if (view.you.profile) toast("Thanks. Your private study profile is ready.");
       }
     } catch (err) { btn.disabled = false; toast(err.message); }
   }
@@ -362,147 +361,79 @@
     else qa.answers[id] = t.value;
   });
 
-  // ---------- Your account (after consent) ----------
-  // A quick app account, or sign in, so the events testers add and the plans they make are their own and stay.
-  // Skipping uses the shared demo account. The study keeps only which kind it was and the account's internal id.
-  // The app reads the signed-in account from localStorage "sq2.user" (the same origin), so the checklist's
-  // links open the app as this account.
+  // ---------- The private study profile ----------
+  // Made on the server right after the questionnaire: an account with no name or email, two practice friends and a
+  // squad. The app reads the signed-in account from localStorage "sq2.user" (the same origin), so the checklist signs
+  // it in before each task; an account that was signed in before is put back when the study ends.
   const appUser = {
-    get() { try { const v = localStorage.getItem("sq2.user"); return v && /^[\w-]{4,40}$/.test(v) ? v : null; } catch { return null; } },
-    set(v) { try { localStorage.setItem("sq2.user", v); sessionStorage.removeItem("sq2.demo"); } catch {} },
+    get() { try { return localStorage.getItem("sq2.user"); } catch { return null; } },
+    use(id) {
+      try {
+        const was = localStorage.getItem("sq2.user");
+        if (was && was !== id && !store.get("study:prevUser")) store.set("study:prevUser", was);
+        localStorage.setItem("sq2.user", id);
+        sessionStorage.removeItem("sq2.demo");
+      } catch {}
+    },
+    giveBack(id) {
+      try {
+        if (id && localStorage.getItem("sq2.user") === id) {
+          const prev = store.get("study:prevUser");
+          if (prev) localStorage.setItem("sq2.user", prev); else localStorage.removeItem("sq2.user");
+        }
+        localStorage.removeItem("study:prevUser");
+        sessionStorage.removeItem("sq2.studyTask");
+      } catch {}
+    },
   };
-  const VIBES = [["Live music", ["Live music", "Jazz", "Indie gigs"]], ["Food & drink", ["Food & drink"]], ["Art", ["Art & making", "Photography"]], ["Comedy", ["Comedy"]], ["Dance nights", ["Dance", "Electronic"]], ["Markets", ["Markets", "Records & vinyl"]], ["Film", ["Film nights"]], ["Games", ["Games & social"]], ["Outdoors", ["Outdoors"]]];
-  // acct: what the account step shows. { how: "create" | "signin" | "code", mine: { id, name } | null, ... }
-  let acct = null;
-  const act = async (type, args, user = null) => (await api("/api/act", { user, type, args })).result;
-  async function stateOf(id) {
-    try { return (await api(`/api/state?user=${encodeURIComponent(id)}&host=`)).user || null; } catch { return null; }
-  }
-  async function accountScreen() {
-    if (!acct) {
-      acct = { how: "create", mine: null, name: "", email: "", vibes: [], code: "", demoCode: null, error: null, busy: false };
-      const id = appUser.get();
-      const u = id && (await stateOf(id));
-      if (u && !u.demo) acct.mine = { id, name: u.name || "your account" };
-    }
-    const a = acct;
-    const err = a.error ? `<p class="field-err" role="alert">${esc(a.error)}</p>` : "";
-    let body;
-    if (a.how === "signin") {
-      body = `<h1>Sign in</h1>
-        <p class="muted">Enter the email on your Sidequest account. We'll send you a 6-digit code.</p>
-        <form class="stack" id="acctSignin">
-          <label class="f">Email<input class="in" id="a-email" type="email" inputmode="email" autocomplete="email" value="${esc(a.email)}" required></label>
-          ${err}<button class="btn pri" type="submit" ${a.busy ? "disabled" : ""}>Send code</button></form>
-        <button class="linkish" type="button" data-acct="create">New here? Create an account</button>`;
-    } else if (a.how === "code") {
-      body = `<h1>Check your email</h1>
-        <p class="muted">We sent a 6-digit code to ${esc(a.email)}.</p>
-        ${a.demoCode ? `<p class="note">No email service is set up here, so here's your code: <b>${esc(a.demoCode)}</b></p>` : ""}
-        <form class="stack" id="acctCode">
-          <label class="f">6-digit code<input class="in" id="a-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" value="${esc(a.code)}" required></label>
-          ${err}<button class="btn pri" type="submit" ${a.busy ? "disabled" : ""}>Sign in</button></form>
-        <button class="linkish" type="button" data-acct="signin">Use a different email</button>`;
-    } else {
-      body = `<h1>Create your account (1 min)</h1>
-        <p class="muted">So the events you add and the plans you make are yours, and they stay after the study.</p>
-        ${a.mine ? `<button class="btn pri" type="button" id="useMine">Continue as ${esc(a.mine.name)}</button><p class="small">Or make a new account:</p>` : ""}
-        <form class="stack" id="acctCreate">
-          <label class="f">First name<input class="in" id="a-name" maxlength="30" autocomplete="given-name" value="${esc(a.name)}" required></label>
-          <label class="f">Email<input class="in" id="a-email" type="email" inputmode="email" autocomplete="email" value="${esc(a.email)}" required><span class="hint">Your sign-in codes go here.</span></label>
-          <div class="likert" role="group" aria-label="Pick two or more things you're into"><p>Pick two or more things you're into</p>
-            <div class="chips">${VIBES.map(([label]) => `<button type="button" class="chip" data-vibe="${esc(label)}" aria-pressed="${a.vibes.includes(label)}">${esc(label)}</button>`).join("")}</div></div>
-          ${err}<button class="btn ${a.mine ? "out" : "pri"}" type="submit" ${a.busy ? "disabled" : ""}>Create account</button></form>
-        <button class="linkish" type="button" data-acct="signin">Already have an account? Sign in</button>`;
-    }
-    app.innerHTML = `
-      ${endBar("your account")}
-      <div class="lead-in acct">${body}</div>
-      <p class="fine">Your study answers stay anonymous. They're linked to your account only by a random id, never your name or email.</p>
-      <div class="skip">
-        <button class="btn out" type="button" id="skipAccount">Skip and use the demo account</button>
-        <p class="small">The demo account is shared: anything you make there is visible to everyone using it, and is reset.</p>
-      </div>`;
-  }
-  async function useAccount(kind, user, made = false) {
-    view = await post("account", { kind, user, made }); // made: a study test account, deleted with the study
-    acct = null;
-    open = null;
-    render();
-  }
-  async function accountSubmit(form) {
-    const a = acct;
-    const val = (id) => (document.getElementById(id) ? document.getElementById(id).value.trim() : "");
-    a.error = null;
-    a.busy = true;
+  let profileTry = 0;
+  async function profileScreen() {
+    app.innerHTML = `${endBar("your study profile")}
+      <div class="lead-in"><h1>Setting up your study profile…</h1><p class="muted">A private profile with no name or email, two practice friends and a squad.</p></div>`;
     try {
-      if (form.id === "acctCreate") {
-        Object.assign(a, { name: val("a-name"), email: val("a-email") });
-        if (!a.name) throw new Error("Add your first name.");
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.email)) throw new Error("Check the email. It should look like name@example.com.");
-        if (a.vibes.length < 2) throw new Error("Pick two or more things you're into.");
-        const r = await act("signup", { name: a.name, email: a.email, username: "" });
-        const vibes = [...new Set(a.vibes.flatMap((l) => (VIBES.find((v) => v[0] === l) || [l, [l]])[1]))];
-        await act("setProfile", { vibes, registered: true }, r.userId);
-        appUser.set(r.userId);
-        await useAccount("own", r.userId, true);
-        toast("Account made. You're signed in to the app as you.");
-        return;
-      }
-      if (form.id === "acctSignin") {
-        a.email = val("a-email");
-        const r = await act("requestCode", { email: a.email });
-        Object.assign(a, { how: "code", code: "", demoCode: r.demoCode || null });
-      } else if (form.id === "acctCode") {
-        a.code = val("a-code");
-        const r = await act("verifyCode", { email: a.email, code: a.code });
-        if (!r.userId) throw new Error("That email is on a host account. Create an attendee account instead.");
-        const u = await stateOf(r.userId);
-        if (u && u.demo) throw new Error("That's the shared demo account. Tap Skip below to use it.");
-        if (u && !u.registered) await act("setProfile", { registered: true }, r.userId);
-        appUser.set(r.userId);
-        await useAccount("own", r.userId);
-        toast("Signed in. The app opens as you.");
-        return;
-      }
+      view = await post("profile");
+      render();
     } catch (err) {
-      a.error = err.message;
+      profileTry++;
+      if (profileTry < 3) return void setTimeout(profileScreen, 1200);
+      app.innerHTML = `${endBar("your study profile")}<div class="lead-in"><h1>Couldn't set up your profile</h1><p class="muted">${esc(err.message)}</p></div>
+        <button class="btn pri" type="button" id="profileRetry">Try again</button>`;
     }
-    a.busy = false;
-    accountScreen();
   }
 
-  // ---------- The checklist ----------
-  const TITLES = {
-    consent: "Agree and get started",
-    discover: "Look around Discover",
-    plan: "Open Plan",
-    share: "Share the call link",
-    call1: "Call with Voice 1",
-    form: "Try “Just answer, no call”",
-    call2: "Short call with Voice 2",
-    survey: "Compare the two voices",
+  // ---------- The checklist: five tasks, then the two calls ----------
+  const TASK_TEXT = {
+    1: "Find an event this week you'd actually go to, and save it.",
+    2: "Open the event you saved. Find out when it starts, what it costs and how far away it is.",
+    3: "Find a place to eat near you that's open late.",
+    4: "See what SideQuest thinks your taste is, and change one thing that's wrong.",
+    5: "Open your squad, say hi in the chat, then make a new squad with one of your friends.",
   };
+  const ROWS = ["task1", "task2", "task3", "task4", "task5", "call1", "call2"];
+  const taskN = (step) => (/^task\d$/.test(step) ? Number(step.slice(4)) : null);
+  const titleOf = (step) => (taskN(step) ? view.you.tasks[taskN(step)].title : step === "call1" ? "Plan with Sidekick · Voice 1" : "Short call · Voice 2");
   const callLink = (n, room) => `/sk/${encodeURIComponent(room)}?study=${encodeURIComponent(sid)}&v=${n}`;
   const planLink = () => `/sk?study=${encodeURIComponent(sid)}`;
-  // Into the app: as the tester's own account, or the shared demo if they skipped
-  const appLink = () => (view.you.account === "own" ? `/?study=${encodeURIComponent(sid)}` : `/?demo=1&study=${encodeURIComponent(sid)}`);
+  const mins = (s) => (s == null ? "" : s < 60 ? " · under a minute" : ` · ${Math.round(s / 60)} min`);
 
   function sub(step) {
     const v = view;
-    if (v.you.steps[step]) return "Done";
-    if (step === "call1" || step === "call2") {
-      const c = v.calls[step === "call1" ? 1 : 2];
-      if (c.status === "live") return "On a call now";
-      if (c.status !== "none") return "4 quick questions left";
+    const n = taskN(step);
+    if (n) {
+      const t = v.you.tasks[n];
+      if (t.done) return t.outcome === "stuck" ? "Moved on" : t.outcome === "skipped" ? "Skipped" : `Done${mins(t.secs)}`;
+      if (t.outcome) return "A quick question left";
+      return "To do";
     }
-    if (step === "form" && !done1()) return "After the Voice 1 call";
-    if (step === "call2" && !done1()) return "After the Voice 1 call";
-    if (step === "survey" && !(v.you.surveys[1] && v.you.surveys[2])) return "After both calls";
-    return "To do";
+    if (v.you.steps[step]) return "Done";
+    const c = v.calls[step === "call1" ? 1 : 2];
+    if (c.status === "live") return "On a call now";
+    if (c.status !== "none") return "4 quick questions left";
+    if (step === "call2") return "After Voice 1";
+    return ROWS.slice(0, 5).every((r) => v.you.steps[r]) ? "To do" : "After the tasks";
   }
   const done1 = () => view.calls[1].status !== "none" && view.calls[1].status !== "live";
-  const firstOpen = () => view.steps.find((s) => !view.you.steps[s]) || "survey";
+  const firstOpen = () => ROWS.find((s) => !view.you.steps[s]) || null;
 
   function likert(n) {
     const items = [["natural", "Sidekick felt natural to talk with."], ["decide", "It helped us decide."], ["trust", "I trust the picks it suggested."], ["again", "I'd use it again to plan a night."]];
@@ -513,16 +444,24 @@
         <div class="ends" aria-hidden="true"><span>Disagree</span><span>Agree</span></div></div>`).join("")}
       <button class="btn pri" type="submit" ${items.every(([k]) => d[k]) ? "" : "disabled"}>Send</button></form>`;
   }
-  function finalSurvey() {
+
+  // ---------- The final questions (a screen of their own, after both calls) ----------
+  const USE = [["discover", "Discover"], ["map", "Map"], ["squads", "Squads"], ["plan", "Plan with Sidekick"], ["profile", "Profile"]];
+  function finalScreen() {
     const d = draft.final;
-    return `<form class="stack" data-final>
+    app.innerHTML = `${endBar("last questions")}
+      <h1 class="final-t">Last few questions</h1>
+      <form class="stack" data-final>
       <div class="likert" role="group" aria-label="Which voice would you keep?"><p>Which voice would you keep?</p>
         <div class="keep">${[1, 2].map((x) => `<button type="button" data-keep="${x}" aria-pressed="${d.keep === x}">Voice ${x}</button>`).join("")}</div></div>
       <label class="f">Why? (optional)<textarea class="in" id="why" maxlength="300" rows="3" placeholder="It sounded…">${esc(d.why)}</textarea></label>
       <div class="likert" role="group" aria-label="Overall, how easy or hard was planning with Sidekick?"><p>Overall, how easy or hard was planning with Sidekick?</p>
         <div class="rate seven">${[1, 2, 3, 4, 5, 6, 7].map((x) => `<button type="button" data-seq="${x}" aria-pressed="${d.seq === x}" aria-label="${x}">${x}</button>`).join("")}</div>
         <div class="ends" aria-hidden="true"><span>Very hard</span><span>Very easy</span></div></div>
-      <button class="btn pri" type="submit" ${d.keep && d.seq ? "" : "disabled"}>Send</button></form>`;
+      <div class="likert" role="group" aria-label="Which part would you use most?"><p>Which part would you use most?</p>
+        <div class="opts">${USE.map(([k, l]) => `<button type="button" data-use="${k}" aria-pressed="${d.use === k}">${esc(l)}</button>`).join("")}</div></div>
+      <label class="f">One thing you'd change? (optional)<textarea class="in" id="change" maxlength="300" rows="3">${esc(d.change)}</textarea></label>
+      <button class="btn pri" type="submit" ${d.keep && d.seq && d.use ? "" : "disabled"}>Send</button></form>`;
   }
 
   function callPanel(n) {
@@ -547,64 +486,49 @@
     }
     return intro + action;
   }
-
-  function panel(step) {
-    const v = view;
-    switch (step) {
-      case "consent":
-        return `<p class="muted">You agreed to take part. We record the steps you finish, timings, whether a plan gets locked, and your answers to our questions. Never names, voices, captions or your private answers.</p>`;
-      case "discover":
-        return `<p class="muted">Open the app (${view.you.account === "own" ? "you're signed in as you, so what you add stays yours" : "you're in the shared demo account"}). Then try:</p>
-          <ul><li>the map's pins and cards</li><li>pulling the sheet up for the list</li><li>a search, with a filter</li><li>opening one sidequest</li></ul>
-          <p class="small">The bar at the top of the app brings you back here.</p>
-          <div class="btns"><a class="btn out" href="${esc(appLink())}">Open Discover</a>${mark("discover")}</div>`;
-      case "plan":
-        return `<p class="muted">Plan is where Sidekick lives. Open it, add your name and a crew name, pick a night or two, and tap <b>Start the call</b>.</p>
-          <div class="btns">${v.calls[1].status === "none" ? (v.you.creator ? `<a class="btn pri" href="${planLink()}">Open Plan</a>` : '<p class="note">Whoever started the study opens Plan and starts the call.</p>') : v.calls[1].status === "live" ? `<a class="btn pri" href="${callLink(1, v.calls[1].room)}">${v.calls[1].mine ? "Back to" : "Join"} the call</a>` : ""}${mark("plan")}</div>`;
-      case "share":
-        return `<p class="muted">On the call screen, the invite card has Copy, Share and app buttons (WhatsApp, Messages and more). Send the link to a friend, or to yourself to see the preview card.</p>
-          <div class="btns">${v.calls[1].status === "live" && v.calls[1].mine ? `<a class="btn out" href="${callLink(1, v.calls[1].room)}">Back to the call</a>` : ""}${mark("share")}</div>`;
-      case "call1":
-        return callPanel(1);
-      case "form":
-        return `<p class="muted">Friends who can't talk can still answer by form. Tap below, choose <b>Answer without calling</b>, fill it in and send. Practice friends run the rest of that call.</p>
-          ${done1() ? '<div class="btns"><button class="btn pri" id="tryForm">Try the form</button>' + mark("form") + "</div>" : '<p class="note">Do the Voice 1 call first, so the first voice you hear is your crew\'s.</p>'}`;
-      case "call2":
-        return callPanel(2);
-      case "survey":
-        if (v.you.final) return `<p class="muted">All done. Thank you for testing Sidekick!</p>`;
-        if (!(v.you.surveys[1] && v.you.surveys[2])) return `<p class="note">Do both calls and their quick questions first.</p>`;
-        return finalSurvey();
-    }
-    return "";
+  function taskPanel(n) {
+    const t = view.you.tasks[n];
+    const event = n === 2 && t.event ? `<p class="note">Your saved event: <b>${esc(t.event)}</b></p>` : "";
+    if (t.done) return `<p class="muted">${esc(TASK_TEXT[n])}</p>${t.outcome === "skipped" ? `<div class="btns"><button class="btn out" type="button" data-task-start="${n}">Try it now</button></div>` : ""}`;
+    return `<p class="task-say">${esc(TASK_TEXT[n])}</p>${event}
+      <p class="small">The app opens as your study profile. A bar at the top shows the task, with <b>I'm done</b> and <b>I'm stuck</b>.</p>
+      <div class="btns"><button class="btn pri" type="button" data-task-start="${n}">Start</button>
+        <button class="linkish center" type="button" data-task-skip="${n}">Skip this task</button></div>`;
   }
-  const mark = (step) => (view.you.steps[step] ? `<button class="btn out" data-undo="${step}">Mark as not done</button>` : `<button class="btn out" data-mark="${step}">Mark done</button>`);
+  function panel(step) {
+    const n = taskN(step);
+    if (n) return taskPanel(n);
+    return callPanel(step === "call1" ? 1 : 2);
+  }
 
   function render() {
     if (!view) return;
     document.body.classList.remove("on-consent");
-    if (!view.you.account) return accountScreen(); // right after consent: the account step
-    if (!view.you.questionnaire.done) { // then the questionnaire, from the next part not yet saved
+    if (!view.you.questionnaire.done) { // right after consent: the questionnaire, from the next part not yet saved
       if (!document.getElementById("qNext")) { qa.part = Math.min(4, view.you.questionnaire.parts + 1); questionsScreen(); }
       return;
     }
+    if (!view.you.profile) return void profileScreen(); // then the private study profile (normally made already)
     if (view.you.final) return thanksScreen();
-    const doneN = view.steps.filter((s) => view.you.steps[s]).length;
+    if (view.you.surveys[1] && view.you.surveys[2]) return finalScreen();
+    const doneN = ROWS.filter((s) => view.you.steps[s]).length;
     const next = firstOpen();
-    if (!open) open = location.hash.replace("#", "") in TITLES ? location.hash.replace("#", "") : next;
+    if (open == null) open = next;
     const share = `${location.origin}/study?s=${encodeURIComponent(sid)}`;
+    const fresh = !ROWS.some((s) => view.you.steps[s]) && !Object.values(view.you.tasks).some((t) => t.started || t.outcome);
     app.innerHTML = `${endBar("checklist")}
-      <div class="row sb"><span class="tag pri">Sidekick study</span><span class="small">${doneN} of ${view.steps.length} done</span></div>
-      <div class="prog"><h1>${view.you.final ? "Thank you!" : "Your checklist"}</h1>
-        <span class="meter" role="progressbar" aria-label="Study progress" aria-valuemin="0" aria-valuemax="${view.steps.length}" aria-valuenow="${doneN}"><i style="width:${Math.round((doneN / view.steps.length) * 100)}%"></i></span>
-        <p class="small">${view.you.final ? "Every step is done. You can close this page." : "Go in order, or tap any step to jump to it."}</p></div>
-      <ol class="steps">${view.steps.map((s, i) => {
+      <div class="prog"><span class="mono-k">Your study · ${doneN} of ${ROWS.length} done</span><h1 class="final-t">Try SideQuest</h1>
+        <span class="meter" role="progressbar" aria-label="Study progress" aria-valuemin="0" aria-valuemax="${ROWS.length}" aria-valuenow="${doneN}"><i style="width:${Math.round((doneN / ROWS.length) * 100)}%"></i></span>
+        <p class="small">Five short tasks in the app, then two calls with Sidekick. Go in order, or tap any row to open it.</p></div>
+      ${fresh ? `<p class="note profile-note"><b>Your private study profile is ready.</b> No name or email. Your squad, Study crew, has two practice friends, Robin and Jules. It's deleted with your answers.</p>` : ""}
+      <ol class="steps">${ROWS.map((s) => {
         const isDone = view.you.steps[s];
         const isOpen = open === s;
-        return `<li class="step ${isDone ? "done" : ""} ${s === next && !isDone ? "now" : ""}" id="step-${s}">
+        const n = taskN(s);
+        return `<li class="step ${isDone ? "done" : ""} ${s === next && !isDone ? "now" : ""} ${n ? "" : "callrow"}" id="step-${s}">
           <button class="step-h" data-step="${s}" aria-expanded="${isOpen}" aria-controls="panel-${s}">
-            <span class="num">${isDone ? ICON.check : i + 1}</span>
-            <span class="step-t"><b>${esc(TITLES[s])}</b><span class="small">${esc(sub(s))}</span></span>${ICON.chev}</button>
+            <span class="num ${n ? "" : "orbk"}">${isDone ? ICON.check : n || ""}</span>
+            <span class="step-t"><b>${esc(titleOf(s))}</b><span class="small">${esc(sub(s))}</span></span>${ICON.chev}</button>
           ${isOpen ? `<div class="panel" id="panel-${s}">${panel(s)}</div>` : ""}</li>`;
       }).join("")}</ol>
       <div class="foot">
@@ -612,6 +536,117 @@
         <div class="row"><input class="in" readonly value="${esc(share)}" aria-label="Study link" style="font-size:13px"><button class="btn sm out" id="copyStudy">Copy</button></div>
         <button class="linkish" id="restart" type="button">Start over as a new crew</button>
       </div>`;
+    afterTask();
+  }
+
+  // ---------- After a task: task 2's two questions, then "How easy was that?" ----------
+  let taskSheetOpen = false;
+  function afterTask() {
+    if (taskSheetOpen) return;
+    const n = [1, 2, 3, 4, 5].find((k) => view.you.tasks[k].needsQuiz || view.you.tasks[k].needsEase);
+    if (!n) return;
+    if (view.you.tasks[n].needsQuiz) quizSheet(n);
+    else easeSheet(n);
+  }
+  // A sheet that must be answered: traps focus, makes the page behind it inert, gives focus back when it closes
+  function taskSheet(html, onReady) {
+    taskSheetOpen = true;
+    const opener = document.activeElement;
+    const wrap = document.createElement("div");
+    wrap.className = "sheet-wrap study-sheet task-sheet";
+    wrap.innerHTML = `<div class="sheet-scrim"></div><div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="tsT">${html}</div>`;
+    document.body.appendChild(wrap);
+    for (const el of [app, document.querySelector("body > p")]) if (el) el.setAttribute("inert", "");
+    const onKey = (e) => {
+      if (e.key !== "Tab") return;
+      const items = [...wrap.querySelectorAll("button:not([disabled]), textarea, input")];
+      const i = items.indexOf(document.activeElement);
+      if (e.shiftKey && i <= 0) { e.preventDefault(); items[items.length - 1].focus(); }
+      else if (!e.shiftKey && i === items.length - 1) { e.preventDefault(); items[0].focus(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    const close = () => {
+      wrap.remove();
+      for (const el of [app, document.querySelector("body > p")]) if (el) el.removeAttribute("inert");
+      document.removeEventListener("keydown", onKey, true);
+      taskSheetOpen = false;
+      if (opener && document.contains(opener)) opener.focus();
+    };
+    onReady(wrap, close);
+    const first = wrap.querySelector("button");
+    if (first) first.focus();
+  }
+  const opt = (name, value, label, on) => `<button type="button" data-${name}="${esc(value)}" aria-pressed="${on}">${esc(label)}</button>`;
+  async function quizSheet(n) {
+    let qz;
+    try { qz = await api(`/api/sk/study/${encodeURIComponent(sid)}/quiz?t=${encodeURIComponent(tid)}`); } catch (err) { toast(err.message); return; }
+    if (taskSheetOpen) return;
+    const pick = { time: null, cost: null };
+    taskSheet(`<span class="grab" aria-hidden="true"></span>
+      <span class="mono-k">Task ${n} · quick check</span>
+      <h2 class="sheet-t" id="tsT">What time does it start?</h2>
+      <div class="opts" role="group" aria-labelledby="tsT">${qz.time.map((x) => opt("qtime", x, x, false)).join("")}</div>
+      <h2 class="sheet-t" id="tsC">Roughly what does it cost?</h2>
+      <div class="opts" role="group" aria-labelledby="tsC">${qz.cost.map((x) => opt("qcost", x, x, false)).join("")}</div>
+      <button class="btn pri" type="button" id="quizNext" disabled>Next</button>
+      <p class="small center">About ${esc(qz.event.title)}. There's no score: it checks whether the page is clear.</p>`, (wrap, close) => {
+      wrap.addEventListener("click", async (e) => {
+        const b = e.target.closest("[data-qtime],[data-qcost]");
+        if (b) {
+          const k = b.dataset.qtime != null ? "time" : "cost";
+          pick[k] = b.dataset[k === "time" ? "qtime" : "qcost"];
+          for (const x of wrap.querySelectorAll(`[data-q${k}]`)) x.setAttribute("aria-pressed", String(x === b));
+          wrap.querySelector("#quizNext").disabled = !(pick.time && pick.cost);
+          return;
+        }
+        const go = e.target.closest("#quizNext");
+        if (!go || go.disabled) return;
+        go.disabled = true;
+        try { view = await post("quiz", pick); close(); render(); }
+        catch (err) { go.disabled = false; toast(err.message); }
+      });
+    });
+  }
+  function easeSheet(n) {
+    const t = view.you.tasks[n];
+    const last = [1, 2, 3, 4, 5].every((k) => k === n || view.you.tasks[k].done);
+    let ease = null;
+    taskSheet(`<span class="grab" aria-hidden="true"></span>
+      <span class="mono-k ${t.outcome === "stuck" ? "" : "ok"}">${t.outcome === "stuck" ? `Task ${n} · moving on` : `${ICON.check} Task ${n} done`}</span>
+      <h2 class="sheet-t" id="tsT">How easy was that?</h2>
+      <div class="rate seven" role="group" aria-labelledby="tsT">${[1, 2, 3, 4, 5, 6, 7].map((x) => `<button type="button" data-ease="${x}" aria-pressed="false" aria-label="${x}">${x}</button>`).join("")}</div>
+      <div class="ends" aria-hidden="true"><span>Very hard</span><span>Very easy</span></div>
+      <label class="f">Anything get in the way? (optional)<textarea class="in" id="easeWhy" maxlength="300" rows="2"></textarea></label>
+      <button class="btn pri" type="button" id="easeNext" disabled>${last ? "Back to the checklist" : "Next task"}</button>`, (wrap, close) => {
+      wrap.addEventListener("click", async (e) => {
+        const b = e.target.closest("[data-ease]");
+        if (b) {
+          ease = Number(b.dataset.ease);
+          for (const x of wrap.querySelectorAll("[data-ease]")) x.setAttribute("aria-pressed", String(x === b));
+          wrap.querySelector("#easeNext").disabled = false;
+          return;
+        }
+        const go = e.target.closest("#easeNext");
+        if (!go || go.disabled) return;
+        go.disabled = true;
+        try {
+          view = await post("taskRate", { n, ease, comment: wrap.querySelector("#easeWhy").value });
+          close();
+          open = null;
+          render();
+          toast("Thanks, saved.");
+        } catch (err) { go.disabled = false; toast(err.message); }
+      });
+    });
+  }
+  async function startTask(n, btn) {
+    btn.disabled = true;
+    try {
+      view = await post("task", { n, start: true });
+      appUser.use(view.you.profile);
+      sessionStorage.setItem("sq2.studyTask", JSON.stringify({ sid, n, title: view.you.tasks[n].title, flags: {} }));
+      location.href = `/?study=${encodeURIComponent(sid)}`;
+    } catch (err) { btn.disabled = false; toast(err.message); }
   }
 
   // ---------- Taps ----------
@@ -651,21 +686,18 @@
     }
     if (t.closest("#qNext")) { nextPart(t.closest("#qNext")); return; }
     if (t.closest("#qBack")) { qa.part = Math.max(1, qa.part - 1); questionsScreen(); document.getElementById("qPartT").focus(); return; }
-    if (acct) {
-      const v = t.closest("[data-vibe]");
-      if (v) { const l = v.dataset.vibe; acct.vibes = acct.vibes.includes(l) ? acct.vibes.filter((x) => x !== l) : [...acct.vibes, l]; v.setAttribute("aria-pressed", String(acct.vibes.includes(l))); return; }
-      const to = t.closest("[data-acct]");
-      if (to) { const keep = document.getElementById("a-email"); if (keep) acct.email = keep.value.trim(); acct.how = to.dataset.acct; acct.error = null; accountScreen(); return; }
-      if (t.closest("#useMine") || t.closest("#skipAccount")) {
-        const b = t.closest("button");
-        b.disabled = true;
-        try {
-          if (b.id === "useMine") await useAccount("own", acct.mine.id);
-          else await useAccount("demo");
-        } catch (err) { b.disabled = false; toast(err.message); }
-        return;
-      }
+    if (t.closest("#profileRetry")) { profileTry = 0; profileScreen(); return; }
+    const ts = t.closest("[data-task-start]");
+    if (ts) { startTask(Number(ts.dataset.taskStart), ts); return; }
+    const sk = t.closest("[data-task-skip]");
+    if (sk) {
+      sk.disabled = true;
+      try { view = await post("task", { n: Number(sk.dataset.taskSkip), outcome: "skipped" }); open = null; render(); }
+      catch (err) { sk.disabled = false; toast(err.message); }
+      return;
     }
+    const use = t.closest("[data-use]");
+    if (use) { draft.final.use = use.dataset.use; finalScreen(); return; }
     const head = t.closest("[data-step]");
     if (head) {
       open = open === head.dataset.step ? "" : head.dataset.step;
@@ -675,33 +707,15 @@
       if (el && open) el.scrollIntoView({ block: "nearest" });
       return;
     }
-    const m = t.closest("[data-mark],[data-undo]");
-    if (m) {
-      try {
-        view = await post("step", { step: m.dataset.mark || m.dataset.undo, done: Boolean(m.dataset.mark) });
-        if (m.dataset.mark) open = firstOpen();
-        render();
-      } catch (err) { toast(err.message); }
-      return;
-    }
     const rate = t.closest(".rate button");
     if (rate) {
       const form = rate.closest("form");
-      if (form.dataset.survey) draft[form.dataset.survey][rate.dataset.q] = Number(rate.dataset.n);
-      else draft.final.seq = Number(rate.dataset.seq);
-      render();
+      if (form.dataset.survey) { draft[form.dataset.survey][rate.dataset.q] = Number(rate.dataset.n); render(); }
+      else { draft.final.seq = Number(rate.dataset.seq); finalScreen(); }
       return;
     }
     const keep = t.closest("[data-keep]");
-    if (keep) { draft.final.keep = Number(keep.dataset.keep); render(); return; }
-    if (t.closest("#tryForm")) {
-      t.disabled = true;
-      try {
-        const out = await post("form");
-        location.href = `/sk/${encodeURIComponent(out.room)}?study=${encodeURIComponent(sid)}&v=form`;
-      } catch (err) { t.disabled = false; toast(err.message); }
-      return;
-    }
+    if (keep) { draft.final.keep = Number(keep.dataset.keep); finalScreen(); return; }
     if (t.closest("#startCall2")) {
       const input = document.getElementById("name2");
       const name = (input ? input.value : store.get("sk:name") || "").trim();
@@ -726,21 +740,26 @@
       sid = null;
       tid = null;
       view = null;
-      acct = null;
       history.replaceState(null, "", "/study");
       introScreen(false);
     }
   });
-  app.addEventListener("input", (e) => { if (e.target.id === "why") draft.final.why = e.target.value; });
+  app.addEventListener("input", (e) => {
+    if (e.target.id === "why") draft.final.why = e.target.value;
+    if (e.target.id === "change") draft.final.change = e.target.value;
+  });
   app.addEventListener("submit", async (e) => {
     e.preventDefault();
     const form = e.target;
-    if (/^acct/.test(form.id)) return accountSubmit(form);
     const btn = form.querySelector("[type=submit]");
     btn.disabled = true;
     try {
       if (form.dataset.survey) view = await post("survey", { n: Number(form.dataset.survey), ...draft[form.dataset.survey] });
-      else view = await post("final", { keep: draft.final.keep, seq: draft.final.seq, why: draft.final.why });
+      else {
+        view = await post("final", { keep: draft.final.keep, seq: draft.final.seq, why: draft.final.why, use: draft.final.use, change: draft.final.change });
+        appUser.giveBack(view.you.profile); // done with the app as the study profile
+        window.scrollTo(0, 0);
+      }
       open = firstOpen();
       render();
       toast("Thanks, saved.");
@@ -753,14 +772,15 @@
     try {
       const next = await api(`/api/sk/study/${encodeURIComponent(sid)}?t=${encodeURIComponent(tid)}`);
       if (JSON.stringify(next) !== JSON.stringify(view)) {
-        const typing = document.activeElement && document.activeElement.id === "why";
-        const onAccount = acct && !next.you.account; // the account step keeps what's typed
-        const onQuestions = !next.you.questionnaire.done; // so does the questionnaire
+        const first = !view;
+        const typing = document.activeElement && ["why", "change"].includes(document.activeElement.id);
+        const onQuestions = !next.you.questionnaire.done; // the questionnaire keeps what's picked
+        const onFinal = view && view.you.surveys[1] && view.you.surveys[2] && !view.you.final && next.you.surveys[1] && next.you.surveys[2] && !next.you.final; // so do the last questions
         view = next;
-        if (!typing && !onAccount && !onQuestions) render();
+        if (first || (!typing && !onQuestions && !onFinal && !taskSheetOpen && next.you.profile)) render();
       }
     } catch (err) {
-      if (err.status === 403) { store.set(`study:${sid}:tid`, null); tid = null; acct = null; introScreen(true); }
+      if (err.status === 403) { store.set(`study:${sid}:tid`, null); tid = null; introScreen(true); }
       if (err.status === 404) { store.set("study:last", null); sid = null; tid = null; view = null; history.replaceState(null, "", "/study"); introScreen(false); toast("That study link has expired. Start a new one."); }
     }
   }

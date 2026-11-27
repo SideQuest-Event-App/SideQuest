@@ -10,7 +10,7 @@ main{gap:16px;padding-bottom:max(32px,env(safe-area-inset-bottom))}
 .agree input{width:22px;height:22px;margin:1px 0 0;accent-color:var(--pri);flex:none}
 
 /* progress */
-.prog{display:flex;flex-direction:column;gap:6px}
+.prog{display:flex;flex-direction:column;align-items:stretch;gap:6px;white-space:normal}
 .prog .meter i{background:var(--soc)}
 
 /* the checklist */
@@ -39,7 +39,7 @@ main{gap:16px;padding-bottom:max(32px,env(safe-area-inset-bottom))}
 .likert p{font-weight:600}
 .likert .rate button{height:48px}
 .ends{display:flex;justify-content:space-between;font-size:12px;color:var(--t3)}
-.rate.seven{grid-template-columns:repeat(7,1fr);gap:6px}
+.rate.seven{grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
 .rate.seven button{height:44px;font-size:15px}
 .keep{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .keep button{min-height:56px;border-radius:16px;background:var(--raise);font-weight:600}
@@ -67,13 +67,27 @@ textarea.in{height:auto;min-height:76px;padding:12px 14px;resize:vertical;font:i
 @keyframes arrive { from { opacity: 0; transform: translateY(6px); } }
 @media (prefers-reduced-motion: reduce) { @keyframes arrive { from { opacity: 0; } } }
 
-/* The account step (after consent): create a quick account, sign in, or skip to the shared demo */
-.acct .chips{gap:8px}
-.acct .chip{font-size:14px}
+/* The checklist's tasks, the sheets after each task, and the last questions (study redesign) */
 .hint{font-size:13px;line-height:18px;font-weight:400;color:var(--t2)}
-.field-err{font-size:13px;line-height:18px;color:#ffb4b4;background:rgba(255,120,120,.1);border-radius:12px;padding:10px 12px}
-.fine{font-size:13px;line-height:18px;color:var(--t2)}
-.skip{display:flex;flex-direction:column;gap:8px;padding-top:4px;border-top:1px solid var(--bs);padding-top:16px}
+.mono-k{font:500 12px/16px var(--m);letter-spacing:.12em;text-transform:uppercase;color:var(--acc);display:inline-flex;align-items:center;gap:6px}
+.mono-k.ok{color:var(--ok)}
+.mono-k svg{width:14px;height:14px}
+.final-t{font:600 28px/30px var(--f);letter-spacing:-.03em;margin:0;color:var(--t1)}
+.prog .meter i{background:linear-gradient(96deg,#a97af2 0%,#c98adf 55%,#f28dc8 100%)}
+.profile-note b{color:var(--t1);font-weight:600}
+.num.orbk{background:radial-gradient(circle at 35% 30%,#fff1ff 0%,#c98adf 38%,#a97af2 62%,#452871 100%)}
+.step.done .num.orbk{background:var(--ok-t)}
+.step.now{background:linear-gradient(180deg,rgba(69,40,113,.35),var(--surf))}
+.task-say{font-size:15px;line-height:21px;color:var(--t1)}
+.panel .linkish.center{align-self:center;justify-content:center;min-width:44px}
+.opts{display:flex;flex-wrap:wrap;gap:6px}
+.opts button{min-height:44px;min-width:44px;padding:0 14px;border-radius:999px;background:var(--raise);color:#d6ccef;font-size:14px;font-weight:600;text-align:center}
+.opts button[aria-pressed=true]{background:var(--pri-t);color:var(--acc);box-shadow:inset 0 0 0 1.5px var(--pri-e)}
+.task-sheet .sheet-panel{gap:12px;max-height:92vh;overflow-y:auto}
+.task-sheet .sheet-t{font-size:17px;line-height:22px;margin:0}
+.task-sheet .rate.seven{display:grid}
+.task-sheet .btn{height:48px}
+.rate.seven button[aria-pressed=true]{background:var(--pri);color:#13101b}
 
 /* ---------- Consent, questionnaire, End session, Thank you and removal (design ST1) ----------
    Violet for Sidekick and primary actions, teal for what we don't collect, pink only for End and erase,

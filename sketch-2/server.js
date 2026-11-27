@@ -235,7 +235,7 @@ function crewPeople(user) {
   const me = tasteProfile(user);
   return [
     { name: user.name || "You", interests: [...me.vibes, ...me.loved.map((l) => l.title)].join(", ") || "anything fun", origin: user.origin, budget: user.budget },
-    ...party.members.map((m) => ({ name: m, interests: db.FRIENDS[m].vibes.join(", "), origin: db.FRIENDS[m].origin, budget: db.FRIENDS[m].budget })),
+    ...party.members.filter((m) => db.FRIENDS[m]).map((m) => ({ name: m, interests: db.FRIENDS[m].vibes.join(", "), origin: db.FRIENDS[m].origin, budget: db.FRIENDS[m].budget })), // a study profile's practice friends are accounts
   ];
 }
 // The crew's tastes for fair blending: names and vibe weights only (no budgets, areas or locations)
@@ -516,7 +516,7 @@ A.findPeople = (ctx, { q }) => {
   const s = clean(q, 60).toLowerCase().replace(/^@/, "");
   if (!s) return { people: [] };
   const mine = friendKeys(u);
-  const keys = [...Object.keys(db.FRIENDS), ...Object.values(db.data.users).filter((x) => x !== u && x.registered && !x.demo && !u.demo).map((x) => "u:" + x.id)];
+  const keys = [...Object.keys(db.FRIENDS), ...Object.values(db.data.users).filter((x) => x !== u && x.registered && !x.demo && !x.study && !u.demo).map((x) => "u:" + x.id)];
   const hit = (k) => {
     const p = person(k);
     const x = k.startsWith("u:") && db.data.users[k.slice(2)];
@@ -2051,7 +2051,24 @@ const server = http.createServer(async (req, res) => {
 // Load the database (from Supabase or data/db.json) before taking requests
 // The study's sweeps (lib/sidekick/study.js): abandoned sessions and the deletion date, on start and hourly.
 // A study test account goes the way Delete account does (lib/tabs).
-const studySweeps = () => skStudy.init({ deleteAccount: async (id) => { const u = db.data.users[id]; if (u && !u.demo) await tabs.deleteAccount(u); } });
+// A private study profile (after the questionnaire): an attendee account with no name or email, its taste from the
+// questionnaire, two practice friends (accounts too, friends with it only) and its first squad "Study crew" with them.
+// All three are flagged study accounts: never found in people search, and deleted with the study.
+async function makeStudyProfile({ vibes, names }) {
+  const okVibes = [...new Set((vibes || []).filter((v) => VIBES.includes(v)))];
+  const FRIEND_VIBES = [["Live music", "Food & drink", "Comedy"], ["Markets", "Art & making", "Dance"]];
+  const friends = (names || []).slice(0, 2).map((name, i) => newUser({ name, registered: true, study: true, vibes: FRIEND_VIBES[i % 2] }));
+  const me = newUser({ name: "You", registered: true, study: true, vibes: okVibes.length >= 2 ? okVibes : ["Live music", "Food & drink", "Comedy"] });
+  const keys = friends.map((f) => `u:${f.id}`);
+  me.friends = keys;
+  for (const f of friends) { f.friends = [`u:${me.id}`]; Object.assign(db.data.parties[f.id], { name: "Study crew", members: [], chat: [] }); }
+  const at = now().toISOString();
+  Object.assign(db.data.parties[me.id], { name: "Study crew", members: keys, votes: {}, poll: [], locked: null, blend: null,
+    chat: friends.length ? [{ from: keys[0], text: "Hey! Ready to find something for this week?", time: at }] : [] });
+  await db.saveNow();
+  return { id: me.id, friends: friends.map((f) => f.id) };
+}
+const studySweeps = () => skStudy.init({ makeProfile: makeStudyProfile, deleteAccount: async (id) => { const u = db.data.users[id]; if (u && !u.demo) await tabs.deleteAccount(u); } });
 db.load().then(() => sidekick.init({ events: () => db.data.events })).then(() => skPlan.init({ db, friendList, person })).then(studySweeps).then(() => server.listen(PORT, () => {
   console.log(`Sketch 2 running at http://localhost:${PORT}`);
   console.log(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY ? "Database: Supabase" : "Database: data/db.json (no Supabase keys in .env)");

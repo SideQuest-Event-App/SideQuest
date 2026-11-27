@@ -30,22 +30,24 @@ const CONSENT = { age: true, gta: true, phone: true, agree: true };
 
 // ---------- The approved text, word for word ----------
 const INTRO = "SideQuest is a student project for a university course. It helps groups of friends in Toronto find and plan nights out, with a planning assistant called Sidekick.";
-const HEADINGS = ["Help us test SideQuest", "Why we're doing this", "What you'll be asked to do (about 15–20 minutes)", "Why you were invited", "What we collect", "What we don't collect", "Your choices", "How long we keep it", "How we use it", "Questions?", "Please confirm"];
+const HEADINGS = ["Help us test SideQuest", "Why we're doing this", "What you'll be asked to do (about 20–25 minutes)", "Why you were invited", "What we collect", "What we don't collect", "Your choices", "How long we keep it", "How we use it", "Questions?", "Please confirm"];
 const BULLETS = [
   "To learn whether SideQuest makes planning a night out with friends easier.",
   "To find out which of two Sidekick voices people prefer.",
   "To improve the app and finish our class project.",
   "Answer a few short questions about how you usually go out (2–3 minutes).",
+  "Try SideQuest's main features with five short tasks (finding an event, the map, your profile, Squads).",
   "Try the app: look around, start a plan, and have a short planning call with Sidekick.",
   "Try a second, shorter call with a different Sidekick voice. This is an A/B test: you won't be told which voice is which.",
   "Answer a few quick questions about each call.",
   "Your answers to the questions.",
   "What you do in the app during the test, such as what you tap, save, plan and pick.",
   "Your ratings of each call.",
+  "Whether you finished each task, how long it took, and how easy it felt.",
   "We don't record or keep your voice or call transcripts.",
   "We don't save your location.",
   "Your answers are stored with a random code, not your name or email.",
-  "If you create an account to test with, your account details are kept separate from your study answers.",
+  "You don't need an account. We set up a private study profile for you, with no name or email, and delete it with your answers.",
   "Taking part is completely voluntary.",
   "You can skip any question you don't want to answer.",
   "You can leave or end the session at any time, for any reason.",
@@ -105,17 +107,17 @@ async function inproc(S, method, p, body) {
   if (shots) fs.mkdirSync(shots, { recursive: true });
   let browser = null;
 
-  // A tester over the API: consent, an account, the questionnaire, and (optionally) the final survey
-  async function apiTester({ synthetic = false, finish = true, account = "demo" } = {}) {
+  // A tester over the API: consent, the questionnaire (which makes the private study profile), and (optionally) the final survey
+  async function apiTester({ synthetic = false, finish = true } = {}) {
     const s = (await post("/api/sk/study/sessions", { consent: { ...CONSENT, synthetic } })).body;
     const sp = (a, b) => post(`/api/sk/study/${s.sid}/${a}`, { t: s.tid, ...b });
-    if (account === "demo") await sp("account", { kind: "demo" });
+    let view = null;
     for (const part of [1, 2, 3, 4]) {
       const answers = { 1: { q1: "3-4", q2: ["comedy", "jazz"], q3: 4 }, 2: { q4: 2, q5: ["fri", "sat"], q6: "6-8" }, 3: { q7: "30", q8: "20-40", q9: "3-4" }, 4: { q10: "we-vote", q11: "timing", q12: { kind: "comedy", cost: "20-40", travel: "15" } } }[part];
-      await sp("questionnaire", { part, answers });
+      view = (await sp("questionnaire", { part, answers })).body;
     }
     if (finish) assert.strictEqual((await sp("final", { keep: 1, seq: 6 })).status, 200);
-    return { ...s, sp };
+    return { ...s, sp, profile: view.you.profile };
   }
   async function makeAccount(name) {
     const r = await post("/api/act", { user: null, type: "signup", args: { name, email: `${name.toLowerCase()}.${Date.now()}@example.com`, username: "" } });
@@ -242,19 +244,17 @@ async function inproc(S, method, p, body) {
     });
 
     let uiSid = null;
-    await test("In the browser: consent, the account step, then the questionnaire as grouped cards (3 per part, Skip on each), then the checklist; answers and skips are saved and exported id-only", async () => {
+    await test("In the browser: consent, then straight to the questionnaire as grouped cards (3 per part, Skip on each, no account step), then the checklist; answers and skips are saved and exported id-only", async () => {
       const ctx = await phone();
       const page = await ctx.newPage();
       await page.goto(`${base}/study`);
       await page.waitForSelector("#c-age");
       for (const k of ["age", "gta", "phone", "agree", "synthetic"]) await page.check(`#c-${k}`);
       await page.click("#start");
-      await page.waitForSelector("#skipAccount");
-      assert(await page.locator("#endSession").isVisible(), "the End session bar is on the account step");
-      uiSid = new URL(page.url()).searchParams.get("s");
-      await page.click("#skipAccount");
-      // Part 1
+      // Part 1, straight after consent: no account step
       await page.waitForSelector("#qNext");
+      assert.strictEqual(await page.locator("#skipAccount, #acctCreate, #acctSignin").count(), 0, "an account step");
+      uiSid = new URL(page.url()).searchParams.get("s");
       assert.strictEqual(norm(await page.locator("#qPartT").innerText()).toLowerCase(), "part 1 of 4 · about your nights out");
       assert.strictEqual(await page.locator("#app .qc").count(), 3);
       assert.strictEqual(await page.locator("#app .qc [data-skip]").count(), 3, "Skip on every card");
@@ -326,27 +326,15 @@ async function inproc(S, method, p, body) {
       await ctx.close();
     });
 
-    await test("End session: the sheet starts on Keep going, traps focus, closes with Escape; End and erase deletes the session and its study test account", async () => {
+    await test("End session: the sheet starts on Keep going, traps focus, closes with Escape; End and erase deletes the session and its private study profile", async () => {
       const ctx = await phone();
       const page = await ctx.newPage();
       await page.goto(`${base}/study`);
       await page.waitForSelector("#c-age");
       for (const k of ["age", "gta", "phone", "agree"]) await page.check(`#c-${k}`);
       await page.click("#start");
-      // Create a quick account in the account step: a study test account
-      await page.waitForSelector("#acctCreate");
-      await page.fill("#a-name", "Erin");
-      await page.fill("#a-email", `erin.${Date.now()}@example.com`);
-      await page.click("[data-vibe='Comedy']");
-      await page.click("[data-vibe='Film']");
-      await page.click("#acctCreate [type=submit]");
       await page.waitForSelector("#qNext");
       const sid = new URL(page.url()).searchParams.get("s");
-      const accountId = await page.evaluate(() => localStorage.getItem("sq2.user"));
-      assert(await accountExists(accountId), "the account exists");
-      const saved = await fileUntil((d) => Object.values(d.sessions[sid].testers)[0].account, "the account");
-      assert(saved.sessions[sid], "the session exists");
-      assert.strictEqual(Object.values(saved.sessions[sid].testers)[0].account.made, true, "marked as a study test account");
       await page.click("[data-chip=q2][data-value=comedy]");
       await page.click("#qNext");
       await page.waitForSelector("#card-q4");
@@ -367,7 +355,18 @@ async function inproc(S, method, p, body) {
       await page.keyboard.press("Escape");
       assert.strictEqual(await page.locator(".study-sheet").count(), 0, "Escape closes the sheet");
       assert.strictEqual(await page.evaluate(() => document.activeElement.id), "endSession", "focus goes back to End session");
-      assert(studyFile().sessions[sid], "Keep going / Escape erases nothing");
+      assert((await fileUntil((d) => d.sessions[sid], "the session")).sessions[sid], "Keep going / Escape erases nothing");
+      // The rest of the questions: the private study profile is made
+      for (let part = 2; part <= 4; part++) { await page.waitForSelector(`#qPartT:has-text("Part ${part} of 4")`); await page.click("#qNext"); }
+      await page.waitForSelector(".steps");
+      const saved = await fileUntil((d) => Object.values(d.sessions[sid].testers)[0].account, "the profile");
+      const acct = Object.values(saved.sessions[sid].testers)[0].account;
+      assert.strictEqual(acct.kind, "study");
+      assert.strictEqual(acct.made, true, "marked as a study test account");
+      assert(await accountExists(acct.id), "the profile exists");
+      for (const f of acct.friends) assert(await accountExists(f), "a practice friend exists");
+      await page.evaluate((id) => localStorage.setItem("sq2.user", id), acct.id); // as a task start does
+      assert(await page.locator("#endSession").isVisible(), "End session is on the checklist");
       await page.click("#endSession");
       await page.click(".study-sheet [data-danger]");
       await page.waitForSelector("#byeT");
@@ -376,42 +375,39 @@ async function inproc(S, method, p, body) {
       assert(!after.sessions[sid], "the session is gone");
       assert.strictEqual(after.erased[sid].why, "ended");
       assert(!JSON.stringify(after.sessions).includes(sid));
-      assert(!(after.accounts || []).includes(accountId));
-      assert.strictEqual(await accountExists(accountId), false, "the study test account is deleted");
-      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.user")), null, "signed out of the deleted account");
+      for (const id of [acct.id, ...acct.friends]) {
+        assert(!(after.accounts || []).includes(id));
+        assert.strictEqual(await accountExists(id), false, "the study profile and its practice friends are deleted");
+      }
+      assert.strictEqual(await page.evaluate(() => localStorage.getItem("sq2.user")), null, "signed out of the deleted profile");
       assert.strictEqual((await exportJSON()).testers.filter((r) => r.session === sid).length, 0);
       await ctx.close();
     });
 
-    await test("End and erase over the API: the session's call metrics, its live call and practice friends, and the test account all go", async () => {
+    await test("End and erase over the API: the session's call metrics, its live call and practice friends, and the study profile all go; other accounts stay", async () => {
       const nights = (await getJSON("/api/sk/nights")).body.nights.filter((n) => n.events > 0).slice(0, 2).map((n) => n.date);
-      const s = (await post("/api/sk/study/sessions", { consent: CONSENT })).body;
-      const accountId = await makeAccount("Pax");
-      assert.strictEqual((await post(`/api/sk/study/${s.sid}/account`, { t: s.tid, kind: "own", user: accountId, made: true })).status, 200);
+      const s = await apiTester({ finish: false });
+      assert(s.profile && (await accountExists(s.profile)), "the profile");
       const c1 = (await post(`/api/sk/study/${s.sid}/call`, { t: s.tid, n: 1, name: "Pax", crew: "Erase crew", nights })).body;
       assert(c1.room, JSON.stringify(c1));
       assert.strictEqual((await post(`/api/sk/study/${s.sid}/practice`, { t: s.tid, room: c1.room, p: c1.person })).body.added, 2);
       await wait(800);
       assert(studyFile().sessions[s.sid].calls[1], "call metrics exist");
-      await wait(500);
-      // An account the tester already had (not made in the study) is never deleted
+      // An account the tester already had (not made by the study) is never deleted
       const theirs = await makeAccount("Quinn");
-      await wait(1500);
-      const s2 = (await post("/api/sk/study/sessions", { consent: CONSENT })).body;
-      assert.strictEqual((await post(`/api/sk/study/${s2.sid}/account`, { t: s2.tid, kind: "own", user: theirs, made: true })).status, 200);
       const r = await post(`/api/sk/study/${s.sid}/end`, { t: s.tid });
       assert.strictEqual(r.status, 200, JSON.stringify(r.body));
       const info = await getJSON(`/api/sk/rooms/${c1.room}/info?p=${c1.person}`);
       assert(info.status === 404 || info.body.status === "ended", `the call is still on: ${JSON.stringify(info.body)}`);
       assert(!studyFile().sessions[s.sid], "the session is gone");
-      assert.strictEqual(await accountExists(accountId), false, "the test account is deleted");
+      assert.strictEqual(await accountExists(s.profile), false, "the study profile is deleted");
       assert.strictEqual((await exportJSON()).calls.filter((c) => c.session === s.sid).length, 0, "the call metrics are gone");
       assert.strictEqual((await getJSON(`/api/sk/study/${s.sid}?t=${s.tid}`)).status, 404);
-      // Quinn signed in with an account made before the session: ending that session keeps the account
-      const made2 = Object.values((await fileUntil((d) => Object.values(d.sessions[s2.sid].testers)[0].account, "Quinn's account")).sessions[s2.sid].testers)[0].account.made === true;
-      await post(`/api/sk/study/${s2.sid}/end`, { t: s2.tid });
-      assert.strictEqual(made2, false, "an account older than the session isn't a study test account");
       assert.strictEqual(await accountExists(theirs), true, "an existing account is never deleted");
+      // The account step is gone from the server too
+      const s2 = (await post("/api/sk/study/sessions", { consent: CONSENT })).body;
+      assert.strictEqual((await post(`/api/sk/study/${s2.sid}/account`, { t: s2.tid, kind: "own", user: theirs, made: true })).status, 404);
+      await post(`/api/sk/study/${s2.sid}/end`, { t: s2.tid });
     });
 
     // ---------- Removal requests and the aggregate ----------
@@ -483,6 +479,7 @@ async function inproc(S, method, p, body) {
       assert(!saved.sessions[f.sid], "the session is deleted");
       assert(saved.removals.some((r) => r.code === code), "the code is stored");
       assert.strictEqual(saved.erased[f.sid].code, code, "the code finds the session if they get in touch");
+      assert.strictEqual(await accountExists(f.profile), false, "the private study profile is deleted with the answers");
       // The researcher's results page lists it
       const rp = await ctx.newPage();
       await rp.goto(`${base}/study/results`);
@@ -525,7 +522,6 @@ async function inproc(S, method, p, body) {
       assert.strictEqual(await page.evaluate(() => document.activeElement.id), "c-gta", "the sticky Start sends focus to the first unticked box");
       for (const k of ["gta", "phone", "agree"]) await page.check(`#c-${k}`);
       await page.click("#start");
-      await page.click("#skipAccount");
       await page.waitForSelector("#qNext");
       await layoutCheck(page, "questions at 1280");
       await ctx.close();
@@ -566,13 +562,13 @@ async function inproc(S, method, p, body) {
       const a = (await inproc(S, "POST", "/api/sk/study/sessions", { consent: CONSENT })).body;
       const b = (await inproc(S, "POST", "/api/sk/study/sessions", { consent: CONSENT })).body;
       const data = S._test.data();
-      Object.values(data.sessions[a.sid].testers)[0].account = { kind: "own", id: "acct-made-1", made: true };
-      data.accounts.push("acct-made-1");
+      Object.values(data.sessions[a.sid].testers)[0].account = { kind: "study", id: "acct-made-1", friends: ["acct-f1", "acct-f2"], made: true };
+      data.accounts.push("acct-made-1", "acct-f1", "acct-f2");
       await inproc(S, "POST", `/api/sk/study/${b.sid}/final`, { t: b.tid, keep: 2, seq: 5 });
       t = T0 + 23 * 3600000;
       await S.sweep();
       assert(S._test.data().sessions[a.sid], "kept before 24 hours");
-      await inproc(S, "POST", `/api/sk/study/${a.sid}/step`, { t: a.tid, step: "discover" }); // activity at 23 h
+      await inproc(S, "POST", `/api/sk/study/${a.sid}/task`, { t: a.tid, n: 1, start: true }); // activity at 23 h
       t = T0 + 46 * 3600000;
       await S.sweep();
       assert(S._test.data().sessions[a.sid], "activity resets the 24 hours");
@@ -580,7 +576,7 @@ async function inproc(S, method, p, body) {
       await S.sweep();
       assert(!S._test.data().sessions[a.sid], "erased after 24 hours without activity");
       assert.strictEqual(S._test.data().erased[a.sid].why, "abandoned");
-      assert.deepStrictEqual(deleted, ["acct-made-1"], "its study test account is deleted");
+      assert.deepStrictEqual(deleted, ["acct-made-1", "acct-f1", "acct-f2"], "its study profile and practice friends are deleted");
       assert(S._test.data().sessions[b.sid], "a finished session is kept");
       assert(!fs.readFileSync(file, "utf8").includes(`"${a.sid}":{"id"`), "gone from the file");
       // A session marked excluded (a removal whose deletion didn't finish) is left out at once, then the sweep deletes it
