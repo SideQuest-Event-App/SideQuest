@@ -346,8 +346,10 @@ async function until(fn, ms, what) {
       assert.strictEqual(await page.getAttribute(`[data-pffriend="u:${ravi}"]`, "aria-checked"), "true", "Ravi stays picked");
       await page.click("#pfNext");
       assert.strictEqual(await title(), "Which nights work?");
-      await page.click(`.pf-night[data-date="${nights[2].date}"]`);
+      // Add a night that isn't picked yet (which nights start picked depends on the listings)
+      await page.locator(".pf-night[aria-pressed=false]").first().click();
       const picked = await page.$$eval(".pf-night[aria-pressed=true]", (els) => els.map((e) => e.dataset.date));
+      assert(picked.length, "a night is picked");
       await page.click("[data-pfback]");
       assert.strictEqual(await title(), "Choose people", "step 2 goes back to the picker");
       await page.click("#pfNext");

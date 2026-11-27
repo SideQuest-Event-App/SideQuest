@@ -192,7 +192,10 @@ function restore() {
     await test("b. Repeated shows collapse into one card with their dates; titles wrap to 2 lines; prices only when known", async () => {
       const { ctx, page } = await phone();
       const r = await page.evaluate(() => {
-        const day = 864e5, base = Date.now() + 5 * 3600000;
+        // Sooner than every other listing still to come (the import has many nights in the next hours), so the soonest-first
+        // grid shows them in its first 30
+        const day = 864e5, base = Date.now() + 60000;
+        SQ.d.events = SQ.d.events.filter((e) => Date.parse(e.startsAt) > base);
         const mk = (id, t, price) => ({ id, title: "Twice Nightly Revue", startsAt: new Date(base + t * day).toISOString(), neighbourhood: "Annex", venue: { name: "Bad Dog Theatre", address: "N/A", lat: 43.665, lng: -79.41 }, price, vibes: ["Comedy"], tags: [], description: "", going: 0, friends: [], reviews: [], travel: { from: {} }, organizer: { name: "N/A" } });
         SQ.d.events.unshift(mk(992001, 0, null), mk(992002, 1, null), mk(992003, 2, null));
         SQ.d.user.feed = null;

@@ -204,7 +204,10 @@ function contrast(a, b) {
     await test("d. No pin in the lake: lake and outside-the-GTA events get no pin, and stay in the list", async () => {
       const { ctx, page } = await phone();
       const out = await page.evaluate(() => {
-        const soon = new Date(Date.now() + 2 * 3600000).toISOString();
+        // Sooner than every other listing still to come (the import has many nights in the next hours), and nothing that
+        // already started today ahead of them, so they're at the top of the soonest-first list
+        const soon = new Date(Date.now() + 60000).toISOString();
+        SQ.d.events = SQ.d.events.filter((e) => Date.parse(e.startsAt) > Date.now() + 60000);
         const mk = (id, title, lat, lng) => ({ id, title, startsAt: soon, date: "Today", neighbourhood: "Harbourfront", area: "Downtown", venue: { name: "Somewhere", address: "N/A", lat, lng }, price: 0, priceNote: "Free", vibes: ["Live music"], tags: [], description: "", going: 0, friends: [], reviews: [], travel: { from: {} } });
         SQ.d.events.unshift(mk(990001, "Wet Gig", 43.6, -79.38), mk(990002, "Plus Code Picnic", 43.5747, -79.3498), mk(990003, "Buffalo Show", 42.88, -78.87), mk(990004, "No Pin Night", null, null));
         SQ.d.user.feed = null; // this week's list, soonest first, so the new ones are at the top
